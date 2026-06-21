@@ -1,0 +1,922 @@
+{
+  "confirmed": false,
+  "home": {
+    "players": [
+      {
+        "player": {
+          "name": "Dean Henderson",
+          "firstName": "",
+          "lastName": "",
+          "slug": "dean-henderson",
+          "shortName": "D. Henderson",
+          "position": "G",
+          "jerseyNumber": "1",
+          "height": 188,
+          "userCount": 4728,
+          "sofascoreId": "deanhenderson",
+          "id": 788134,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 858124800,
+          "proposedMarketValueRaw": { "value": 21000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "دين هندرسون",
+              "hi": "डीन हेंडरसन",
+              "bn": "ডিন হেন্ডারসন"
+            },
+            "shortNameTranslation": {
+              "ar": "د. هندرسون",
+              "hi": "डी. हेंडरसन",
+              "bn": "ডি. হেন্ডারসন"
+            }
+          }
+        },
+        "teamId": 7,
+        "position": "G",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.53,
+        "player": {
+          "name": "Ezri Konsa",
+          "firstName": "",
+          "lastName": "",
+          "slug": "ezri-konsa",
+          "shortName": "E. Konsa",
+          "position": "D",
+          "jerseyNumber": "4",
+          "height": 183,
+          "userCount": 3069,
+          "id": 827679,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 877564800,
+          "proposedMarketValueRaw": { "value": 37000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إزري كونسا",
+              "hi": "एज़री कोंसा",
+              "bn": "ইজরি কনসা"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. كونسا",
+              "hi": "ई. कोंसा",
+              "bn": "ই. কনসা"
+            }
+          }
+        },
+        "teamId": 40,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "player": {
+          "name": "John Stones",
+          "slug": "john-stones",
+          "shortName": "J. Stones",
+          "position": "D",
+          "jerseyNumber": "5",
+          "height": 188,
+          "userCount": 24106,
+          "sofascoreId": "johnstones5",
+          "id": 152077,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 770083200,
+          "proposedMarketValueRaw": { "value": 23000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "جون ستونز",
+              "hi": "जॉन स्टोन्स",
+              "bn": "জন স্টোনস"
+            },
+            "shortNameTranslation": {
+              "ar": "ج. ستونز",
+              "hi": "जे. स्टोन्स",
+              "bn": "জে. স্টোনস"
+            }
+          }
+        },
+        "teamId": 17,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.3,
+        "player": {
+          "name": "Marc Guéhi",
+          "slug": "marc-guehi",
+          "shortName": "M. Guéhi",
+          "position": "D",
+          "jerseyNumber": "6",
+          "height": 182,
+          "userCount": 5388,
+          "sofascoreId": "MarcGuehi13",
+          "id": 877994,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 963446400,
+          "proposedMarketValueRaw": { "value": 42000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "مارك غيهي",
+              "hi": "मार्क गुएही",
+              "bn": "মার্ক গুয়েহি"
+            },
+            "shortNameTranslation": {
+              "ar": "م. غيهي",
+              "hi": "एम. गुएही",
+              "bn": "এম. গুয়েহি"
+            }
+          }
+        },
+        "teamId": 7,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "player": {
+          "name": "Valentino Livramento",
+          "firstName": "",
+          "lastName": "",
+          "slug": "valentino-livramento",
+          "shortName": "V. Livramento",
+          "position": "D",
+          "jerseyNumber": "21",
+          "height": 181,
+          "userCount": 4527,
+          "id": 980634,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1037059200,
+          "proposedMarketValueRaw": { "value": 39000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "فالنتينو ليفرامينتو",
+              "hi": "वैलेंटिनो लिवरामेंटो",
+              "bn": "ভ্যালেন্টিনো লিভরামেন্টো"
+            },
+            "shortNameTranslation": {
+              "ar": "ف. ليفرامينتو",
+              "hi": "वी. लिवरामेंटो",
+              "bn": "ভি. লিভরামেন্টো"
+            }
+          }
+        },
+        "teamId": 39,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "player": {
+          "name": "Elliot Anderson",
+          "firstName": "",
+          "lastName": "",
+          "slug": "elliot-anderson",
+          "shortName": "E. Anderson",
+          "position": "M",
+          "jerseyNumber": "8",
+          "height": 175,
+          "userCount": 2492,
+          "id": 994546,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1036540800,
+          "proposedMarketValueRaw": { "value": 29000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إليوت أندرسون",
+              "hi": "इलियट एंडरसन",
+              "bn": "এলিয়ট অ্যান্ডারসন"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. أندرسون",
+              "hi": "ई. एंडरसन",
+              "bn": "ই. অ্যান্ডারসন"
+            }
+          }
+        },
+        "teamId": 14,
+        "position": "M",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.53,
+        "player": {
+          "name": "Declan Rice",
+          "slug": "declan-rice",
+          "shortName": "D. Rice",
+          "position": "M",
+          "jerseyNumber": "41",
+          "height": 188,
+          "userCount": 57622,
+          "sofascoreId": "DeclanRice",
+          "id": 856714,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 916272000,
+          "proposedMarketValueRaw": { "value": 114000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "ديكلان رايس",
+              "hi": "डेक्लान राइस",
+              "bn": "ডেক্লান রাইস"
+            },
+            "shortNameTranslation": {
+              "ar": "د. رايس",
+              "hi": "डी. राइस",
+              "bn": "ডি. রাইস"
+            }
+          }
+        },
+        "teamId": 42,
+        "position": "M",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.05,
+        "player": {
+          "name": "Jarrod Bowen",
+          "slug": "jarrod-bowen",
+          "shortName": "J. Bowen",
+          "position": "M",
+          "jerseyNumber": "20",
+          "height": 174,
+          "userCount": 8864,
+          "sofascoreId": "jarrodbowen",
+          "id": 552884,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 851040000,
+          "proposedMarketValueRaw": { "value": 39000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "جارود بوين",
+              "hi": "जारोड बोवेन",
+              "bn": "জারড বোয়েন"
+            },
+            "shortNameTranslation": {
+              "ar": "ج. بوين",
+              "hi": "जे. बोवेन",
+              "bn": "জে. বোয়েন"
+            }
+          }
+        },
+        "teamId": 37,
+        "position": "M",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.25,
+        "player": {
+          "name": "Eberechi Eze",
+          "firstName": "",
+          "lastName": "",
+          "slug": "eberechi-eze",
+          "shortName": "E. Eze",
+          "position": "F",
+          "jerseyNumber": "10",
+          "height": 178,
+          "userCount": 35229,
+          "sofascoreId": "eze",
+          "id": 864921,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 899078400,
+          "proposedMarketValueRaw": { "value": 58000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إيبيريشي إيز",
+              "hi": "एबेरची ईज़े",
+              "bn": "ইবেরেচি এজ"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. إيز",
+              "hi": "ई. ईज़े",
+              "bn": "ই. এজ"
+            }
+          }
+        },
+        "teamId": 42,
+        "position": "F",
+        "substitute": false
+      },
+      {
+        "avgRating": 8.3,
+        "player": {
+          "name": "Noni Madueke",
+          "slug": "noni-madueke",
+          "shortName": "N. Madueke",
+          "position": "M",
+          "jerseyNumber": "20",
+          "height": 182,
+          "userCount": 39968,
+          "sofascoreId": "nonzinoo10",
+          "id": 966547,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1015718400,
+          "proposedMarketValueRaw": { "value": 43000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "نوني مادويكي",
+              "hi": "नोनी मदुके",
+              "bn": "ননি মাদুকে"
+            },
+            "shortNameTranslation": {
+              "ar": "ن. مادويكي",
+              "hi": "एन. मदुके",
+              "bn": "এন. মাদুকে"
+            }
+          }
+        },
+        "teamId": 42,
+        "position": "M",
+        "substitute": false
+      },
+      {
+        "avgRating": 7.8,
+        "player": {
+          "name": "Harry Kane",
+          "firstName": "",
+          "lastName": "",
+          "slug": "harry-kane",
+          "shortName": "H. Kane",
+          "position": "F",
+          "jerseyNumber": "9",
+          "height": 188,
+          "userCount": 246674,
+          "sofascoreId": "HurriKane",
+          "id": 108579,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 743817600,
+          "proposedMarketValueRaw": { "value": 81000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "هاري كين",
+              "hi": "हैरी केन",
+              "bn": "হ্যারি কেইন"
+            },
+            "shortNameTranslation": {
+              "ar": "ه. كين",
+              "hi": "एच. केन",
+              "bn": "এইচ. কেইন"
+            }
+          }
+        },
+        "teamId": 2672,
+        "position": "F",
+        "substitute": false
+      }
+    ],
+    "supportStaff": [],
+    "formation": "4-2-3-1",
+    "playerColor": {
+      "primary": "ffffff",
+      "number": "163c7d",
+      "outline": "ffffff",
+      "fancyNumber": "222226"
+    },
+    "goalkeeperColor": {
+      "primary": "ffea16",
+      "number": "0a0000",
+      "outline": "ffea16",
+      "fancyNumber": "222226"
+    },
+    "missingPlayers": [
+      {
+        "player": {
+          "name": "Bukayo Saka",
+          "slug": "bukayo-saka",
+          "shortName": "B. Saka",
+          "position": "F",
+          "jerseyNumber": "7",
+          "height": 178,
+          "userCount": 199867,
+          "sofascoreId": "BSaka7",
+          "id": 934235,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 999648000,
+          "proposedMarketValueRaw": { "value": 157000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "بوكايو ساكا",
+              "hi": "बुकायो साका",
+              "bn": "বুকায়ো সাকা"
+            },
+            "shortNameTranslation": {
+              "ar": "ب. ساكا",
+              "hi": "बी. साका",
+              "bn": "বি. সাকা"
+            }
+          }
+        },
+        "type": "missing",
+        "reason": 1,
+        "externalType": 5
+      },
+      {
+        "player": {
+          "name": "Adam Wharton",
+          "firstName": "",
+          "lastName": "",
+          "slug": "adam-wharton",
+          "shortName": "A. Wharton",
+          "position": "M",
+          "jerseyNumber": "20",
+          "height": 182,
+          "userCount": 3640,
+          "id": 1109771,
+          "country": {
+            "alpha2": "EN",
+            "alpha3": "ENG",
+            "name": "England",
+            "slug": "england"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1076025600,
+          "proposedMarketValueRaw": { "value": 48000000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "آدم وارتون",
+              "hi": "एडम व्हार्टन",
+              "bn": "অ্যাডাম ওয়ার্টন"
+            },
+            "shortNameTranslation": {
+              "ar": "أ. وارتون",
+              "hi": "ए. व्हार्टन",
+              "bn": "এ. ওয়ার্টন"
+            }
+          }
+        },
+        "type": "missing",
+        "reason": 1,
+        "externalType": 5
+      }
+    ]
+  },
+  "away": {
+    "players": [
+      {
+        "avgRating": 7.13,
+        "player": {
+          "name": "Iker Álvarez",
+          "slug": "iker-alvarez",
+          "shortName": "I. Álvarez",
+          "position": "G",
+          "jerseyNumber": "1",
+          "height": 190,
+          "userCount": 255,
+          "id": 1005638,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 996019200,
+          "proposedMarketValueRaw": { "value": 835000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إيكر ألفاريز",
+              "hi": "इकर अल्वारेज़",
+              "bn": "ইকার আলভারেজ"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. ألفاريز",
+              "hi": "आई. अल्वारेज़",
+              "bn": "আই. আলভারেজ"
+            }
+          }
+        },
+        "teamId": 2850,
+        "position": "G",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.43,
+        "player": {
+          "name": "Biel Borra Font",
+          "firstName": "",
+          "lastName": "",
+          "slug": "biel-borra-font",
+          "shortName": "B. B. Font",
+          "position": "D",
+          "userCount": 18,
+          "id": 1409685,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1104537600
+        },
+        "teamId": 263401,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.58,
+        "player": {
+          "name": "Max Llovera",
+          "firstName": "",
+          "lastName": "",
+          "slug": "max-llovera",
+          "shortName": "M. Llovera",
+          "position": "D",
+          "height": 176,
+          "userCount": 23,
+          "id": 810852,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 852681600,
+          "proposedMarketValueRaw": { "value": 46000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "ماكس لوفيرا",
+              "hi": "मैक्स लोवेरा",
+              "bn": "ম্যাক্স লোভেরা"
+            },
+            "shortNameTranslation": {
+              "ar": "م. لوفيرا",
+              "hi": "एम. लोवेरा",
+              "bn": "এম. লোভেরা"
+            }
+          }
+        },
+        "teamId": 293718,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.43,
+        "player": {
+          "name": "Christian García",
+          "slug": "christian-garcia",
+          "shortName": "C. García",
+          "position": "D",
+          "jerseyNumber": "4",
+          "userCount": 21,
+          "id": 850336,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 918086400,
+          "proposedMarketValueRaw": { "value": 260000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "كريستيان غارسيا",
+              "hi": "क्रिश्चियन गार्सिया",
+              "bn": "ক্রিশ্চিয়ান গার্সিয়া"
+            },
+            "shortNameTranslation": {
+              "ar": "ك. غارسيا",
+              "hi": "सी. गार्सिया",
+              "bn": "সি. গার্সিয়া"
+            }
+          }
+        },
+        "teamId": 37949,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.5,
+        "player": {
+          "name": "Ian Bryan Olivera",
+          "firstName": "",
+          "lastName": "",
+          "slug": "ian-bryan-olivera",
+          "shortName": "I. B. Olivera",
+          "position": "D",
+          "height": 189,
+          "userCount": 29,
+          "id": 1159417,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1096934400,
+          "proposedMarketValueRaw": { "value": 23000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إيان بريان أوليفيرا",
+              "hi": "इयान ब्रायन ओलिवेरा",
+              "bn": "ইয়ান ব্রায়ান অলিভেরা"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. ب. أوليفيرا",
+              "hi": "आई. बी. ओलिवेरा",
+              "bn": "আই. বি. অলিভেরা"
+            }
+          }
+        },
+        "teamId": 2855,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.33,
+        "player": {
+          "name": "Moisés San Nicolás",
+          "slug": "moises-san-nicolas",
+          "shortName": "M. S. Nicolás",
+          "position": "D",
+          "jerseyNumber": "23",
+          "height": 188,
+          "userCount": 16,
+          "id": 97423,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 748224000,
+          "proposedMarketValueRaw": { "value": 210000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "مويسيس سان نيكولا",
+              "hi": "मोइसेस सैन निकोलस",
+              "bn": "মোজেস সেন্ট নিকোলাস"
+            },
+            "shortNameTranslation": {
+              "ar": "م. سان نيكولا",
+              "hi": "एम.एस. निकोलस",
+              "bn": "এম. এস. নিকোলাস"
+            }
+          }
+        },
+        "teamId": 7711,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.28,
+        "player": {
+          "name": "Aron Rodrigo",
+          "firstName": "Aron Rodrigo",
+          "slug": "aron-rodrigo",
+          "shortName": "A. Rodrigo",
+          "position": "F",
+          "jerseyNumber": "17",
+          "userCount": 17,
+          "id": 1481915,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 1097107200
+        },
+        "teamId": 368757,
+        "position": "F",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.3,
+        "player": {
+          "name": "Éric Vales",
+          "slug": "eric-vales",
+          "shortName": "É. Vales",
+          "position": "D",
+          "jerseyNumber": "3",
+          "height": 182,
+          "userCount": 19,
+          "id": 986075,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 966556800,
+          "proposedMarketValueRaw": { "value": 97000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "إريك فالس",
+              "hi": "एरिक वाल्स",
+              "bn": "এরিক ভ্যালস"
+            },
+            "shortNameTranslation": {
+              "ar": "إ. فالس",
+              "hi": "ई. वाल्स",
+              "bn": "ই. ভ্যালেস"
+            }
+          }
+        },
+        "teamId": 229348,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.57,
+        "player": {
+          "name": "Marc Vales",
+          "slug": "marc-vales",
+          "shortName": "M. Vales",
+          "position": "D",
+          "height": 183,
+          "userCount": 38,
+          "id": 41807,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 639187200,
+          "proposedMarketValueRaw": { "value": 110000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "مارك فاليس",
+              "hi": "मार्क वैलेस",
+              "bn": "মার্ক ভ্যালস"
+            },
+            "shortNameTranslation": {
+              "ar": "م. فاليس",
+              "hi": "एम. वैलेस",
+              "bn": "এম. ভ্যালেস"
+            }
+          }
+        },
+        "teamId": 126298,
+        "position": "D",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.4,
+        "player": {
+          "name": "Joan Cervós",
+          "slug": "joan-cervos",
+          "shortName": "J. Cervós",
+          "position": "M",
+          "height": 180,
+          "userCount": 20,
+          "id": 850334,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 888278400,
+          "proposedMarketValueRaw": { "value": 145000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "جوان سيرفوس",
+              "hi": "जॉन सर्वोस",
+              "bn": "জোয়ান সার্ভোস"
+            },
+            "shortNameTranslation": {
+              "ar": "ج. سيرفوس",
+              "hi": "जे. सर्वोस",
+              "bn": "জে. সার্ভোস"
+            }
+          }
+        },
+        "teamId": 293718,
+        "position": "M",
+        "substitute": false
+      },
+      {
+        "avgRating": 6.57,
+        "player": {
+          "name": "Guillaume Lopez",
+          "firstName": "",
+          "lastName": "",
+          "slug": "guillaume-lopez",
+          "shortName": "G. Lopez",
+          "position": "F",
+          "jerseyNumber": "7",
+          "height": 172,
+          "userCount": 59,
+          "id": 1049118,
+          "country": {
+            "alpha2": "AD",
+            "alpha3": "AND",
+            "name": "Andorra",
+            "slug": "andorra"
+          },
+          "marketValueCurrency": "EUR",
+          "dateOfBirthTimestamp": 917654400,
+          "proposedMarketValueRaw": { "value": 385000, "currency": "EUR" },
+          "fieldTranslations": {
+            "nameTranslation": {
+              "ar": "غيوم لوبيز",
+              "hi": "गिलौम लोपेज़",
+              "bn": "গুইলাম লোপেজ"
+            },
+            "shortNameTranslation": {
+              "ar": "غ. لوبيز",
+              "hi": "जी. लोपेज़",
+              "bn": "জি. লোপেজ"
+            }
+          }
+        },
+        "teamId": 37946,
+        "position": "F",
+        "substitute": false
+      }
+    ],
+    "supportStaff": [],
+    "formation": "5-4-1",
+    "playerColor": {
+      "primary": "fac223",
+      "number": "04539b",
+      "outline": "fac223",
+      "fancyNumber": "222226"
+    },
+    "goalkeeperColor": {
+      "primary": "000000",
+      "number": "ffffff",
+      "outline": "000000",
+      "fancyNumber": "ffffff"
+    },
+    "missingPlayers": []
+  }
+}

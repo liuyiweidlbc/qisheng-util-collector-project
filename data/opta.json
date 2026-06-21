@@ -1,0 +1,4043 @@
+{
+  "match": [
+    {
+      "matchInfo": {
+        "id": "dj93wlc4y6a5z30ns89tmayac",
+        "coverageLevel": "13",
+        "date": "2025-11-03Z",
+        "time": "19:45:00Z",
+        "localDate": "2025-11-03",
+        "localTime": "20:45:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-10-31T11:31:15Z",
+        "description": "Lazio vs Cagliari",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "btcy9nra9ak4m22ovr2ia6m5v",
+            "name": "Lazio",
+            "shortName": "Lazio",
+            "officialName": "SS Lazio",
+            "code": "LAZ",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "name": "Cagliari",
+            "shortName": "Cagliari",
+            "officialName": "Cagliari Calcio",
+            "code": "CAG",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "aenrk3ub34bddieyjn1calqu7",
+          "neutral": "no",
+          "longName": "Stadio Olimpico",
+          "shortName": "Stadio Olimpico",
+          "latitude": "41.933947912",
+          "longitude": "12.454757094"
+        }
+      },
+      "liveData": {
+        "matchDetails": { "periodId": 16, "matchStatus": "Fixture" },
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "a72lwc1d9oou0kp2d3f2vsp1x",
+              "type": "Main",
+              "firstName": "Juan Luca",
+              "lastName": "Sacchi",
+              "shortFirstName": "Juan Luca",
+              "shortLastName": "Sacchi"
+            },
+            {
+              "id": "a5gblyc2nns6dt9v5w1ej2or9",
+              "type": "Assistant referee 1",
+              "firstName": "Luca",
+              "lastName": "Mondin",
+              "shortFirstName": "Luca",
+              "shortLastName": "Mondin"
+            },
+            {
+              "id": "8ku26g5schkgiimfwuutof2fo",
+              "type": "Assistant referee 2",
+              "firstName": "Giacomo",
+              "lastName": "Monaco",
+              "shortFirstName": "Giacomo",
+              "shortLastName": "Monaco"
+            },
+            {
+              "id": "2comxbper6c7jdpzznqd6cxyh",
+              "type": "Fourth official",
+              "firstName": "Simone",
+              "lastName": "Galipò",
+              "shortFirstName": "Simone",
+              "shortLastName": "Galipò"
+            },
+            {
+              "id": "dnejd2fdk7jx4843c9hlzqkfd",
+              "type": "Video Assistant Referee",
+              "firstName": "Daniele",
+              "lastName": "Paterna",
+              "shortFirstName": "Daniele",
+              "shortLastName": "Paterna"
+            },
+            {
+              "id": "5gnqdmbw4lafkudd4eizogic5",
+              "type": "Assistant VAR Official",
+              "firstName": "Aleandro",
+              "lastName": "Di Paolo",
+              "shortFirstName": "Aleandro",
+              "shortLastName": "Di Paolo"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dkulf66kq04h9lzqdtjkqpixg",
+        "coverageLevel": "13",
+        "date": "2025-11-03Z",
+        "time": "17:30:00Z",
+        "localDate": "2025-11-03",
+        "localTime": "18:30:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-01T10:01:02Z",
+        "description": "Sassuolo vs Genoa",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "6tuibxq39fdryu8ou06wcm0q3",
+            "name": "Sassuolo",
+            "shortName": "Sassuolo",
+            "officialName": "US Sassuolo Calcio",
+            "code": "SAS",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "4kumqzwifv478caxed8zywlh3",
+            "name": "Genoa",
+            "shortName": "Genoa",
+            "officialName": "Genoa CFC",
+            "code": "GEN",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "bkxidwwi02xyr6dfrccszauvy",
+          "neutral": "no",
+          "longName": "MAPEI Stadium - Città del Tricolore",
+          "shortName": "MAPEI Stadium - Città del Tricolore",
+          "latitude": "44.714636965",
+          "longitude": "10.649710894"
+        }
+      },
+      "liveData": {
+        "matchDetails": { "periodId": 16, "matchStatus": "Fixture" },
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "a3bc1qrmrf411zqsfekf0q191",
+              "type": "Main",
+              "firstName": "Ermanno",
+              "lastName": "Feliciani",
+              "shortFirstName": "Ermanno",
+              "shortLastName": "Feliciani"
+            },
+            {
+              "id": "ce7dx0d021pcmgc5ofpog30et",
+              "type": "Assistant referee 1",
+              "firstName": "Luigi",
+              "lastName": "Rossi",
+              "shortFirstName": "Luigi",
+              "shortLastName": "Rossi"
+            },
+            {
+              "id": "2ij4l0qj9r2b8csrd4shigrf9",
+              "type": "Assistant referee 2",
+              "firstName": "Francesca",
+              "lastName": "Di Monte",
+              "shortFirstName": "Francesca",
+              "shortLastName": "Di Monte"
+            },
+            {
+              "id": "6b1wr02ps6zdsex6zk48bbmne",
+              "type": "Fourth official",
+              "firstName": "Davide",
+              "lastName": "Di Marco",
+              "shortFirstName": "Davide",
+              "shortLastName": "Di Marco"
+            },
+            {
+              "id": "3pgpxq2dadypfwaut5rafxvit",
+              "type": "Video Assistant Referee",
+              "firstName": "Fabio",
+              "lastName": "Maresca",
+              "shortFirstName": "Fabio",
+              "shortLastName": "Maresca"
+            },
+            {
+              "id": "duv78hmf7q5p4m9nfrcenqms5",
+              "type": "Assistant VAR Official",
+              "firstName": "Davide",
+              "lastName": "Massa",
+              "shortFirstName": "Davide",
+              "shortLastName": "Massa"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "djnhnvs0hjjv7p1rlkt1eizh0",
+        "coverageLevel": "13",
+        "date": "2025-11-02Z",
+        "time": "19:45:00Z",
+        "localDate": "2025-11-02",
+        "localTime": "20:45:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-03T00:50:43Z",
+        "description": "Milan vs Roma",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "9dntj5dioj5ex52yrgwzxrq9l",
+            "name": "Milan",
+            "shortName": "Milan",
+            "officialName": "AC Milan",
+            "code": "MIL",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "name": "Roma",
+            "shortName": "Roma",
+            "officialName": "AS Roma",
+            "code": "ROM",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "5wymqo2eq76mrtyoo07n33kxs",
+          "neutral": "no",
+          "longName": "Stadio Giuseppe Meazza",
+          "shortName": "Stadio Giuseppe Meazza",
+          "latitude": "45.478083998",
+          "longitude": "9.123979211"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "home",
+          "matchLengthMin": 97,
+          "matchLengthSec": 8,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-02T19:49:26Z",
+              "end": "2025-11-02T20:35:27Z",
+              "lengthMin": 46,
+              "lengthSec": 1,
+              "announcedInjuryTime": 60
+            },
+            {
+              "id": 2,
+              "start": "2025-11-02T20:53:01Z",
+              "end": "2025-11-02T21:44:08Z",
+              "lengthMin": 51,
+              "lengthSec": 7,
+              "announcedInjuryTime": 240
+            }
+          ],
+          "scores": {
+            "ht": { "home": 1, "away": 0 },
+            "ft": { "home": 1, "away": 0 },
+            "total": { "home": 1, "away": 0 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 1,
+            "timeMin": 39,
+            "timeMinSec": "38:44",
+            "lastUpdated": "2025-11-02T20:29:12Z",
+            "timestamp": "2025-11-02T20:28:11Z",
+            "type": "G",
+            "scorerId": "7wjdqyl3bkhsfca5cu4riwley",
+            "scorerName": "S. Pavlović",
+            "assistPlayerId": "11o903vztwpnmvgrinn208qnd",
+            "assistPlayerName": "Rafael Leão",
+            "optaEventId": "2868457125",
+            "homeScore": 1,
+            "awayScore": 0
+          }
+        ],
+        "missedPen": [
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:28",
+            "lastUpdated": "2025-11-02T21:30:10Z",
+            "timestamp": "2025-11-02T21:29:29Z",
+            "type": "PS",
+            "playerId": "3fpnfgoy4lbpapv2th6g60cet",
+            "playerName": "M. Maignan",
+            "optaEventId": "2868491985"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:28",
+            "lastUpdated": "2025-11-02T21:30:10Z",
+            "timestamp": "2025-11-02T21:29:29Z",
+            "type": "PM",
+            "playerId": "93i0gcndi2m8giqqcm4knduxh",
+            "playerName": "P. Dybala",
+            "optaEventId": "2868491951"
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 1,
+            "timeMin": 34,
+            "timeMinSec": "33:30",
+            "lastUpdated": "2025-11-02T20:23:02Z",
+            "timestamp": "2025-11-02T20:22:57Z",
+            "type": "YC",
+            "playerId": "6zf7dbi1xepyxdohsnrunu5m",
+            "playerName": "N. El Aynaoui",
+            "optaEventId": "2868453821",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 74,
+            "timeMinSec": "73:41",
+            "lastUpdated": "2025-11-02T21:21:54Z",
+            "timestamp": "2025-11-02T21:21:42Z",
+            "type": "YC",
+            "playerId": "9k3cr9bc23253jmcw2a53hn2s",
+            "playerName": "Wesley",
+            "optaEventId": "2868488629",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 75,
+            "timeMinSec": "74:46",
+            "lastUpdated": "2025-11-02T21:22:54Z",
+            "timestamp": "2025-11-02T21:22:47Z",
+            "type": "YC",
+            "playerId": "1pkymw7biivk760rxhubin1ed",
+            "playerName": "Z. Çelik",
+            "optaEventId": "2868489163",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 2,
+            "timeMin": 78,
+            "timeMinSec": "77:38",
+            "lastUpdated": "2025-11-02T21:26:21Z",
+            "timestamp": "2025-11-02T21:25:39Z",
+            "type": "YC",
+            "playerId": "b0wb7gf04synxlkq7o8gvzkoa",
+            "playerName": "Y. Fofana",
+            "optaEventId": "2868490475",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:23",
+            "lastUpdated": "2025-11-02T21:30:31Z",
+            "timestamp": "2025-11-02T21:30:24Z",
+            "type": "YC",
+            "playerId": "am5gj5qg3gjtyhvwfnj8sjz6d",
+            "playerName": "Hermoso",
+            "optaEventId": "2868492319",
+            "cardReason": "Argument"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 95,
+            "timeMinSec": "94:54",
+            "lastUpdated": "2025-11-02T21:43:05Z",
+            "timestamp": "2025-11-02T21:42:55Z",
+            "type": "YC",
+            "playerId": "6fttn5mk6n1lstqt0dl5xzn4l",
+            "playerName": "G. Mancini",
+            "optaEventId": "2868498929",
+            "cardReason": "Dissent"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 51,
+            "timeMinSec": "50:37",
+            "lastUpdated": "2025-11-02T20:59:00Z",
+            "timestamp": "2025-11-02T20:58:38Z",
+            "playerOnId": "57bin6he6kbdo2bs4i78z2k0l",
+            "playerOnName": "L. Pellegrini",
+            "playerOffId": "6zf7dbi1xepyxdohsnrunu5m",
+            "playerOffName": "N. El Aynaoui",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 51,
+            "timeMinSec": "50:45",
+            "lastUpdated": "2025-11-02T20:58:53Z",
+            "timestamp": "2025-11-02T20:58:47Z",
+            "playerOnId": "4jyrztlaueae7eg18kuvxa489",
+            "playerOnName": "L. Bailey",
+            "playerOffId": "erwh25hbq259kqdirfufnbcb8",
+            "playerOffName": "M. Soulé",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 77,
+            "timeMinSec": "76:01",
+            "lastUpdated": "2025-11-02T21:24:18Z",
+            "timestamp": "2025-11-02T21:24:03Z",
+            "playerOnId": "192q3f2xwk9nc6juoa1bcm3th",
+            "playerOnName": "A. Dovbyk",
+            "playerOffId": "1pkymw7biivk760rxhubin1ed",
+            "playerOffName": "Z. Çelik",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 2,
+            "timeMin": 84,
+            "timeMinSec": "83:21",
+            "lastUpdated": "2025-11-02T21:31:33Z",
+            "timestamp": "2025-11-02T21:31:23Z",
+            "playerOnId": "e6jaaazxqeczj6ziaj0qnqpxx",
+            "playerOnName": "R. Loftus-Cheek",
+            "playerOffId": "1j0a3ml1zglc9s31yentfckb9",
+            "playerOffName": "C. Nkunku",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 84,
+            "timeMinSec": "83:25",
+            "lastUpdated": "2025-11-02T21:31:37Z",
+            "timestamp": "2025-11-02T21:31:27Z",
+            "playerOnId": "3kwkd3b95n8qzqtq4idxav45x",
+            "playerOnName": "K. Tsimikas",
+            "playerOffId": "am5gj5qg3gjtyhvwfnj8sjz6d",
+            "playerOffName": "Hermoso",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "2tk2l9sgktwc9jhzqdd4mpdtb",
+            "periodId": 2,
+            "timeMin": 84,
+            "timeMinSec": "83:33",
+            "lastUpdated": "2025-11-02T21:31:44Z",
+            "timestamp": "2025-11-02T21:31:34Z",
+            "playerOnId": "bk1gdyxtfp4drwb0yotwerbsa",
+            "playerOnName": "T. Baldanzi",
+            "playerOffId": "93i0gcndi2m8giqqcm4knduxh",
+            "playerOffName": "P. Dybala",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 2,
+            "timeMin": 87,
+            "timeMinSec": "86:58",
+            "lastUpdated": "2025-11-02T21:36:03Z",
+            "timestamp": "2025-11-02T21:35:00Z",
+            "playerOnId": "ac6r3yi7rzqlcih7qw86jsro4",
+            "playerOnName": "Z. Athekame",
+            "playerOffId": "9vnr9uog5fmggich2i4vjxwbt",
+            "playerOffName": "A. Saelemaekers",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "9dntj5dioj5ex52yrgwzxrq9l",
+            "periodId": 2,
+            "timeMin": 94,
+            "timeMinSec": "93:50",
+            "lastUpdated": "2025-11-02T21:41:57Z",
+            "timestamp": "2025-11-02T21:41:51Z",
+            "playerOnId": "3sezchmdtivxl4kusvgc6j7x1",
+            "playerOnName": "F. Tomori",
+            "playerOffId": "11o903vztwpnmvgrinn208qnd",
+            "playerOffName": "Rafael Leão",
+            "subReason": "Injury"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "5sxmv6pf52a8uoaksigfvk2j9",
+              "type": "Main",
+              "firstName": "Marco",
+              "lastName": "Guida",
+              "shortFirstName": "Marco",
+              "shortLastName": "Guida"
+            },
+            {
+              "id": "ecqhupinnxtx245wc2m5wyok5",
+              "type": "Assistant referee 1",
+              "firstName": "Pietro",
+              "lastName": "Dei Giudici",
+              "shortFirstName": "Pietro",
+              "shortLastName": "Dei Giudici"
+            },
+            {
+              "id": "22vxza0m7kh17ki3k42ar0jbp",
+              "type": "Assistant referee 2",
+              "firstName": "Christian",
+              "lastName": "Rossi",
+              "shortFirstName": "Christian",
+              "shortLastName": "Rossi"
+            },
+            {
+              "id": "4bwal2lhmoudzzsme0odo6zf9",
+              "type": "Fourth official",
+              "firstName": "Matteo",
+              "lastName": "Marchetti",
+              "shortFirstName": "Matteo",
+              "shortLastName": "Marchetti"
+            },
+            {
+              "id": "5gnqdmbw4lafkudd4eizogic5",
+              "type": "Video Assistant Referee",
+              "firstName": "Aleandro",
+              "lastName": "Di Paolo",
+              "shortFirstName": "Aleandro",
+              "shortLastName": "Di Paolo"
+            },
+            {
+              "id": "3ljswpg1997dluzothotr6fv9",
+              "type": "Assistant VAR Official",
+              "firstName": "Marco",
+              "lastName": "Di Bello",
+              "shortFirstName": "Marco",
+              "shortLastName": "Di Bello"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dkg96ikwaxincjz0osgjhgqac",
+        "coverageLevel": "13",
+        "date": "2025-11-02Z",
+        "time": "17:00:00Z",
+        "localDate": "2025-11-02",
+        "localTime": "18:00:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-03T00:12:32Z",
+        "description": "Parma vs Bologna",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "5aosfavi55p40c65lkriqnqnl",
+            "name": "Parma",
+            "shortName": "Parma",
+            "officialName": "Parma Calcio 1913",
+            "code": "PAR",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "ej5er0oyngdw138yuumwqbyqt",
+            "name": "Bologna",
+            "shortName": "Bologna",
+            "officialName": "Bologna FC 1909",
+            "code": "BOL",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "ezq4vbogobqqhr1h64t56gxyo",
+          "neutral": "no",
+          "longName": "Stadio Ennio Tardini",
+          "shortName": "Stadio Ennio Tardini",
+          "latitude": "44.794905165",
+          "longitude": "10.338386893"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "away",
+          "matchLengthMin": 100,
+          "matchLengthSec": 57,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-02T17:01:35Z",
+              "end": "2025-11-02T17:50:51Z",
+              "lengthMin": 49,
+              "lengthSec": 16,
+              "announcedInjuryTime": 240
+            },
+            {
+              "id": 2,
+              "start": "2025-11-02T18:07:17Z",
+              "end": "2025-11-02T18:58:58Z",
+              "lengthMin": 51,
+              "lengthSec": 41,
+              "announcedInjuryTime": 300
+            }
+          ],
+          "scores": {
+            "ht": { "home": 1, "away": 1 },
+            "ft": { "home": 1, "away": 3 },
+            "total": { "home": 1, "away": 3 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 1,
+            "timeMin": 1,
+            "timeMinSec": "0:13",
+            "lastUpdated": "2025-11-02T17:02:35Z",
+            "timestamp": "2025-11-02T17:01:49Z",
+            "type": "G",
+            "scorerId": "b7l20ljluxk74v0ok82s0iz56",
+            "scorerName": "Adrián Bernabé",
+            "optaEventId": "2868280673",
+            "homeScore": 1,
+            "awayScore": 0
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 1,
+            "timeMin": 17,
+            "timeMinSec": "16:38",
+            "lastUpdated": "2025-11-02T17:19:08Z",
+            "timestamp": "2025-11-02T17:18:14Z",
+            "type": "G",
+            "scorerId": "b9clhoz198r69kavhw4anymms",
+            "scorerName": "S. Castro",
+            "assistPlayerId": "awf3x41nsz8m73bhte5wlz6ui",
+            "assistPlayerName": "E. Holm",
+            "optaEventId": "2868300495",
+            "homeScore": 1,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 68,
+            "timeMinSec": "67:04",
+            "lastUpdated": "2025-11-02T18:29:53Z",
+            "timestamp": "2025-11-02T18:29:21Z",
+            "type": "G",
+            "scorerId": "b9clhoz198r69kavhw4anymms",
+            "scorerName": "S. Castro",
+            "optaEventId": "2868371095",
+            "homeScore": 1,
+            "awayScore": 2
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 92,
+            "timeMinSec": "91:04",
+            "lastUpdated": "2025-11-02T18:54:29Z",
+            "timestamp": "2025-11-02T18:53:21Z",
+            "type": "G",
+            "scorerId": "emvmn561wgd62zj0s3qi5j5rd",
+            "scorerName": "Juan Miranda",
+            "assistPlayerId": "d5m5q6dlc7vnbs634dinbsuwa",
+            "assistPlayerName": "N. Cambiaghi",
+            "optaEventId": "2868390791",
+            "homeScore": 1,
+            "awayScore": 3
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 1,
+            "timeMin": 28,
+            "timeMinSec": "27:35",
+            "lastUpdated": "2025-11-02T17:29:18Z",
+            "timestamp": "2025-11-02T17:29:10Z",
+            "type": "YC",
+            "playerId": "e5pi22e4qopz95q3y5co7thqs",
+            "playerName": "C. Ordoñez",
+            "optaEventId": "2868314201",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 1,
+            "timeMin": 35,
+            "timeMinSec": "34:48",
+            "lastUpdated": "2025-11-02T17:36:37Z",
+            "timestamp": "2025-11-02T17:36:24Z",
+            "type": "Y2C",
+            "playerId": "e5pi22e4qopz95q3y5co7thqs",
+            "playerName": "C. Ordoñez",
+            "optaEventId": "2868322367",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 61,
+            "timeMinSec": "60:34",
+            "lastUpdated": "2025-11-02T18:22:56Z",
+            "timestamp": "2025-11-02T18:22:51Z",
+            "type": "YC",
+            "playerId": "b9clhoz198r69kavhw4anymms",
+            "playerName": "S. Castro",
+            "optaEventId": "2868365747",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 2,
+            "timeMin": 79,
+            "timeMinSec": "78:09",
+            "lastUpdated": "2025-11-02T18:40:34Z",
+            "timestamp": "2025-11-02T18:40:26Z",
+            "type": "YC",
+            "playerId": "befbveuodyomkhm9ed31kb4a2",
+            "playerName": "L. Valenti",
+            "optaEventId": "2868379757",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 87,
+            "timeMinSec": "86:41",
+            "lastUpdated": "2025-11-02T18:49:05Z",
+            "timestamp": "2025-11-02T18:48:58Z",
+            "type": "YC",
+            "playerId": "d5m5q6dlc7vnbs634dinbsuwa",
+            "playerName": "N. Cambiaghi",
+            "optaEventId": "2868387549",
+            "cardReason": "Foul"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 1,
+            "timeMin": 24,
+            "timeMinSec": "23:33",
+            "lastUpdated": "2025-11-02T17:25:02Z",
+            "timestamp": "2025-11-02T17:25:09Z",
+            "playerOnId": "drlp4xtkta08jiu0px6m4ocq2",
+            "playerOnName": "O. Sørensen",
+            "playerOffId": "1to07m18m7wqroewvyxzrz0lx",
+            "playerOffName": "N. Estévez",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 1,
+            "timeMin": 41,
+            "timeMinSec": "40:38",
+            "lastUpdated": "2025-11-02T17:42:18Z",
+            "timestamp": "2025-11-02T17:42:14Z",
+            "playerOnId": "7pd1rtu3x4tjacwmvuodib4oa",
+            "playerOnName": "A. Ndiaye",
+            "playerOffId": "c1sj6aogyfpm5wqvhd2bli7e",
+            "playerOffName": "A. Circati",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 56,
+            "timeMinSec": "55:15",
+            "lastUpdated": "2025-11-02T18:17:47Z",
+            "timestamp": "2025-11-02T18:17:33Z",
+            "playerOnId": "6eqqtmbg35rg2stk10ic7q8k5",
+            "playerOnName": "N. Moro",
+            "playerOffId": "19nlw3sa0khwz0el4wqc7zrp",
+            "playerOffName": "R. Freuler",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 72,
+            "timeMinSec": "71:05",
+            "lastUpdated": "2025-11-02T18:35:06Z",
+            "timestamp": "2025-11-02T18:33:22Z",
+            "playerOnId": "1lnktjxx0mux4beo28cl54j1m",
+            "playerOnName": "T. Dallinga",
+            "playerOffId": "b9clhoz198r69kavhw4anymms",
+            "playerOffName": "S. Castro",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 72,
+            "timeMinSec": "71:30",
+            "lastUpdated": "2025-11-02T18:35:05Z",
+            "timestamp": "2025-11-02T18:33:47Z",
+            "playerOnId": "4j3d7ujmhevsi0y3zvs34i13o",
+            "playerOnName": "G. Fabbian",
+            "playerOffId": "1t7nph4960rjzu7rgi47sf8ix",
+            "playerOffName": "J. Odgaard",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 2,
+            "timeMin": 78,
+            "timeMinSec": "77:18",
+            "lastUpdated": "2025-11-02T18:40:08Z",
+            "timestamp": "2025-11-02T18:39:35Z",
+            "playerOnId": "8zke93n0uca6gf2jihqby28d1",
+            "playerOnName": "Hernani",
+            "playerOffId": "9olzf630oclv41h41p5iunm6s",
+            "playerOffName": "S. Britschgi",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 2,
+            "timeMin": 78,
+            "timeMinSec": "77:20",
+            "lastUpdated": "2025-11-02T18:40:08Z",
+            "timestamp": "2025-11-02T18:39:37Z",
+            "playerOnId": "7dnu1vdavskc4ct33k88lpdcl",
+            "playerOnName": "P. Cutrone",
+            "playerOffId": "25wawsdczm69ctbpw5nn51kvd",
+            "playerOffName": "A. Benedyczak",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5aosfavi55p40c65lkriqnqnl",
+            "periodId": 2,
+            "timeMin": 78,
+            "timeMinSec": "77:31",
+            "lastUpdated": "2025-11-02T18:40:02Z",
+            "timestamp": "2025-11-02T18:39:48Z",
+            "playerOnId": "dp1y9x5r6z1q120hj3sgyhxat",
+            "playerOnName": "M. Đurić",
+            "playerOffId": "7maur0rp96hubnkuu84576wpg",
+            "playerOffName": "M. Pellegrino",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:29",
+            "lastUpdated": "2025-11-02T18:44:08Z",
+            "timestamp": "2025-11-02T18:43:46Z",
+            "playerOnId": "6kms3ctf8joymna289onk9lg5",
+            "playerOnName": "F. Bernardeschi",
+            "playerOffId": "1cu7fg8sf90isf9gp21e5fqh",
+            "playerOffName": "R. Orsolini",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ej5er0oyngdw138yuumwqbyqt",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:30",
+            "lastUpdated": "2025-11-02T18:44:04Z",
+            "timestamp": "2025-11-02T18:43:48Z",
+            "playerOnId": "d5m5q6dlc7vnbs634dinbsuwa",
+            "playerOnName": "N. Cambiaghi",
+            "playerOffId": "2bmeynv0dhsc8sjfuaprkexre",
+            "playerOffName": "J. Rowe",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "155tvrujpas01bb0do7enhu96",
+              "type": "Main",
+              "firstName": "Kevin",
+              "lastName": "Bonacina",
+              "shortFirstName": "Kevin",
+              "shortLastName": "Bonacina"
+            },
+            {
+              "id": "2unlolwj3rzdsr6uieotsc89h",
+              "type": "Assistant referee 1",
+              "firstName": "Vito",
+              "lastName": "Mastrodonato",
+              "shortFirstName": "Vito",
+              "shortLastName": "Mastrodonato"
+            },
+            {
+              "id": "mb0rpghvv20th27pflsbw3ro",
+              "type": "Assistant referee 2",
+              "firstName": "Mattia",
+              "lastName": "Politi",
+              "shortFirstName": "Mattia",
+              "shortLastName": "Politi"
+            },
+            {
+              "id": "340em3cmem3pc50gud01d9l91",
+              "type": "Fourth official",
+              "firstName": "Matteo",
+              "lastName": "Marcenaro",
+              "shortFirstName": "Matteo",
+              "shortLastName": "Marcenaro"
+            },
+            {
+              "id": "71t2ndh6hh0qhq82eswwjrb9x",
+              "type": "Video Assistant Referee",
+              "firstName": "Matteo",
+              "lastName": "Gariglio",
+              "shortFirstName": "Matteo",
+              "shortLastName": "Gariglio"
+            },
+            {
+              "id": "avmzkg92ui0qefxpfsc8uzbv9",
+              "type": "Assistant VAR Official",
+              "firstName": "Marco",
+              "lastName": "Piccinini",
+              "shortFirstName": "Marco",
+              "shortLastName": "Piccinini"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dl8z0whe7rrb6x9q5t2ujr0gk",
+        "coverageLevel": "13",
+        "date": "2025-11-02Z",
+        "time": "14:00:00Z",
+        "localDate": "2025-11-02",
+        "localTime": "15:00:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-02T15:54:57Z",
+        "description": "Torino vs Pisa",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "7gnly6999wao1xarwct4p8fe9",
+            "name": "Torino",
+            "shortName": "Torino",
+            "officialName": "Torino FC",
+            "code": "TOR",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "bfztlrr6176xsdt2bmp0u1d2d",
+            "name": "Pisa",
+            "shortName": "Pisa",
+            "officialName": "Pisa Sporting Club",
+            "code": "PIS",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "a212dbnk1ia0xdec29slbt5pt",
+          "neutral": "no",
+          "longName": "Stadio Olimpico Grande Torino",
+          "shortName": "Stadio Olimpico Grande Torino",
+          "latitude": "45.041752184",
+          "longitude": "7.650015503"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "draw",
+          "matchLengthMin": 97,
+          "matchLengthSec": 21,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-02T14:00:39Z",
+              "end": "2025-11-02T14:48:50Z",
+              "lengthMin": 48,
+              "lengthSec": 11,
+              "announcedInjuryTime": 180
+            },
+            {
+              "id": 2,
+              "start": "2025-11-02T15:05:37Z",
+              "end": "2025-11-02T15:54:47Z",
+              "lengthMin": 49,
+              "lengthSec": 10,
+              "announcedInjuryTime": 240
+            }
+          ],
+          "scores": {
+            "ht": { "home": 2, "away": 2 },
+            "ft": { "home": 2, "away": 2 },
+            "total": { "home": 2, "away": 2 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 1,
+            "timeMin": 13,
+            "timeMinSec": "12:15",
+            "lastUpdated": "2025-11-02T14:13:50Z",
+            "timestamp": "2025-11-02T14:12:55Z",
+            "type": "G",
+            "scorerId": "22ck04xk148cks27zwby83d1x",
+            "scorerName": "S. Moreo",
+            "assistPlayerId": "6u6mobmk6lpvwebo76ddxr3s9",
+            "assistPlayerName": "M. Léris",
+            "optaEventId": "2868061983",
+            "homeScore": 0,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 1,
+            "timeMin": 29,
+            "timeMinSec": "28:51",
+            "lastUpdated": "2025-11-02T14:29:37Z",
+            "timestamp": "2025-11-02T14:29:30Z",
+            "type": "PG",
+            "scorerId": "22ck04xk148cks27zwby83d1x",
+            "scorerName": "S. Moreo",
+            "optaEventId": "2868082431",
+            "homeScore": 0,
+            "awayScore": 2
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 1,
+            "timeMin": 42,
+            "timeMinSec": "41:42",
+            "lastUpdated": "2025-11-02T14:43:01Z",
+            "timestamp": "2025-11-02T14:42:21Z",
+            "type": "G",
+            "scorerId": "cp13vthbds3tl1wtfelfx2evp",
+            "scorerName": "G. Simeone",
+            "optaEventId": "2868098901",
+            "homeScore": 1,
+            "awayScore": 2
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 1,
+            "timeMin": 48,
+            "timeMinSec": "47:20",
+            "lastUpdated": "2025-11-02T14:48:30Z",
+            "timestamp": "2025-11-02T14:47:59Z",
+            "type": "G",
+            "scorerId": "59ujnkvl7rlffomi2bqpsmbpx",
+            "scorerName": "C. Adams",
+            "optaEventId": "2868106469",
+            "homeScore": 2,
+            "awayScore": 2
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 1,
+            "timeMin": 27,
+            "timeMinSec": "26:47",
+            "lastUpdated": "2025-11-02T14:27:36Z",
+            "timestamp": "2025-11-02T14:27:26Z",
+            "type": "YC",
+            "playerId": "82pgcsfvbitzlpbao9ptbsgoa",
+            "playerName": "C. Casadei",
+            "optaEventId": "2868080327",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 1,
+            "timeMin": 37,
+            "timeMinSec": "36:31",
+            "lastUpdated": "2025-11-02T14:37:22Z",
+            "timestamp": "2025-11-02T14:37:11Z",
+            "type": "YC",
+            "playerId": "eyx42tgneccybvhk8bfhtcaqy",
+            "playerName": "M. Højholt",
+            "optaEventId": "2868091523",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 94,
+            "timeMinSec": "93:42",
+            "lastUpdated": "2025-11-02T15:54:30Z",
+            "timestamp": "2025-11-02T15:54:19Z",
+            "type": "YC",
+            "playerId": "e6xexn53yyoxmdt5naduyx8bu",
+            "playerName": "M. Pedersen",
+            "optaEventId": "2868194251",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 1,
+            "timeMin": 45,
+            "timeMinSec": "44:05",
+            "lastUpdated": "2025-11-02T14:45:42Z",
+            "timestamp": "2025-11-02T14:44:44Z",
+            "type": "RC",
+            "teamOfficialId": "1t4bc138hs96algzfmamozxlh",
+            "officialName": "M. Baroni",
+            "optaEventId": "2868103269",
+            "cardReason": "Foul and Abusive Language"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-02T15:05:05Z",
+            "timestamp": "2025-11-02T15:04:55Z",
+            "playerOnId": "bpfg11qh1q0zj2x6sqd3srvmx",
+            "playerOnName": "M. Aebischer",
+            "playerOffId": "eyx42tgneccybvhk8bfhtcaqy",
+            "playerOffName": "M. Højholt",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-02T15:05:17Z",
+            "timestamp": "2025-11-02T15:04:55Z",
+            "playerOnId": "a9z0jsjwfteq974bxwucvc4ix",
+            "playerOnName": "C. Ngonge",
+            "playerOffId": "ebgkv548xih19m8uza7bgrvmd",
+            "playerOffName": "N. Vlašić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "65:07",
+            "lastUpdated": "2025-11-02T15:25:52Z",
+            "timestamp": "2025-11-02T15:25:44Z",
+            "playerOnId": "56ekwofu3616kd4qjlirphdzo",
+            "playerOnName": "S. Angori",
+            "playerOffId": "22ck04xk148cks27zwby83d1x",
+            "playerOffName": "S. Moreo",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "65:31",
+            "lastUpdated": "2025-11-02T15:26:16Z",
+            "timestamp": "2025-11-02T15:26:08Z",
+            "playerOnId": "8zltxvt0rcrcv96x1wmdhlrrp",
+            "playerOnName": "M'Bala Nzola",
+            "playerOffId": "8trp1348qs14phwpsx4a9beuh",
+            "playerOffName": "I. Touré",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "65:44",
+            "lastUpdated": "2025-11-02T15:26:29Z",
+            "timestamp": "2025-11-02T15:26:21Z",
+            "playerOnId": "6egg2gwvxxqv2i9hrr0zg4yz8",
+            "playerOnName": "G. Gineitis",
+            "playerOffId": "59ujnkvl7rlffomi2bqpsmbpx",
+            "playerOffName": "C. Adams",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 67,
+            "timeMinSec": "66:01",
+            "lastUpdated": "2025-11-02T15:26:48Z",
+            "timestamp": "2025-11-02T15:26:38Z",
+            "playerOnId": "9sjt5rv156hr2llfu241r6cph",
+            "playerOnName": "A. Tamèze",
+            "playerOffId": "270djbc9lxhoupmd1djrii191",
+            "playerOffName": "G. Maripán",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:41",
+            "lastUpdated": "2025-11-02T15:33:29Z",
+            "timestamp": "2025-11-02T15:33:18Z",
+            "playerOnId": "66at96kfhvigkny465lkmrnbp",
+            "playerOnName": "C. Biraghi",
+            "playerOffId": "866f0f7taqhae91o3cjnnx0ph",
+            "playerOffName": "V. Lazaro",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "7gnly6999wao1xarwct4p8fe9",
+            "periodId": 2,
+            "timeMin": 78,
+            "timeMinSec": "77:42",
+            "lastUpdated": "2025-11-02T15:38:29Z",
+            "timestamp": "2025-11-02T15:38:19Z",
+            "playerOnId": "30gsjr0xlmjulnz227zfxga8l",
+            "playerOnName": "D. Zapata",
+            "playerOffId": "cp13vthbds3tl1wtfelfx2evp",
+            "playerOffName": "G. Simeone",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:04",
+            "lastUpdated": "2025-11-02T15:43:11Z",
+            "timestamp": "2025-11-02T15:42:41Z",
+            "playerOnId": "93cnkzi86q36c8n86mo35q5t5",
+            "playerOnName": "M. Marin",
+            "playerOffId": "np5er6kwne1u1y3avr7sr11w",
+            "playerOffName": "İ. Vural",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:33",
+            "lastUpdated": "2025-11-02T15:43:21Z",
+            "timestamp": "2025-11-02T15:43:10Z",
+            "playerOnId": "pconfrmsdy9aikioqz9s9lg5",
+            "playerOnName": "J. Cuadrado",
+            "playerOffId": "6u6mobmk6lpvwebo76ddxr3s9",
+            "playerOffName": "M. Léris",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "eex8aqbd0atfe3nbhhy8en0mh",
+              "type": "Main",
+              "firstName": "Alberto Ruben",
+              "lastName": "Arena",
+              "shortFirstName": "Alberto",
+              "shortLastName": "Arena"
+            },
+            {
+              "id": "emwhpencz6nl8chf488ytmjqi",
+              "type": "Assistant referee 1",
+              "firstName": "Alessio",
+              "lastName": "Berti",
+              "shortFirstName": "Alessio",
+              "shortLastName": "Berti"
+            },
+            {
+              "id": "a7im4qspjcy935no5jctub5xx",
+              "type": "Assistant referee 2",
+              "firstName": "Valerio",
+              "lastName": "Colarossi",
+              "shortFirstName": "Valerio",
+              "shortLastName": "Colarossi"
+            },
+            {
+              "id": "2br0nrqe4641vwmq6gguty5n8",
+              "type": "Fourth official",
+              "firstName": "Claudio Giuseppe",
+              "lastName": "Allegretta",
+              "shortFirstName": "Claudio Giuseppe",
+              "shortLastName": "Allegretta"
+            },
+            {
+              "id": "1a1af5fc1dnjd4puplbstyiuh",
+              "type": "Video Assistant Referee",
+              "firstName": "Giacomo",
+              "lastName": "Camplone",
+              "shortFirstName": "Giacomo",
+              "shortLastName": "Camplone"
+            },
+            {
+              "id": "ep5ncxce5bide1sea2uxhnfth",
+              "type": "Assistant VAR Official",
+              "firstName": "Simone",
+              "lastName": "Sozza",
+              "shortFirstName": "Simone",
+              "shortLastName": "Sozza"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "diuxkzq1t6j5r3b8myu04i3h0",
+        "coverageLevel": "13",
+        "date": "2025-11-02Z",
+        "time": "14:00:00Z",
+        "localDate": "2025-11-02",
+        "localTime": "15:00:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-02T15:58:21Z",
+        "description": "Fiorentina vs Lecce",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "4raiad4l2j5lkfaz92pk4osb",
+            "name": "Fiorentina",
+            "shortName": "Fiorentina",
+            "officialName": "ACF Fiorentina",
+            "code": "FIO",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "name": "Lecce",
+            "shortName": "Lecce",
+            "officialName": "US Lecce",
+            "code": "LEC",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "6dk5n3s1k263ic4psqgewme01",
+          "neutral": "no",
+          "longName": "Stadio Artemio Franchi",
+          "shortName": "Stadio Artemio Franchi",
+          "latitude": "43.780787925",
+          "longitude": "11.282712221"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "away",
+          "matchLengthMin": 97,
+          "matchLengthSec": 15,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-02T14:03:00Z",
+              "end": "2025-11-02T14:49:00Z",
+              "lengthMin": 46,
+              "lengthSec": 0,
+              "announcedInjuryTime": 60
+            },
+            {
+              "id": 2,
+              "start": "2025-11-02T15:06:55Z",
+              "end": "2025-11-02T15:58:10Z",
+              "lengthMin": 51,
+              "lengthSec": 15,
+              "announcedInjuryTime": 360
+            }
+          ],
+          "scores": {
+            "ht": { "home": 0, "away": 1 },
+            "ft": { "home": 0, "away": 1 },
+            "total": { "home": 0, "away": 1 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 1,
+            "timeMin": 23,
+            "timeMinSec": "22:17",
+            "lastUpdated": "2025-11-02T14:25:56Z",
+            "timestamp": "2025-11-02T14:25:17Z",
+            "type": "G",
+            "scorerId": "d12unjo4sk39iix9of2yfask4",
+            "scorerName": "M. Berisha",
+            "optaEventId": "2868077775",
+            "homeScore": 0,
+            "awayScore": 1
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 1,
+            "timeMin": 14,
+            "timeMinSec": "13:24",
+            "lastUpdated": "2025-11-02T14:16:34Z",
+            "timestamp": "2025-11-02T14:16:24Z",
+            "type": "YC",
+            "playerId": "a6lo3s66xv87llkhwveoq1vqh",
+            "playerName": "H. Nicolussi",
+            "optaEventId": "2868066903",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 1,
+            "timeMin": 15,
+            "timeMinSec": "14:54",
+            "lastUpdated": "2025-11-02T14:18:05Z",
+            "timestamp": "2025-11-02T14:17:54Z",
+            "type": "YC",
+            "playerId": "418gw0hpjoy8dt0ywaxjgm5pm",
+            "playerName": "N. Fagioli",
+            "optaEventId": "2868068875",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 1,
+            "timeMin": 41,
+            "timeMinSec": "40:56",
+            "lastUpdated": "2025-11-02T14:44:04Z",
+            "timestamp": "2025-11-02T14:43:57Z",
+            "type": "YC",
+            "playerId": "1lisq580zw4yfk6id6f1dwr56",
+            "playerName": "Danilo Veiga",
+            "optaEventId": "2868100913",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "65:54",
+            "lastUpdated": "2025-11-02T15:27:58Z",
+            "timestamp": "2025-11-02T15:27:49Z",
+            "type": "YC",
+            "playerId": "3zqpvn7r1c779l9vwwh7yukfd",
+            "playerName": "M. Kean",
+            "optaEventId": "2868155249",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 87,
+            "timeMinSec": "86:40",
+            "lastUpdated": "2025-11-02T15:49:05Z",
+            "timestamp": "2025-11-02T15:48:35Z",
+            "type": "YC",
+            "playerId": "476nfumr6aadvufrqk72tq5be",
+            "playerName": "L. Ranieri",
+            "optaEventId": "2868186969",
+            "cardReason": "Dissent"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-02T15:06:00Z",
+            "timestamp": "2025-11-02T15:05:54Z",
+            "playerOnId": "87kiw3scnrpt6t0hsaqkgvpey",
+            "playerOnName": "S. Sohm",
+            "playerOffId": "kvbjuvcseqk4sbr04ctkqi38",
+            "playerOffName": "C. Ndour",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-02T15:06:09Z",
+            "timestamp": "2025-11-02T15:05:54Z",
+            "playerOnId": "ejzxqtdo5xxvbg6gvtju3lk9h",
+            "playerOnName": "A. Guðmundsson",
+            "playerOffId": "418gw0hpjoy8dt0ywaxjgm5pm",
+            "playerOffName": "N. Fagioli",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-02T15:06:20Z",
+            "timestamp": "2025-11-02T15:05:54Z",
+            "playerOnId": "dpnp9rguhhs04of6vmlw5spg5",
+            "playerOnName": "R. Mandragora",
+            "playerOffId": "a6lo3s66xv87llkhwveoq1vqh",
+            "playerOffName": "H. Nicolussi",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 59,
+            "timeMinSec": "58:51",
+            "lastUpdated": "2025-11-02T15:20:57Z",
+            "timestamp": "2025-11-02T15:20:47Z",
+            "playerOnId": "31b0dvddmki2b2zvumesyrx4a",
+            "playerOnName": "R. Piccoli",
+            "playerOffId": "a5eki9p236y4zxmp9qz202pcl",
+            "playerOffName": "E. Džeko",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:58",
+            "lastUpdated": "2025-11-02T15:35:03Z",
+            "timestamp": "2025-11-02T15:34:53Z",
+            "playerOnId": "dy4p5raczhbmglfsu8n4xcdwq",
+            "playerOnName": "S. Pierotti",
+            "playerOffId": "cntcffa67r95rbcf1154r92zu",
+            "playerOffName": "L. Banda",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 2,
+            "timeMin": 76,
+            "timeMinSec": "75:58",
+            "lastUpdated": "2025-11-02T15:38:04Z",
+            "timestamp": "2025-11-02T15:37:54Z",
+            "playerOnId": "d9sakxlp96siw0z1jltszdlgp",
+            "playerOnName": "Y. Maleh",
+            "playerOffId": "d12unjo4sk39iix9of2yfask4",
+            "playerOffName": "M. Berisha",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 76,
+            "timeMinSec": "75:59",
+            "lastUpdated": "2025-11-02T15:38:44Z",
+            "timestamp": "2025-11-02T15:37:55Z",
+            "playerOnId": "6e9fu9o226zn6jzx02jutvi3u",
+            "playerOnName": "J. Fazzini",
+            "playerOffId": "9srjp22oprs2tkcutb2g4o2dw",
+            "playerOffName": "P. Comuzzo",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 2,
+            "timeMin": 89,
+            "timeMinSec": "88:34",
+            "lastUpdated": "2025-11-02T15:50:35Z",
+            "timestamp": "2025-11-02T15:50:29Z",
+            "playerOnId": "5vz3ahy53htjc8pk4wzvytzbo",
+            "playerOnName": "F. Camarda",
+            "playerOffId": "4gnprufs4yyf7wq9mzmkmf622",
+            "playerOffName": "N. Štulić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bi1fxjrncd0ram0oi7ja1jyuo",
+            "periodId": 2,
+            "timeMin": 89,
+            "timeMinSec": "88:40",
+            "lastUpdated": "2025-11-02T15:50:42Z",
+            "timestamp": "2025-11-02T15:50:35Z",
+            "playerOnId": "3g14bqou9coim6fit9c2cyr8q",
+            "playerOnName": "M. Kaba",
+            "playerOffId": "1i9mqbswolg91evnmsrf5katx",
+            "playerOffName": "Tete Morente",
+            "subReason": "Tactical"
+          }
+        ],
+        "VAR": [
+          {
+            "contestantId": "4raiad4l2j5lkfaz92pk4osb",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "85:00",
+            "lastUpdated": "2025-11-02T15:47:21Z",
+            "timestamp": "2025-11-02T15:46:55Z",
+            "type": "Penalty awarded",
+            "decision": "Cancelled",
+            "outcome": "No penalty",
+            "playerId": "476nfumr6aadvufrqk72tq5be",
+            "playerName": "L. Ranieri",
+            "optaEventId": "2868184589"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "3qqudqth1c3z7rmxfsqg3tolx",
+              "type": "Main",
+              "firstName": "Antonio",
+              "lastName": "Rapuano",
+              "shortFirstName": "Antonio",
+              "shortLastName": "Rapuano"
+            },
+            {
+              "id": "audi3w4bczamgalouoscs6ctm",
+              "type": "Assistant referee 1",
+              "firstName": "Domenico",
+              "lastName": "Palermo",
+              "shortFirstName": "Domenico",
+              "shortLastName": "Palermo"
+            },
+            {
+              "id": "58vjux40d0b1w7264cdtsqhg",
+              "type": "Assistant referee 2",
+              "firstName": "Claudio",
+              "lastName": "Barone",
+              "shortFirstName": "Claudio",
+              "shortLastName": "Barone"
+            },
+            {
+              "id": "c861ocmkjs0bwbmpi6ufom7rp",
+              "type": "Fourth official",
+              "firstName": "Giovanni",
+              "lastName": "Ayroldi",
+              "shortFirstName": "Giovanni",
+              "shortLastName": "Ayroldi"
+            },
+            {
+              "id": "duv78hmf7q5p4m9nfrcenqms5",
+              "type": "Video Assistant Referee",
+              "firstName": "Davide",
+              "lastName": "Massa",
+              "shortFirstName": "Davide",
+              "shortLastName": "Massa"
+            },
+            {
+              "id": "3pgpxq2dadypfwaut5rafxvit",
+              "type": "Assistant VAR Official",
+              "firstName": "Fabio",
+              "lastName": "Maresca",
+              "shortFirstName": "Fabio",
+              "shortLastName": "Maresca"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dm3jxfctxpdynsz4ifnil87pw",
+        "coverageLevel": "13",
+        "date": "2025-11-02Z",
+        "time": "11:30:00Z",
+        "localDate": "2025-11-02",
+        "localTime": "12:30:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-02T13:31:39Z",
+        "description": "Hellas Verona vs Internazionale",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "ap6blbxhq9elm62vw6tutzlwg",
+            "name": "Hellas Verona",
+            "shortName": "Verona",
+            "officialName": "Hellas Verona FC",
+            "code": "VER",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "3vo5mpj7catp66nrwwqiuhuup",
+            "name": "Internazionale",
+            "shortName": "Inter",
+            "officialName": "FC Internazionale Milano",
+            "code": "INT",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "b039r645r5f23m1mutig7q610",
+          "neutral": "no",
+          "longName": "Stadio Marcantonio Bentegodi",
+          "shortName": "Stadio Marcantonio Bentegodi",
+          "latitude": "45.435323795",
+          "longitude": "10.968585312"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "away",
+          "matchLengthMin": 98,
+          "matchLengthSec": 57,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-02T11:32:34Z",
+              "end": "2025-11-02T12:20:34Z",
+              "lengthMin": 48,
+              "lengthSec": 0,
+              "announcedInjuryTime": 180
+            },
+            {
+              "id": 2,
+              "start": "2025-11-02T12:37:26Z",
+              "end": "2025-11-02T13:28:23Z",
+              "lengthMin": 50,
+              "lengthSec": 57,
+              "announcedInjuryTime": 360
+            }
+          ],
+          "scores": {
+            "ht": { "home": 1, "away": 1 },
+            "ft": { "home": 1, "away": 2 },
+            "total": { "home": 1, "away": 2 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 1,
+            "timeMin": 16,
+            "timeMinSec": "15:39",
+            "lastUpdated": "2025-11-02T11:49:02Z",
+            "timestamp": "2025-11-02T11:48:14Z",
+            "type": "G",
+            "scorerId": "dpcws493fepch23sk26m1a8yd",
+            "scorerName": "P. Zieliński",
+            "assistPlayerId": "botfgp0oq4wqlwtcs9m90kded",
+            "assistPlayerName": "H. Çalhanoğlu",
+            "optaEventId": "2867931091",
+            "homeScore": 0,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 1,
+            "timeMin": 40,
+            "timeMinSec": "39:05",
+            "lastUpdated": "2025-11-02T12:13:14Z",
+            "timestamp": "2025-11-02T12:11:39Z",
+            "type": "G",
+            "scorerId": "1e03r0jzxkpqbfiao98w06cr8",
+            "scorerName": "Giovane",
+            "assistPlayerId": "adrn1x15rsehvnava8q9ofuvo",
+            "assistPlayerName": "G. Orban",
+            "optaEventId": "2867947987",
+            "homeScore": 1,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 93,
+            "timeMinSec": "92:59",
+            "lastUpdated": "2025-11-02T13:27:40Z",
+            "timestamp": "2025-11-02T13:25:25Z",
+            "type": "OG",
+            "scorerId": "75n60pzg0y5agf5nzo3sd3cvd",
+            "scorerName": "M. Frese",
+            "optaEventId": "2868010133",
+            "homeScore": 1,
+            "awayScore": 2
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 1,
+            "timeMin": 41,
+            "timeMinSec": "40:38",
+            "lastUpdated": "2025-11-02T12:13:58Z",
+            "timestamp": "2025-11-02T12:13:13Z",
+            "type": "YC",
+            "playerId": "adrn1x15rsehvnava8q9ofuvo",
+            "playerName": "G. Orban",
+            "optaEventId": "2867949545",
+            "cardReason": "Excessive celebration"
+          },
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "65:47",
+            "lastUpdated": "2025-11-02T12:58:26Z",
+            "timestamp": "2025-11-02T12:58:13Z",
+            "type": "YC",
+            "playerId": "280fh7f5q9lud8lk8reyu7fxm",
+            "playerName": "Y. Bisseck",
+            "optaEventId": "2867984311",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 96,
+            "timeMinSec": "95:30",
+            "lastUpdated": "2025-11-02T13:28:17Z",
+            "timestamp": "2025-11-02T13:27:56Z",
+            "type": "YC",
+            "playerId": "7zkku0gboniozaks9yx0ous8a",
+            "playerName": "A. Bella-Kotchap",
+            "optaEventId": "2868012481",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 90,
+            "timeMinSec": "89:53",
+            "lastUpdated": "2025-11-02T13:28:26Z",
+            "timestamp": "2025-11-02T13:22:19Z",
+            "type": "YC",
+            "teamOfficialId": "80f3iwkl94nf7k4k9yabnlfit",
+            "officialName": "P. Zanetti",
+            "optaEventId": "2868009707",
+            "cardReason": "Dissent"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 55,
+            "timeMinSec": "54:36",
+            "lastUpdated": "2025-11-02T12:47:14Z",
+            "timestamp": "2025-11-02T12:47:03Z",
+            "playerOnId": "ahgd3on22t4h7gg9ipnj1itw5",
+            "playerOnName": "N. Barella",
+            "playerOffId": "dpcws493fepch23sk26m1a8yd",
+            "playerOffName": "P. Zieliński",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 55,
+            "timeMinSec": "54:48",
+            "lastUpdated": "2025-11-02T12:48:22Z",
+            "timestamp": "2025-11-02T12:47:14Z",
+            "playerOnId": "1v6nfd46wx11jbfertslccbo4",
+            "playerOnName": "F. Esposito",
+            "playerOffId": "ejbp3sxls7lgrg6y3a9q4u978",
+            "playerOffName": "A. Bonny",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 55,
+            "timeMinSec": "54:50",
+            "lastUpdated": "2025-11-02T12:47:32Z",
+            "timestamp": "2025-11-02T12:47:16Z",
+            "playerOnId": "2r6hs8npijvt4wekd059t6tx",
+            "playerOnName": "D. Dumfries",
+            "playerOffId": "7rfw6pyjslb3p5q7gmoj1ysmi",
+            "playerOffName": "Luis Henrique",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 65,
+            "timeMinSec": "64:41",
+            "lastUpdated": "2025-11-02T12:57:20Z",
+            "timestamp": "2025-11-02T12:57:07Z",
+            "playerOnId": "19856wqwrmzmvfw9thf0tzrv9",
+            "playerOnName": "F. Dimarco",
+            "playerOffId": "4d17grk2qflzake218uz76uei",
+            "playerOffName": "Carlos Augusto",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:37",
+            "lastUpdated": "2025-11-02T13:05:20Z",
+            "timestamp": "2025-11-02T13:05:03Z",
+            "playerOnId": "8lg7bwc6k73s2x0zd236pbomi",
+            "playerOnName": "D. Mosquera",
+            "playerOffId": "adrn1x15rsehvnava8q9ofuvo",
+            "playerOffName": "G. Orban",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:38",
+            "lastUpdated": "2025-11-02T13:05:04Z",
+            "timestamp": "2025-11-02T13:05:04Z",
+            "playerOnId": "2r3mojnewwtd6bts6w931ho15",
+            "playerOnName": "C. Niasse",
+            "playerOffId": "alrmqpg2y5f7xqqpgubwvx0q1",
+            "playerOffName": "A. Bernede",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 80,
+            "timeMinSec": "79:22",
+            "lastUpdated": "2025-11-02T13:11:54Z",
+            "timestamp": "2025-11-02T13:11:48Z",
+            "playerOnId": "amvonu36at4dg7ksi1ioczi3u",
+            "playerOnName": "A. Sarr",
+            "playerOffId": "1e03r0jzxkpqbfiao98w06cr8",
+            "playerOffName": "Giovane",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "3vo5mpj7catp66nrwwqiuhuup",
+            "periodId": 2,
+            "timeMin": 88,
+            "timeMinSec": "87:03",
+            "lastUpdated": "2025-11-02T13:19:46Z",
+            "timestamp": "2025-11-02T13:19:29Z",
+            "playerOnId": "4qejyummzkrfllds8ord642qx",
+            "playerOnName": "D. Frattesi",
+            "playerOffId": "6u7iuum6kqfwb4pbw5lsoff56",
+            "playerOffName": "P. Sučić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "ap6blbxhq9elm62vw6tutzlwg",
+            "periodId": 2,
+            "timeMin": 88,
+            "timeMinSec": "87:23",
+            "lastUpdated": "2025-11-02T13:19:55Z",
+            "timestamp": "2025-11-02T13:19:49Z",
+            "playerOnId": "74o97lnqpku6m9svks66qbend",
+            "playerOnName": "A. Harroui",
+            "playerOffId": "cxjuod6b1ro67656dxwhpqqc5",
+            "playerOffName": "J. Akpa Akpro",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "54hbclb1wbvza3t9wo3vfso9h",
+              "type": "Main",
+              "firstName": "Daniele",
+              "lastName": "Doveri",
+              "shortFirstName": "Daniele",
+              "shortLastName": "Doveri"
+            },
+            {
+              "id": "267un9y2zro1irz49svfuepxx",
+              "type": "Assistant referee 1",
+              "firstName": "Alessandro",
+              "lastName": "Lo Cicero",
+              "shortFirstName": "Alessandro",
+              "shortLastName": "Lo Cicero"
+            },
+            {
+              "id": "aerneig2yozlzaxq9ac675w4p",
+              "type": "Assistant referee 2",
+              "firstName": "Valerio",
+              "lastName": "Vecchi",
+              "shortFirstName": "Valerio",
+              "shortLastName": "Vecchi"
+            },
+            {
+              "id": "4vn9fawqk7c4d2y73hpobyj8p",
+              "type": "Fourth official",
+              "firstName": "Giuseppe",
+              "lastName": "Collu",
+              "shortFirstName": "Giuseppe",
+              "shortLastName": "Collu"
+            },
+            {
+              "id": "7rodcf5hb5ngw27iszhobulsl",
+              "type": "Video Assistant Referee",
+              "firstName": "Gianluca",
+              "lastName": "Aureliano",
+              "shortFirstName": "Gianluca",
+              "shortLastName": "Aureliano"
+            },
+            {
+              "id": "4wvxc13d1hcimm76bg8q9d5h",
+              "type": "Assistant VAR Official",
+              "firstName": "Rosario",
+              "lastName": "Abisso",
+              "shortFirstName": "Rosario",
+              "shortLastName": "Abisso"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "digmzny5no6kxh6hfopalgahg",
+        "coverageLevel": "13",
+        "date": "2025-11-01Z",
+        "time": "19:45:00Z",
+        "localDate": "2025-11-01",
+        "localTime": "20:45:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-02T00:15:46Z",
+        "description": "Cremonese vs Juventus",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "af91jdcs6x0bqkmdb78rokod2",
+            "name": "Cremonese",
+            "shortName": "Cremonese",
+            "officialName": "US Cremonese",
+            "code": "CRE",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "bqbbqm98ud8obe45ds9ohgyrd",
+            "name": "Juventus",
+            "shortName": "Juventus",
+            "officialName": "Juventus FC",
+            "code": "JUV",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "6icm6v478h5b1959su9twh322",
+          "neutral": "no",
+          "longName": "Stadio Giovanni Zini",
+          "shortName": "Stadio Giovanni Zini",
+          "latitude": "45.140164168",
+          "longitude": "10.034830570"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "away",
+          "matchLengthMin": 99,
+          "matchLengthSec": 17,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-01T19:45:44Z",
+              "end": "2025-11-01T20:33:44Z",
+              "lengthMin": 48,
+              "lengthSec": 0,
+              "announcedInjuryTime": 180
+            },
+            {
+              "id": 2,
+              "start": "2025-11-01T20:48:53Z",
+              "end": "2025-11-01T21:40:10Z",
+              "lengthMin": 51,
+              "lengthSec": 17,
+              "announcedInjuryTime": 360
+            }
+          ],
+          "scores": {
+            "ht": { "home": 0, "away": 1 },
+            "ft": { "home": 1, "away": 2 },
+            "total": { "home": 1, "away": 2 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 1,
+            "timeMin": 2,
+            "timeMinSec": "1:25",
+            "lastUpdated": "2025-11-01T19:47:21Z",
+            "timestamp": "2025-11-01T19:47:10Z",
+            "type": "G",
+            "scorerId": "555z9bynvux7oruirg67r8i51",
+            "scorerName": "F. Kostić",
+            "optaEventId": "2867632839",
+            "homeScore": 0,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 68,
+            "timeMinSec": "67:08",
+            "lastUpdated": "2025-11-01T21:11:22Z",
+            "timestamp": "2025-11-01T21:11:01Z",
+            "type": "G",
+            "scorerId": "7ohgxs03szerp6mwiiv58ryay",
+            "scorerName": "A. Cambiaso",
+            "optaEventId": "2867705687",
+            "homeScore": 0,
+            "awayScore": 2
+          },
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:30",
+            "lastUpdated": "2025-11-01T21:27:22Z",
+            "timestamp": "2025-11-01T21:26:23Z",
+            "type": "G",
+            "scorerId": "6v1o4s2acog9guff3folo1jh1",
+            "scorerName": "J. Vardy",
+            "assistPlayerId": "776qa4yrwh5beenw70cfwh59l",
+            "assistPlayerName": "D. Johnsen",
+            "optaEventId": "2867716255",
+            "homeScore": 1,
+            "awayScore": 2
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 74,
+            "timeMinSec": "73:25",
+            "lastUpdated": "2025-11-01T21:17:28Z",
+            "timestamp": "2025-11-01T21:17:19Z",
+            "type": "YC",
+            "playerId": "ckzn72wo51pmw475t9tl6vr2t",
+            "playerName": "M. Bianchetti",
+            "optaEventId": "2867710125",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 96,
+            "timeMinSec": "95:23",
+            "lastUpdated": "2025-11-01T21:39:25Z",
+            "timestamp": "2025-11-01T21:39:16Z",
+            "type": "YC",
+            "teamOfficialId": "cw5l8kcfxcad4aumq22tz561h",
+            "officialName": "L. Spalletti",
+            "optaEventId": "2867724437",
+            "cardReason": "Dissent"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 62,
+            "timeMinSec": "61:19",
+            "lastUpdated": "2025-11-01T21:05:18Z",
+            "timestamp": "2025-11-01T21:05:12Z",
+            "playerOnId": "8ok0giwhuu7ax85ngr8tunpey",
+            "playerOnName": "J. Sarmiento",
+            "playerOffId": "98x5xrku2jffo0in2u2htazca",
+            "playerOffName": "W. Bondo",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 64,
+            "timeMinSec": "63:43",
+            "lastUpdated": "2025-11-01T21:07:44Z",
+            "timestamp": "2025-11-01T21:07:36Z",
+            "playerOnId": "2x44f29a52v8kpkkjsuiiywdm",
+            "playerOnName": "Francisco Conceição",
+            "playerOffId": "64ubq0xra74xaunooi8knyajt",
+            "playerOffName": "L. Openda",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 71,
+            "timeMinSec": "70:48",
+            "lastUpdated": "2025-11-01T21:15:09Z",
+            "timestamp": "2025-11-01T21:14:41Z",
+            "playerOnId": "5pe8vrm8k9dwiy5uw2jca4jbp",
+            "playerOnName": "F. Vázquez",
+            "playerOffId": "19gglji6ai70jiu7iqpkaxbyt",
+            "playerOffName": "F. Bonazzoli",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 71,
+            "timeMinSec": "70:54",
+            "lastUpdated": "2025-11-01T21:14:51Z",
+            "timestamp": "2025-11-01T21:14:47Z",
+            "playerOnId": "5y65alckrn3nmcjifxoaor52i",
+            "playerOnName": "M. Faye",
+            "playerOffId": "d3dzhnj9na7marc0c4j0d1zbo",
+            "playerOffName": "R. Floriani Mussolini",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 79,
+            "timeMinSec": "78:31",
+            "lastUpdated": "2025-11-01T21:22:31Z",
+            "timestamp": "2025-11-01T21:22:24Z",
+            "playerOnId": "dowh6oc93ggduous7ligguqne",
+            "playerOnName": "João Mário",
+            "playerOffId": "555z9bynvux7oruirg67r8i51",
+            "playerOffName": "F. Kostić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 79,
+            "timeMinSec": "78:44",
+            "lastUpdated": "2025-11-01T21:22:43Z",
+            "timestamp": "2025-11-01T21:22:37Z",
+            "playerOnId": "7pirs3v9u80j5qy71cmhzbxn8",
+            "playerOnName": "V. Adžić",
+            "playerOffId": "6j0ogojh2b7poyceg7i3k09yi",
+            "playerOffName": "K. Thuram",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "af91jdcs6x0bqkmdb78rokod2",
+            "periodId": 2,
+            "timeMin": 81,
+            "timeMinSec": "80:16",
+            "lastUpdated": "2025-11-01T21:24:38Z",
+            "timestamp": "2025-11-01T21:24:09Z",
+            "playerOnId": "776qa4yrwh5beenw70cfwh59l",
+            "playerOnName": "D. Johnsen",
+            "playerOffId": "20f5apcbciifqyln8hp3cziwa",
+            "playerOffName": "F. Terracciano",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "84:16",
+            "lastUpdated": "2025-11-01T21:28:16Z",
+            "timestamp": "2025-11-01T21:28:09Z",
+            "playerOnId": "bh3b7e2qzh41dltd6h2obpln9",
+            "playerOnName": "D. Rugani",
+            "playerOffId": "288nn7pbq5ewriiyb9o7da86h",
+            "playerOffName": "W. McKennie",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bqbbqm98ud8obe45ds9ohgyrd",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "84:30",
+            "lastUpdated": "2025-11-01T21:28:28Z",
+            "timestamp": "2025-11-01T21:28:24Z",
+            "playerOnId": "b8dd5q3n5irlkcv0ekzqhzc2x",
+            "playerOnName": "J. David",
+            "playerOffId": "3ua8gs8tzx1dkdi9z88kjk9nt",
+            "playerOffName": "D. Vlahović",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "1u496ojfq6c2tm5azuqk6zdg5",
+              "type": "Main",
+              "firstName": "Daniele",
+              "lastName": "Chiffi",
+              "shortFirstName": "Daniele",
+              "shortLastName": "Chiffi"
+            },
+            {
+              "id": "f548yrc26ap0eww9rtb1c83px",
+              "type": "Assistant referee 1",
+              "firstName": "Dario",
+              "lastName": "Cecconi",
+              "shortFirstName": "Dario",
+              "shortLastName": "Cecconi"
+            },
+            {
+              "id": "47sv8j66ft74avyyqs5ldi6z9",
+              "type": "Assistant referee 2",
+              "firstName": "Davide",
+              "lastName": "Moro",
+              "shortFirstName": "Davide",
+              "shortLastName": "Moro"
+            },
+            {
+              "id": "a6lm69vtw2mz9lzbx339gwhjp",
+              "type": "Fourth official",
+              "firstName": "Ivano",
+              "lastName": "Pezzuto",
+              "shortFirstName": "Ivano",
+              "shortLastName": "Pezzuto"
+            },
+            {
+              "id": "1t8lpa7nz8r39fz1sci48sc7p",
+              "type": "Video Assistant Referee",
+              "firstName": "Lorenzo",
+              "lastName": "Maggioni",
+              "shortFirstName": "Lorenzo",
+              "shortLastName": "Maggioni"
+            },
+            {
+              "id": "ep5ncxce5bide1sea2uxhnfth",
+              "type": "Assistant VAR Official",
+              "firstName": "Simone",
+              "lastName": "Sozza",
+              "shortFirstName": "Simone",
+              "shortLastName": "Sozza"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dk1y2p3cuhqk9g9jrvfmk6784",
+        "coverageLevel": "13",
+        "date": "2025-11-01Z",
+        "time": "17:00:00Z",
+        "localDate": "2025-11-01",
+        "localTime": "18:00:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-01T21:30:09Z",
+        "description": "Napoli vs Como",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "gi0l1habji5hpgar77dl5jqe",
+            "name": "Napoli",
+            "shortName": "Napoli",
+            "officialName": "SSC Napoli",
+            "code": "NAP",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "name": "Como",
+            "shortName": "Como",
+            "officialName": "Calcio Como 1907",
+            "code": "COM",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "1ydgub5senls0oawbe6e9kyjd",
+          "neutral": "no",
+          "longName": "Stadio Diego Armando Maradona",
+          "shortName": "Stadio Diego Armando Maradona",
+          "latitude": "40.827974049",
+          "longitude": "14.192930460"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "draw",
+          "matchLengthMin": 98,
+          "matchLengthSec": 25,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-01T17:00:56Z",
+              "end": "2025-11-01T17:50:11Z",
+              "lengthMin": 49,
+              "lengthSec": 15,
+              "announcedInjuryTime": 240
+            },
+            {
+              "id": 2,
+              "start": "2025-11-01T18:06:49Z",
+              "end": "2025-11-01T18:55:59Z",
+              "lengthMin": 49,
+              "lengthSec": 10,
+              "announcedInjuryTime": 240
+            }
+          ],
+          "scores": {
+            "ht": { "home": 0, "away": 0 },
+            "ft": { "home": 0, "away": 0 },
+            "total": { "home": 0, "away": 0 }
+          }
+        },
+        "missedPen": [
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 1,
+            "timeMin": 26,
+            "timeMinSec": "25:30",
+            "lastUpdated": "2025-11-01T17:26:41Z",
+            "timestamp": "2025-11-01T17:26:27Z",
+            "type": "PM",
+            "playerId": "46kq5653o302ebz4o5yzsss0l",
+            "playerName": "Álvaro Morata",
+            "optaEventId": "2867460639"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 1,
+            "timeMin": 26,
+            "timeMinSec": "25:30",
+            "lastUpdated": "2025-11-01T17:27:06Z",
+            "timestamp": "2025-11-01T17:26:27Z",
+            "type": "PS",
+            "playerId": "5syage212151fcixahbq3k8ut",
+            "playerName": "V. Milinković-Savić",
+            "optaEventId": "2867460673"
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 1,
+            "timeMin": 16,
+            "timeMinSec": "15:34",
+            "lastUpdated": "2025-11-01T17:16:38Z",
+            "timestamp": "2025-11-01T17:16:31Z",
+            "type": "YC",
+            "playerId": "6d36zn3fr35yhj70yx5n445qs",
+            "playerName": "M. Perrone",
+            "optaEventId": "2867447349",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 1,
+            "timeMin": 21,
+            "timeMinSec": "20:37",
+            "lastUpdated": "2025-11-01T17:21:40Z",
+            "timestamp": "2025-11-01T17:21:34Z",
+            "type": "YC",
+            "playerId": "3bhy6x04rbwzk0nh1fm59dmnd",
+            "playerName": "F. Anguissa",
+            "optaEventId": "2867454357",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 1,
+            "timeMin": 39,
+            "timeMinSec": "38:13",
+            "lastUpdated": "2025-11-01T17:39:17Z",
+            "timestamp": "2025-11-01T17:39:09Z",
+            "type": "YC",
+            "playerId": "94qw1jp87gqyvae89n11z05ey",
+            "playerName": "I. Smolčić",
+            "optaEventId": "2867478759",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 67,
+            "timeMinSec": "66:09",
+            "lastUpdated": "2025-11-01T18:28:07Z",
+            "timestamp": "2025-11-01T18:27:59Z",
+            "type": "YC",
+            "playerId": "9bba1hgnx5mzpkzeazsoikn9x",
+            "playerName": "M. Politano",
+            "optaEventId": "2867542201",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 72,
+            "timeMinSec": "71:36",
+            "lastUpdated": "2025-11-01T18:33:32Z",
+            "timestamp": "2025-11-01T18:33:25Z",
+            "type": "YC",
+            "playerId": "72im0m7d8rqpsclo4f5crqmsp",
+            "playerName": "E. Elmas",
+            "optaEventId": "2867547307",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 2,
+            "timeMin": 54,
+            "timeMinSec": "53:30",
+            "lastUpdated": "2025-11-01T18:15:28Z",
+            "timestamp": "2025-11-01T18:15:20Z",
+            "type": "YC",
+            "teamOfficialId": "9ajene9yg36713lisnaix8r85",
+            "officialName": "Cesc Fàbregas",
+            "optaEventId": "2867527487",
+            "cardReason": "Dissent"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 1,
+            "timeMin": 8,
+            "timeMinSec": "7:06",
+            "lastUpdated": "2025-11-01T17:08:11Z",
+            "timestamp": "2025-11-01T17:08:03Z",
+            "playerOnId": "cot71zatz9vm1hyzp5ecqhvpx",
+            "playerOnName": "Diego Carlos",
+            "playerOffId": "djpsc1fvcnrh61c071t00gmad",
+            "playerOffName": "M. Kempf",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 1,
+            "timeMin": 38,
+            "timeMinSec": "37:23",
+            "lastUpdated": "2025-11-01T17:38:16Z",
+            "timestamp": "2025-11-01T17:38:20Z",
+            "playerOnId": "72im0m7d8rqpsclo4f5crqmsp",
+            "playerOnName": "E. Elmas",
+            "playerOffId": "5okl8s3e8ad2add75m46ojo4p",
+            "playerOffName": "B. Gilmour",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-11-01T18:05:54Z",
+            "timestamp": "2025-11-01T18:05:49Z",
+            "playerOnId": "d7pzcnoztn30xoj5b2sr9slt6",
+            "playerOnName": "Miguel Gutiérrez",
+            "playerOffId": "9ka7y81b5kst146mhq7mom5ed",
+            "playerOffName": "L. Spinazzola",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 2,
+            "timeMin": 71,
+            "timeMinSec": "70:40",
+            "lastUpdated": "2025-11-01T18:32:38Z",
+            "timestamp": "2025-11-01T18:32:29Z",
+            "playerOnId": "92vjurxjnipl210yanki2oz8q",
+            "playerOnName": "L. da Cunha",
+            "playerOffId": "79dz7zni5fcgh5e70spoj2j8p",
+            "playerOffName": "M. Caqueret",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 2,
+            "timeMin": 71,
+            "timeMinSec": "70:46",
+            "lastUpdated": "2025-11-01T18:32:44Z",
+            "timestamp": "2025-11-01T18:32:36Z",
+            "playerOnId": "1po7tmdv73zfjentt0p20wdlh",
+            "playerOnName": "S. Posch",
+            "playerOffId": "94qw1jp87gqyvae89n11z05ey",
+            "playerOffName": "I. Smolčić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:07",
+            "lastUpdated": "2025-11-01T18:34:06Z",
+            "timestamp": "2025-11-01T18:33:56Z",
+            "playerOnId": "7ew7g18qo649t8ld44omgib55",
+            "playerOnName": "N. Lang",
+            "playerOffId": "7pi4j76iy3cfh0bfkxf9x8ell",
+            "playerOffName": "David Neres",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:28",
+            "lastUpdated": "2025-11-01T18:43:27Z",
+            "timestamp": "2025-11-01T18:43:17Z",
+            "playerOnId": "1p0xp2onnys7jlru55vfgf1pm",
+            "playerOnName": "T. Douvikas",
+            "playerOffId": "46kq5653o302ebz4o5yzsss0l",
+            "playerOffName": "Álvaro Morata",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6uzfw7ahyxg4wrrfxo5u7qt0n",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:54",
+            "lastUpdated": "2025-11-01T18:43:51Z",
+            "timestamp": "2025-11-01T18:43:43Z",
+            "playerOnId": "30ed2aojjzmqigq6vkcrzc8pg",
+            "playerOnName": "Jesús Rodríguez",
+            "playerOffId": "685wka5xc8na423mirotcu238",
+            "playerOffName": "J. Addai",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 87,
+            "timeMinSec": "86:39",
+            "lastUpdated": "2025-11-01T18:48:37Z",
+            "timestamp": "2025-11-01T18:48:28Z",
+            "playerOnId": "6w6ewzxircqxk6dsrs1rvc8ru",
+            "playerOnName": "L. Lucca",
+            "playerOffId": "d364lpc0km51psy3zwc4a6zca",
+            "playerOffName": "R. Højlund",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "gi0l1habji5hpgar77dl5jqe",
+            "periodId": 2,
+            "timeMin": 87,
+            "timeMinSec": "86:40",
+            "lastUpdated": "2025-11-01T18:48:44Z",
+            "timestamp": "2025-11-01T18:48:30Z",
+            "playerOnId": "9y8fnvazj02vy31ljx3du0d79",
+            "playerOnName": "S. Lobotka",
+            "playerOffId": "9bba1hgnx5mzpkzeazsoikn9x",
+            "playerOffName": "M. Politano",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "matchOfficial": [
+            {
+              "id": "2fcbcudmcmil173u39lp8a8d1",
+              "type": "Main",
+              "firstName": "Luca",
+              "lastName": "Zufferli",
+              "shortFirstName": "Luca",
+              "shortLastName": "Zufferli"
+            },
+            {
+              "id": "2z29oqouwsmype1109zllkhyh",
+              "type": "Assistant referee 1",
+              "firstName": "Gamal",
+              "lastName": "Mokhtar",
+              "shortFirstName": "Gamal",
+              "shortLastName": "Mokhtar"
+            },
+            {
+              "id": "ae8kmokppopref5qv0j4o6n3e",
+              "type": "Assistant referee 2",
+              "firstName": "Domenico",
+              "lastName": "Fontemurato",
+              "shortFirstName": "Domenico",
+              "shortLastName": "Fontemurato"
+            },
+            {
+              "id": "1adc9sh6hxoto0v8tuvik07ah",
+              "type": "Fourth official",
+              "firstName": "Valerio",
+              "lastName": "Crezzini",
+              "shortFirstName": "Valerio",
+              "shortLastName": "Crezzini"
+            },
+            {
+              "id": "3ljswpg1997dluzothotr6fv9",
+              "type": "Video Assistant Referee",
+              "firstName": "Marco",
+              "lastName": "Di Bello",
+              "shortFirstName": "Marco",
+              "shortLastName": "Di Bello"
+            },
+            {
+              "id": "4wvxc13d1hcimm76bg8q9d5h",
+              "type": "Assistant VAR Official",
+              "firstName": "Rosario",
+              "lastName": "Abisso",
+              "shortFirstName": "Rosario",
+              "shortLastName": "Abisso"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dlp2qf98lb84w8c5g7qp42mfo",
+        "coverageLevel": "13",
+        "date": "2025-11-01Z",
+        "time": "14:00:00Z",
+        "localDate": "2025-11-01",
+        "localTime": "15:00:00",
+        "week": "10",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-11-02T11:14:25Z",
+        "description": "Udinese vs Atalanta",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "dxq76zcvnokq07cszdx0i6kve",
+            "name": "Udinese",
+            "shortName": "Udinese",
+            "officialName": "Udinese Calcio",
+            "code": "UDI",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "e75syeuawg3ql8nwpi3vr2btz",
+            "name": "Atalanta",
+            "shortName": "Atalanta",
+            "officialName": "Atalanta Bergamasca Calcio",
+            "code": "ATA",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "8uygqu4fxph14u4hv5c7gqawg",
+          "neutral": "no",
+          "longName": "Bluenergy Stadium",
+          "shortName": "Bluenergy Stadium",
+          "latitude": "46.081644302",
+          "longitude": "13.200062513"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "home",
+          "matchLengthMin": 95,
+          "matchLengthSec": 25,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-11-01T14:01:37Z",
+              "end": "2025-11-01T14:47:41Z",
+              "lengthMin": 46,
+              "lengthSec": 4,
+              "announcedInjuryTime": 60
+            },
+            {
+              "id": 2,
+              "start": "2025-11-01T15:04:20Z",
+              "end": "2025-11-01T15:53:41Z",
+              "lengthMin": 49,
+              "lengthSec": 21,
+              "announcedInjuryTime": 240
+            }
+          ],
+          "scores": {
+            "ht": { "home": 1, "away": 0 },
+            "ft": { "home": 1, "away": 0 },
+            "total": { "home": 1, "away": 0 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 1,
+            "timeMin": 40,
+            "timeMinSec": "39:34",
+            "lastUpdated": "2025-11-01T14:42:23Z",
+            "timestamp": "2025-11-01T14:41:12Z",
+            "type": "G",
+            "scorerId": "eu4xivu8i6yla9fcnuncx1ucp",
+            "scorerName": "N. Zaniolo",
+            "assistPlayerId": "95qrrtlyz4ikkzjbgy6exbnit",
+            "assistPlayerName": "H. Kamara",
+            "optaEventId": "2867183935",
+            "homeScore": 1,
+            "awayScore": 0
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 64,
+            "timeMinSec": "63:47",
+            "lastUpdated": "2025-11-01T15:23:26Z",
+            "timestamp": "2025-11-01T15:23:07Z",
+            "type": "YC",
+            "playerId": "95qrrtlyz4ikkzjbgy6exbnit",
+            "playerName": "H. Kamara",
+            "optaEventId": "2867246905",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 66,
+            "timeMinSec": "66:00",
+            "lastUpdated": "2025-11-01T21:19:08Z",
+            "timestamp": "2025-11-01T15:25:20Z",
+            "type": "YC",
+            "playerId": "11r7kkbcv2bn8lar3unczuz8p",
+            "playerName": "N. Krstović",
+            "optaEventId": "2867250613",
+            "cardReason": "Off the ball foul"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 91,
+            "timeMinSec": "90:44",
+            "lastUpdated": "2025-11-01T15:51:46Z",
+            "timestamp": "2025-11-01T15:50:04Z",
+            "type": "YC",
+            "playerId": "7ox43isyywsnrfcd56nm65be",
+            "playerName": "C. De Ketelaere",
+            "optaEventId": "2867299139",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 94,
+            "timeMinSec": "93:30",
+            "lastUpdated": "2025-11-01T15:53:40Z",
+            "timestamp": "2025-11-01T15:52:50Z",
+            "type": "YC",
+            "playerId": "4aqkgskbra4wsoo7a8uw7xl9l",
+            "playerName": "Éderson",
+            "optaEventId": "2867301193",
+            "cardReason": "Foul"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 59,
+            "timeMinSec": "58:35",
+            "lastUpdated": "2025-11-01T15:18:02Z",
+            "timestamp": "2025-11-01T15:17:55Z",
+            "playerOnId": "11r7kkbcv2bn8lar3unczuz8p",
+            "playerOnName": "N. Krstović",
+            "playerOffId": "4ml8pyt3rxwxakjxslg0c8kb9",
+            "playerOffName": "G. Scamacca",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 59,
+            "timeMinSec": "58:37",
+            "lastUpdated": "2025-11-01T15:18:08Z",
+            "timestamp": "2025-11-01T15:17:57Z",
+            "playerOnId": "8d04q3yp2kouwog0lj0s7ew2x",
+            "playerOnName": "A. Lookman",
+            "playerOffId": "448wxnlqhqqf2hcecwut90n6y",
+            "playerOffName": "K. Sulemana",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 69,
+            "timeMinSec": "68:39",
+            "lastUpdated": "2025-11-01T15:28:05Z",
+            "timestamp": "2025-11-01T15:27:59Z",
+            "playerOnId": "7qk6gr48g3n1jfzz2tgb3iz1l",
+            "playerOnName": "J. Piotrowski",
+            "playerOffId": "d19yalwh3i2olvpwoi89feqjt",
+            "playerOffName": "J. Ekkelenkamp",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 69,
+            "timeMinSec": "68:57",
+            "lastUpdated": "2025-11-01T15:28:31Z",
+            "timestamp": "2025-11-01T15:28:18Z",
+            "playerOnId": "dqazrm2wmu9zqpvp8xbeeb7jd",
+            "playerOnName": "V. Bayo",
+            "playerOffId": "eu4xivu8i6yla9fcnuncx1ucp",
+            "playerOffName": "N. Zaniolo",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 75,
+            "timeMinSec": "74:59",
+            "lastUpdated": "2025-11-01T21:19:08Z",
+            "timestamp": "2025-11-01T15:34:19Z",
+            "playerOnId": "b4qo4uwejb2o323k7lgefzac4",
+            "playerOnName": "M. Palma",
+            "playerOffId": "8kioh2rzit592d4zwjoqsftas",
+            "playerOffName": "N. Bertola",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 76,
+            "timeMinSec": "75:08",
+            "lastUpdated": "2025-11-01T15:34:41Z",
+            "timestamp": "2025-11-01T15:34:28Z",
+            "playerOnId": "dfckk0xst90yjlep74tvups5x",
+            "playerOnName": "K. Ehizibue",
+            "playerOffId": "7kbn6vt37rfgd9yszzvx9idm2",
+            "playerOffName": "A. Zanoli",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 77,
+            "timeMinSec": "76:28",
+            "lastUpdated": "2025-11-01T15:36:05Z",
+            "timestamp": "2025-11-01T15:35:48Z",
+            "playerOnId": "7ox43isyywsnrfcd56nm65be",
+            "playerOnName": "C. De Ketelaere",
+            "playerOffId": "bl76cebhta912vfi9z7ky32p6",
+            "playerOffName": "L. Samardžić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 77,
+            "timeMinSec": "76:29",
+            "lastUpdated": "2025-11-01T15:35:56Z",
+            "timestamp": "2025-11-01T15:35:49Z",
+            "playerOnId": "aripnzu9yo2wlr8ud93ufdhih",
+            "playerOnName": "R. Bellanova",
+            "playerOffId": "du4ciqofpkn3nei5q3huwlnje",
+            "playerOffName": "N. Zalewski",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "e75syeuawg3ql8nwpi3vr2btz",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "84:04",
+            "lastUpdated": "2025-11-01T15:43:31Z",
+            "timestamp": "2025-11-01T15:43:24Z",
+            "playerOnId": "1f37bo8dikes3350u2a0h9hm2",
+            "playerOnName": "M. Brescianini",
+            "playerOffId": "cis0z72hgahfnfjduk7hdnz3e",
+            "playerOffName": "O. Kossounou",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "dxq76zcvnokq07cszdx0i6kve",
+            "periodId": 2,
+            "timeMin": 86,
+            "timeMinSec": "85:39",
+            "lastUpdated": "2025-11-01T15:45:11Z",
+            "timestamp": "2025-11-01T15:44:59Z",
+            "playerOnId": "488vwilxllk6nhf4o1wrh0gve",
+            "playerOnName": "Oier Zarraga",
+            "playerOffId": "elhmf9cc26ec5p1wnwonuxf4l",
+            "playerOffName": "A. Buksa",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "attendance": "20167",
+          "matchOfficial": [
+            {
+              "id": "c7vaokifueeyx5rrypmbbzjkl",
+              "type": "Main",
+              "firstName": "Michael",
+              "lastName": "Fabbri",
+              "shortFirstName": "Michael",
+              "shortLastName": "Fabbri"
+            },
+            {
+              "id": "8xf3fol589o87spejdk468222",
+              "type": "Assistant referee 1",
+              "firstName": "Daisuke Emanuele",
+              "lastName": "Yoshikawa",
+              "shortFirstName": "Daisuke Emanuele",
+              "shortLastName": "Yoshikawa"
+            },
+            {
+              "id": "52hn507gbprissrw4oriwonh1",
+              "type": "Assistant referee 2",
+              "firstName": "Marco",
+              "lastName": "Ricci",
+              "shortFirstName": "Marco",
+              "shortLastName": "Ricci"
+            },
+            {
+              "id": "3xte6fx9ifqwhmilnzt3c7y7d",
+              "type": "Fourth official",
+              "firstName": "Andrea",
+              "lastName": "Calzavara",
+              "shortFirstName": "Andrea",
+              "shortLastName": "Calzavara"
+            },
+            {
+              "id": "2536vdmiuomwgpmi12skw2ead",
+              "type": "Video Assistant Referee",
+              "firstName": "Marco",
+              "lastName": "Serra",
+              "shortFirstName": "Marco",
+              "shortLastName": "Serra"
+            },
+            {
+              "id": "avmzkg92ui0qefxpfsc8uzbv9",
+              "type": "Assistant VAR Official",
+              "firstName": "Marco",
+              "lastName": "Piccinini",
+              "shortFirstName": "Marco",
+              "shortLastName": "Piccinini"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "dhnuk2lkv2t2krxmz9ezd2vpw",
+        "coverageLevel": "13",
+        "date": "2025-10-30Z",
+        "time": "19:45:00Z",
+        "localDate": "2025-10-30",
+        "localTime": "20:45:00",
+        "week": "9",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-10-31T00:25:15Z",
+        "description": "Pisa vs Lazio",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "bfztlrr6176xsdt2bmp0u1d2d",
+            "name": "Pisa",
+            "shortName": "Pisa",
+            "officialName": "Pisa Sporting Club",
+            "code": "PIS",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "btcy9nra9ak4m22ovr2ia6m5v",
+            "name": "Lazio",
+            "shortName": "Lazio",
+            "officialName": "SS Lazio",
+            "code": "LAZ",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "bohw04nmt77yy9hdyycxgk070",
+          "neutral": "no",
+          "longName": "Arena Garibaldi - Stadio Romeo Anconetani",
+          "shortName": "Arena Garibaldi - Stadio Romeo Anconetani",
+          "latitude": "43.725293078",
+          "longitude": "10.400190353"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "draw",
+          "matchLengthMin": 95,
+          "matchLengthSec": 8,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-10-30T19:49:26Z",
+              "end": "2025-10-30T20:35:34Z",
+              "lengthMin": 46,
+              "lengthSec": 8,
+              "announcedInjuryTime": 60
+            },
+            {
+              "id": 2,
+              "start": "2025-10-30T20:51:48Z",
+              "end": "2025-10-30T21:40:48Z",
+              "lengthMin": 49,
+              "lengthSec": 0,
+              "announcedInjuryTime": 240
+            }
+          ],
+          "scores": {
+            "ht": { "home": 0, "away": 0 },
+            "ft": { "home": 0, "away": 0 },
+            "total": { "home": 0, "away": 0 }
+          }
+        },
+        "card": [
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 1,
+            "timeMin": 41,
+            "timeMinSec": "40:34",
+            "lastUpdated": "2025-10-30T20:30:07Z",
+            "timestamp": "2025-10-30T20:30:00Z",
+            "type": "YC",
+            "playerId": "e3watd4hjax0splswksn79o9g",
+            "playerName": "D. Denoon",
+            "optaEventId": "2866534585",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 61,
+            "timeMinSec": "60:47",
+            "lastUpdated": "2025-10-30T21:07:42Z",
+            "timestamp": "2025-10-30T21:07:35Z",
+            "type": "YC",
+            "playerId": "pconfrmsdy9aikioqz9s9lg5",
+            "playerName": "J. Cuadrado",
+            "optaEventId": "2866551509",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 75,
+            "timeMinSec": "74:05",
+            "lastUpdated": "2025-10-30T21:21:08Z",
+            "timestamp": "2025-10-30T21:20:53Z",
+            "type": "YC",
+            "playerId": "asvqr3i5wcjiajxipt1qvldyh",
+            "playerName": "M. Guendouzi",
+            "optaEventId": "2866557173",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 82,
+            "timeMinSec": "81:15",
+            "lastUpdated": "2025-10-30T21:28:16Z",
+            "timestamp": "2025-10-30T21:28:03Z",
+            "type": "YC",
+            "playerId": "d02p1ldr57bkxcpmq12vtvhsl",
+            "playerName": "Pedro",
+            "optaEventId": "2866559703",
+            "cardReason": "Foul"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-10-30T20:51:29Z",
+            "timestamp": "2025-10-30T20:51:25Z",
+            "playerOnId": "d02p1ldr57bkxcpmq12vtvhsl",
+            "playerOnName": "Pedro",
+            "playerOffId": "3mqhkh4iz4kesvmqui3hupgmi",
+            "playerOffName": "B. Dia",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 46,
+            "timeMinSec": "45:00",
+            "lastUpdated": "2025-10-30T20:51:35Z",
+            "timestamp": "2025-10-30T20:51:25Z",
+            "playerOnId": "19xao2zbulnj2ui07q0zc67rp",
+            "playerOnName": "A. Calabresi",
+            "playerOffId": "e3watd4hjax0splswksn79o9g",
+            "playerOffName": "D. Denoon",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 58,
+            "timeMinSec": "57:38",
+            "lastUpdated": "2025-10-30T21:04:43Z",
+            "timestamp": "2025-10-30T21:04:26Z",
+            "playerOnId": "9462218yklkts6mod3cbfryz9",
+            "playerOnName": "M. Vecino",
+            "playerOffId": "7y5qwgl0xu7btfd7yxgeb2gut",
+            "playerOffName": "T. Bašić",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 58,
+            "timeMinSec": "57:50",
+            "lastUpdated": "2025-10-30T21:04:53Z",
+            "timestamp": "2025-10-30T21:04:38Z",
+            "playerOnId": "8w2rfa3vnu6t1a37510374nv9",
+            "playerOnName": "M. Lazzari",
+            "playerOffId": "d7xdtkzw3h749ngi4sobn6kmh",
+            "playerOffName": "L. Pellegrini",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 61,
+            "timeMinSec": "60:06",
+            "lastUpdated": "2025-10-30T21:07:00Z",
+            "timestamp": "2025-10-30T21:06:54Z",
+            "playerOnId": "7hukebiijqntuvetwzralzuju",
+            "playerOnName": "O. Provstgaard",
+            "playerOffId": "5gond4ss348863bc1768s4q",
+            "playerOffName": "Mario Gila",
+            "subReason": "Injury"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 65,
+            "timeMinSec": "64:28",
+            "lastUpdated": "2025-10-30T21:11:16Z",
+            "timestamp": "2025-10-30T21:11:16Z",
+            "playerOnId": "6u6mobmk6lpvwebo76ddxr3s9",
+            "playerOnName": "M. Léris",
+            "playerOffId": "4tir4q39uy0c71m8zfxvynd9l",
+            "playerOffName": "M. Tramoni",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 65,
+            "timeMinSec": "64:30",
+            "lastUpdated": "2025-10-30T21:11:34Z",
+            "timestamp": "2025-10-30T21:11:18Z",
+            "playerOnId": "22ck04xk148cks27zwby83d1x",
+            "playerOnName": "S. Moreo",
+            "playerOffId": "pconfrmsdy9aikioqz9s9lg5",
+            "playerOffName": "J. Cuadrado",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "bfztlrr6176xsdt2bmp0u1d2d",
+            "periodId": 2,
+            "timeMin": 65,
+            "timeMinSec": "64:57",
+            "lastUpdated": "2025-10-30T21:11:49Z",
+            "timestamp": "2025-10-30T21:11:45Z",
+            "playerOnId": "3o7gvykqi9ldgjrzxl14dqas4",
+            "playerOnName": "E. Akinsanmiro",
+            "playerOffId": "93cnkzi86q36c8n86mo35q5t5",
+            "playerOffName": "M. Marin",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "btcy9nra9ak4m22ovr2ia6m5v",
+            "periodId": 2,
+            "timeMin": 81,
+            "timeMinSec": "80:22",
+            "lastUpdated": "2025-10-30T21:27:16Z",
+            "timestamp": "2025-10-30T21:27:10Z",
+            "playerOnId": "71gwdg60saiwwwnnv6is52may",
+            "playerOnName": "T. Noslin",
+            "playerOffId": "5ec6f4mm3rwjm0fgis0k3cmp5",
+            "playerOffName": "G. Isaksen",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "attendance": "10101",
+          "matchOfficial": [
+            {
+              "id": "duv78hmf7q5p4m9nfrcenqms5",
+              "type": "Main",
+              "firstName": "Davide",
+              "lastName": "Massa",
+              "shortFirstName": "Davide",
+              "shortLastName": "Massa"
+            },
+            {
+              "id": "ecqhupinnxtx245wc2m5wyok5",
+              "type": "Assistant referee 1",
+              "firstName": "Pietro",
+              "lastName": "Dei Giudici",
+              "shortFirstName": "Pietro",
+              "shortLastName": "Dei Giudici"
+            },
+            {
+              "id": "72z2qdx1ua85v7cu338trl6tx",
+              "type": "Assistant referee 2",
+              "firstName": "Marco",
+              "lastName": "Trinchieri",
+              "shortFirstName": "Marco",
+              "shortLastName": "Trinchieri"
+            },
+            {
+              "id": "c7vaokifueeyx5rrypmbbzjkl",
+              "type": "Fourth official",
+              "firstName": "Michael",
+              "lastName": "Fabbri",
+              "shortFirstName": "Michael",
+              "shortLastName": "Fabbri"
+            },
+            {
+              "id": "1t8lpa7nz8r39fz1sci48sc7p",
+              "type": "Video Assistant Referee",
+              "firstName": "Lorenzo",
+              "lastName": "Maggioni",
+              "shortFirstName": "Lorenzo",
+              "shortLastName": "Maggioni"
+            },
+            {
+              "id": "3vdfwsaf948qkbif1abdni505",
+              "type": "Assistant VAR Official",
+              "firstName": "Davide",
+              "lastName": "Ghersini",
+              "shortFirstName": "Davide",
+              "shortLastName": "Ghersini"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "matchInfo": {
+        "id": "df7pc4tsmi40f808ft7kkvvo4",
+        "coverageLevel": "13",
+        "date": "2025-10-30Z",
+        "time": "17:30:00Z",
+        "localDate": "2025-10-30",
+        "localTime": "18:30:00",
+        "week": "9",
+        "numberOfPeriods": 2,
+        "periodLength": 45,
+        "var": "1",
+        "lastUpdated": "2025-10-31T13:47:38Z",
+        "description": "Cagliari vs Sassuolo",
+        "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+        "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+        "competition": {
+          "id": "1r097lpxe0xn03ihb7wi98kao",
+          "name": "Serie A",
+          "knownName": "Italian Serie A",
+          "sponsorName": "Serie A Enilive",
+          "competitionCode": "SEA",
+          "competitionFormat": "Domestic league",
+          "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+        },
+        "tournamentCalendar": {
+          "id": "emdmtfr1v8rey2qru3xzfwges",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "2025/2026"
+        },
+        "stage": {
+          "id": "en87r3dm6rkg8jmx58xstsufo",
+          "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+          "startDate": "2025-08-23Z",
+          "endDate": "2026-05-24Z",
+          "name": "Regular Season"
+        },
+        "contestant": [
+          {
+            "id": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "name": "Cagliari",
+            "shortName": "Cagliari",
+            "officialName": "Cagliari Calcio",
+            "code": "CAG",
+            "position": "home",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          },
+          {
+            "id": "6tuibxq39fdryu8ou06wcm0q3",
+            "name": "Sassuolo",
+            "shortName": "Sassuolo",
+            "officialName": "US Sassuolo Calcio",
+            "code": "SAS",
+            "position": "away",
+            "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+          }
+        ],
+        "venue": {
+          "id": "an2h20c3ta50ztmpnt11kz696",
+          "neutral": "no",
+          "longName": "Unipol Domus",
+          "shortName": "Unipol Domus",
+          "latitude": "39.199802357",
+          "longitude": "9.137473349"
+        }
+      },
+      "liveData": {
+        "matchDetails": {
+          "periodId": 14,
+          "matchStatus": "Played",
+          "winner": "away",
+          "matchLengthMin": 100,
+          "matchLengthSec": 23,
+          "period": [
+            {
+              "id": 1,
+              "start": "2025-10-30T17:30:07Z",
+              "end": "2025-10-30T18:17:10Z",
+              "lengthMin": 47,
+              "lengthSec": 3,
+              "announcedInjuryTime": 120
+            },
+            {
+              "id": 2,
+              "start": "2025-10-30T18:32:58Z",
+              "end": "2025-10-30T19:26:18Z",
+              "lengthMin": 53,
+              "lengthSec": 20,
+              "announcedInjuryTime": 360
+            }
+          ],
+          "scores": {
+            "ht": { "home": 0, "away": 0 },
+            "ft": { "home": 1, "away": 2 },
+            "total": { "home": 1, "away": 2 }
+          }
+        },
+        "goal": [
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 54,
+            "timeMinSec": "53:35",
+            "lastUpdated": "2025-10-30T18:41:48Z",
+            "timestamp": "2025-10-30T18:41:34Z",
+            "type": "G",
+            "scorerId": "27xj7me8icr5ptta7kwx0kfs9",
+            "scorerName": "A. Laurienté",
+            "optaEventId": "2866484045",
+            "homeScore": 0,
+            "awayScore": 1
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 65,
+            "timeMinSec": "64:17",
+            "lastUpdated": "2025-10-30T18:53:19Z",
+            "timestamp": "2025-10-30T18:52:16Z",
+            "type": "G",
+            "scorerId": "153ljvbov0n176vm9fdaizoix",
+            "scorerName": "A. Pinamonti",
+            "assistPlayerId": "bh9jia8qgkhpm5xn82bx0hhck",
+            "assistPlayerName": "C. Volpato",
+            "optaEventId": "2866487715",
+            "homeScore": 0,
+            "awayScore": 2
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 73,
+            "timeMinSec": "72:04",
+            "lastUpdated": "2025-10-30T19:01:25Z",
+            "timestamp": "2025-10-30T19:00:03Z",
+            "type": "G",
+            "scorerId": "c4n7kjp8c47trslpssnyqjo16",
+            "scorerName": "S. Esposito",
+            "assistPlayerId": "ancokw84xekm3uve7tnoiiju",
+            "assistPlayerName": "M. Felici",
+            "optaEventId": "2866489941",
+            "homeScore": 1,
+            "awayScore": 2
+          }
+        ],
+        "card": [
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 1,
+            "timeMin": 12,
+            "timeMinSec": "11:30",
+            "lastUpdated": "2025-10-30T17:41:53Z",
+            "timestamp": "2025-10-30T17:41:38Z",
+            "type": "YC",
+            "playerId": "8ofihttdgz6nyxxon2zim7x0p",
+            "playerName": "M. Folorunsho",
+            "optaEventId": "2866456583",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 1,
+            "timeMin": 37,
+            "timeMinSec": "36:42",
+            "lastUpdated": "2025-10-30T18:07:02Z",
+            "timestamp": "2025-10-30T18:06:50Z",
+            "type": "YC",
+            "playerId": "cc04mat3snly9oe4bt7xaeooa",
+            "playerName": "K. Thorstvedt",
+            "optaEventId": "2866467123",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 58,
+            "timeMinSec": "57:21",
+            "lastUpdated": "2025-10-30T18:45:28Z",
+            "timestamp": "2025-10-30T18:45:20Z",
+            "type": "YC",
+            "playerId": "2uvexgjeidkvy6qu4i2nf14a",
+            "playerName": "A. Obert",
+            "optaEventId": "2866485579",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 86,
+            "timeMinSec": "85:02",
+            "lastUpdated": "2025-10-30T19:13:23Z",
+            "timestamp": "2025-10-30T19:13:01Z",
+            "type": "YC",
+            "playerId": "5f13ro5hgmago2bmqtzjw5ey",
+            "playerName": "A. Fadera",
+            "optaEventId": "2866496581",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 89,
+            "timeMinSec": "88:29",
+            "lastUpdated": "2025-10-30T19:17:01Z",
+            "timestamp": "2025-10-30T19:16:28Z",
+            "type": "YC",
+            "playerId": "cx7olq6m4no1tvyou3j58c2z8",
+            "playerName": "R. Idrissi",
+            "optaEventId": "2866498459",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 90,
+            "timeMinSec": "89:44",
+            "lastUpdated": "2025-10-30T19:17:52Z",
+            "timestamp": "2025-10-30T19:17:43Z",
+            "type": "YC",
+            "playerId": "dnk24js88d4ie661mwo7jkq95",
+            "playerName": "S. Walukiewicz",
+            "optaEventId": "2866499007",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 96,
+            "timeMinSec": "95:18",
+            "lastUpdated": "2025-10-30T19:23:26Z",
+            "timestamp": "2025-10-30T19:23:17Z",
+            "type": "YC",
+            "playerId": "2r1hv8jivl8q2zd3egpipfe38",
+            "playerName": "E. Iannoni",
+            "optaEventId": "2866501657",
+            "cardReason": "Foul"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 97,
+            "timeMinSec": "96:59",
+            "lastUpdated": "2025-10-30T19:25:20Z",
+            "timestamp": "2025-10-30T19:24:58Z",
+            "type": "YC",
+            "playerId": "ab420lzne042a3e3b2lfmy5ii",
+            "playerName": "E. Caprile",
+            "optaEventId": "2866502553",
+            "cardReason": "Argument"
+          }
+        ],
+        "substitute": [
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 62,
+            "timeMinSec": "61:04",
+            "lastUpdated": "2025-10-30T18:49:18Z",
+            "timestamp": "2025-10-30T18:49:03Z",
+            "playerOnId": "1ct0gujao4wvj1ff3aebqgqnd",
+            "playerOnName": "G. Gaetano",
+            "playerOffId": "8ofihttdgz6nyxxon2zim7x0p",
+            "playerOffName": "M. Folorunsho",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 62,
+            "timeMinSec": "61:24",
+            "lastUpdated": "2025-10-30T18:49:38Z",
+            "timestamp": "2025-10-30T18:49:22Z",
+            "playerOnId": "ancokw84xekm3uve7tnoiiju",
+            "playerOnName": "M. Felici",
+            "playerOffId": "13ey9mb0ullya36lpv62pspre",
+            "playerOffName": "G. Zappa",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 74,
+            "timeMinSec": "73:33",
+            "lastUpdated": "2025-10-30T19:01:37Z",
+            "timestamp": "2025-10-30T19:01:32Z",
+            "playerOnId": "72vim7cq99zdjjwivwtr773vu",
+            "playerOnName": "A. Vranckx",
+            "playerOffId": "cc04mat3snly9oe4bt7xaeooa",
+            "playerOffName": "K. Thorstvedt",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 74,
+            "timeMinSec": "73:34",
+            "lastUpdated": "2025-10-30T19:01:46Z",
+            "timestamp": "2025-10-30T19:01:33Z",
+            "playerOnId": "5o8qoe2fv7ppwrwdyx6v5fdd6",
+            "playerOnName": "L. Moro",
+            "playerOffId": "153ljvbov0n176vm9fdaizoix",
+            "playerOffName": "A. Pinamonti",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 74,
+            "timeMinSec": "73:50",
+            "lastUpdated": "2025-10-30T19:02:04Z",
+            "timestamp": "2025-10-30T19:01:49Z",
+            "playerOnId": "5f13ro5hgmago2bmqtzjw5ey",
+            "playerOnName": "A. Fadera",
+            "playerOffId": "27xj7me8icr5ptta7kwx0kfs9",
+            "playerOffName": "A. Laurienté",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 76,
+            "timeMinSec": "75:57",
+            "lastUpdated": "2025-10-30T19:04:02Z",
+            "timestamp": "2025-10-30T19:03:56Z",
+            "playerOnId": "awkjevra745mh5j30bkjp70t1",
+            "playerOnName": "L. Pavoletti",
+            "playerOffId": "8bjzw0pgu2gbwhyfm2k62hv8q",
+            "playerOffName": "G. Borrelli",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:53",
+            "lastUpdated": "2025-10-30T19:10:57Z",
+            "timestamp": "2025-10-30T19:10:52Z",
+            "playerOnId": "e0gv5rugqtsipy89z4rk7hsoa",
+            "playerOnName": "Zito Luvumbo",
+            "playerOffId": "c4n7kjp8c47trslpssnyqjo16",
+            "playerOffName": "S. Esposito",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+            "periodId": 2,
+            "timeMin": 83,
+            "timeMinSec": "82:58",
+            "lastUpdated": "2025-10-31T00:40:57Z",
+            "timestamp": "2025-10-30T19:10:57Z",
+            "playerOnId": "c7u5a6ngr4f839ibw3b0opsk5",
+            "playerOnName": "L. Mazzitelli",
+            "playerOffId": "43rid94d7jz7u5ba4xzb8bbe2",
+            "playerOffName": "M. Adopo",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "84:13",
+            "lastUpdated": "2025-10-30T19:12:20Z",
+            "timestamp": "2025-10-30T19:12:12Z",
+            "playerOnId": "2r1hv8jivl8q2zd3egpipfe38",
+            "playerOnName": "E. Iannoni",
+            "playerOffId": "81rizhub9w9a7ifnf60bbppuc",
+            "playerOffName": "I. Koné",
+            "subReason": "Tactical"
+          },
+          {
+            "contestantId": "6tuibxq39fdryu8ou06wcm0q3",
+            "periodId": 2,
+            "timeMin": 85,
+            "timeMinSec": "84:15",
+            "lastUpdated": "2025-10-30T19:12:26Z",
+            "timestamp": "2025-10-30T19:12:14Z",
+            "playerOnId": "c23q56z612clw2oxpordhrwiy",
+            "playerOnName": "W. Cheddira",
+            "playerOffId": "bh9jia8qgkhpm5xn82bx0hhck",
+            "playerOffName": "C. Volpato",
+            "subReason": "Tactical"
+          }
+        ],
+        "matchDetailsExtra": {
+          "attendance": "15563",
+          "matchOfficial": [
+            {
+              "id": "82ikz6szndi46ls07wufd8r85",
+              "type": "Main",
+              "firstName": "Luca",
+              "lastName": "Pairetto",
+              "shortFirstName": "Luca",
+              "shortLastName": "Pairetto"
+            },
+            {
+              "id": "a7im4qspjcy935no5jctub5xx",
+              "type": "Assistant referee 1",
+              "firstName": "Valerio",
+              "lastName": "Colarossi",
+              "shortFirstName": "Valerio",
+              "shortLastName": "Colarossi"
+            },
+            {
+              "id": "bk9ikdgvo6g1n8aab84enxjze",
+              "type": "Assistant referee 2",
+              "firstName": "Eugenio",
+              "lastName": "Scarpa",
+              "shortFirstName": "Eugenio",
+              "shortLastName": "Scarpa"
+            },
+            {
+              "id": "dvgatcm97naudt20i3252q2fp",
+              "type": "Fourth official",
+              "firstName": "Livio",
+              "lastName": "Marinelli",
+              "shortFirstName": "Livio",
+              "shortLastName": "Marinelli"
+            },
+            {
+              "id": "1a1af5fc1dnjd4puplbstyiuh",
+              "type": "Video Assistant Referee",
+              "firstName": "Giacomo",
+              "lastName": "Camplone",
+              "shortFirstName": "Giacomo",
+              "shortLastName": "Camplone"
+            },
+            {
+              "id": "5sxmv6pf52a8uoaksigfvk2j9",
+              "type": "Assistant VAR Official",
+              "firstName": "Marco",
+              "lastName": "Guida",
+              "shortFirstName": "Marco",
+              "shortLastName": "Guida"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

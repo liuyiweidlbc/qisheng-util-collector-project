@@ -1,0 +1,81 @@
+{
+  "matchInfo": {
+    "id": "dj93wlc4y6a5z30ns89tmayac",
+    "coverageLevel": "13",
+    "date": "2025-11-03Z",
+    "time": "19:45:00Z",
+    "localDate": "2025-11-03",
+    "localTime": "20:45:00",
+    "week": "10",
+    "numberOfPeriods": 2,
+    "periodLength": 45,
+    "var": "1",
+    "lastUpdated": "2025-11-03T07:31:41Z",
+    "description": "Lazio vs Cagliari",
+    "sport": { "id": "289u5typ3vp4ifwh5thalohmq", "name": "Soccer" },
+    "ruleset": { "id": "79plas4983031idr6vw83nuel", "name": "Men" },
+    "competition": {
+      "id": "1r097lpxe0xn03ihb7wi98kao",
+      "name": "Serie A",
+      "knownName": "Italian Serie A",
+      "sponsorName": "Serie A Enilive",
+      "competitionCode": "SEA",
+      "competitionFormat": "Domestic league",
+      "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+    },
+    "tournamentCalendar": {
+      "id": "emdmtfr1v8rey2qru3xzfwges",
+      "startDate": "2025-08-23Z",
+      "endDate": "2026-05-24Z",
+      "name": "2025/2026"
+    },
+    "stage": {
+      "id": "en87r3dm6rkg8jmx58xstsufo",
+      "formatId": "e2q01r9o9jwiq1fls93d1sslx",
+      "startDate": "2025-08-23Z",
+      "endDate": "2026-05-24Z",
+      "name": "Regular Season"
+    },
+    "contestant": [
+      {
+        "id": "btcy9nra9ak4m22ovr2ia6m5v",
+        "name": "Lazio",
+        "shortName": "Lazio",
+        "officialName": "SS Lazio",
+        "code": "LAZ",
+        "position": "home",
+        "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+      },
+      {
+        "id": "5rwlg5cfv1hu7yf0ek1zxpzy3",
+        "name": "Cagliari",
+        "shortName": "Cagliari",
+        "officialName": "Cagliari Calcio",
+        "code": "CAG",
+        "position": "away",
+        "country": { "id": "25f2cmb2r8mk5rj92tzer6kvv", "name": "Italy" }
+      }
+    ],
+    "venue": {
+      "id": "aenrk3ub34bddieyjn1calqu7",
+      "neutral": "no",
+      "longName": "Stadio Olimpico",
+      "shortName": "Stadio Olimpico",
+      "latitude": "41.933947912",
+      "longitude": "12.454757094"
+    }
+  },
+  "liveData": {
+    "matchDetails": { "periodId": 16, "matchStatus": "Fixture" },
+    "preMatchPredictions": [
+      {
+        "type": "Win",
+        "prediction": [
+          { "type": "Home", "probability": "55.734" },
+          { "type": "Away", "probability": "19.868" },
+          { "type": "Draw", "probability": "24.398" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+### IDE ###
+.idea/
+.vscode/*
+!.vscode/sftp*.json.example
+.fastRequest/
+*.iml
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.eggs/
+*.egg-info/
+
+### Secrets ###
+.env
+.env.*
+docs/PAT.txt
+*.pat
+
+### Logs ###
+logs/
+*.log
+*.log.*
+hs_err_pid*.log
+replay_pid*.log
+
+### Generated outputs ###
+*.xlsx
+
+### Empty / local scratch ###
+doh_srv/
+
+### Large scraped cache (keep gen_*.py scripts) ###
+data/opta_teams.json
+data/500-wc-19476.html
+
+### OS ###
+Thumbs.db
+Desktop.ini

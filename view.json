@@ -1,0 +1,36 @@
+{
+	"table": "events_statements_summary_by_digest",
+	"rows":
+	[
+		{
+			"DIGEST_TEXT": "SELECT DISTINCTROW `m` . `match_id_local` FROM `t_cnjc_matches` `m` JOIN `t_cnjc_lottery_draws` `d` ON `m` . `lottery_draw_id` = `d` . `id` WHERE `d` . `lottery_type` = COALESCE (...) AND `m` . `match_id_local` IS NOT NULL AND `m` . `match_id_local` != ? AND `m` . `match_id_local` IN (...)",
+			"cnt": 1478046,
+			"avg_ms": 13.97,
+			"SUM_ROWS_EXAMINED": 5235064487
+		},
+		{
+			"DIGEST_TEXT": "SELECT `t_cnjc_matches` . `id` AS `t_cnjc_matches_id` , `t_cnjc_matches` . `lottery_draw_id` AS `t_cnjc_matches_lottery_draw_id` , `t_cnjc_matches` . `match_num` AS `t_cnjc_matches_match_num` , `t_cnjc_matches` . `league_name` AS `t_cnjc_matches_league_name` , `t_cnjc_matches` . `home_team` AS `t_cnjc_matches_home_team` , `t_cnjc_matches` . `away_team` AS `t_cnjc_matches_away_team` , `t_cnjc_matches` . `full_score` AS `t_cnjc_matches_full_score` , `t_cnjc_matches` . `half_score` AS `t_cnjc_matches_half_score` , `t_cnjc_matches` . `result` AS `t_cnjc_matches_result` , `t_cnjc_matches` . `match_time` AS `t_cnjc_matches_match_time` , `t_cnjc_matches` . `match_id_local` AS `t_cnjc_matches_match_id_local` FROM `t_cnjc_matches` WHERE `t_cnjc_matches` . `lottery_draw_id` = ?",
+			"cnt": 18698,
+			"avg_ms": 0.46,
+			"SUM_ROWS_EXAMINED": 146050
+		},
+		{
+			"DIGEST_TEXT": "SELECT `d` . `draw_number` , `p` . * , `m` . * FROM `t_cnjc_matches` `m` JOIN `t_cnjc_lottery_draws` `d` ON `m` . `lottery_draw_id` = `d` . `id` LEFT JOIN `t_cnjc_prizes` `p` ON `d` . `id` = `p` . `lottery_draw_id` WHERE `d` . `draw_number` = ? AND `d` . `lottery_type` = COALESCE (...)",
+			"cnt": 2491,
+			"avg_ms": 0.9,
+			"SUM_ROWS_EXAMINED": 94176
+		},
+		{
+			"DIGEST_TEXT": "UPDATE `t_cnjc_matches` SET `full_score` = ? , `half_score` = ? WHERE `t_cnjc_matches` . `id` = ?",
+			"cnt": 1073,
+			"avg_ms": 0.35,
+			"SUM_ROWS_EXAMINED": 1073
+		},
+		{
+			"DIGEST_TEXT": "INSERT INTO `t_cnjc_matches` ( `lottery_draw_id` , `match_num` , `league_name` , `home_team` , `away_team` , `full_score` , `half_score` , `result` , `match_time` , `match_id_local` ) VALUES (...)",
+			"cnt": 1032,
+			"avg_ms": 0.34,
+			"SUM_ROWS_EXAMINED": 0
+		}
+	]
+}
