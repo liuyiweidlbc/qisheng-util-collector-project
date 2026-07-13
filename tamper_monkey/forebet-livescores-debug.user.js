@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Forebet Predictions Debug
 // @namespace    https://www.forebet.com/
-// @version      1.4.3
+// @version      1.4.7
 // @description  Forebet predictions: top-5, UCL/UEL/UECL, WC, Championship + upload + extra leagues
 // @match        https://www.forebet.com/*
 // @match        http://www.forebet.com/*
@@ -20,7 +20,7 @@
 
   const LOG_PREFIX = '[Forebet Debug]';
   const PANEL_ID = 'fb-livescores-debug-panel';
-  const SCRIPT_VER = '1.4.3';
+  const SCRIPT_VER = '1.4.7';
   const KAZAKH_TEAM_HINT_RE =
     /\b(turan|ekibastuz|kairat|astana|ordabasy|aktobe|tobol|atyrau|shakhter|kaisar|okzhetpes|zetysu|altai|akbulak|taraz|elimai|kaspiy)\b/i;
   /** Non-England countries that also use "Premier League" in the name */
@@ -106,6 +106,7 @@
   let lastFingerprint = '';
   let domWatchTimer = null;
   let leagueBarSearchBlurTimer = null;
+  let panelCollapsed = false;
 
   function isListPage() {
     return !/\/football\/matches\//i.test(location.pathname);
@@ -901,17 +902,50 @@
     return best;
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  /** Forebet DD/MM/YYYY + 24h clock for upload/API (strip AM/PM, pad fields) */
+  function normalizeForebetKickoff(raw) {
+    const s = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    if (/^(FT|HT|AET|Live|\d{1,3}'?)$/i.test(s)) return s;
+
+    const expandYear = (y) => (y.length === 2 ? `20${y}` : y);
+
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*([AP]M)$/i);
+    if (m) {
+      let h = +m[4];
+      const ampm = m[6].toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      return `${pad2(m[1])}/${pad2(m[2])}/${expandYear(m[3])} ${pad2(h)}:${m[5]}`;
+    }
+
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
+    if (m) {
+      return `${pad2(m[1])}/${pad2(m[2])}/${expandYear(m[3])} ${pad2(m[4])}:${m[5]}`;
+    }
+
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m) return `${pad2(m[1])}/${pad2(m[2])}/${expandYear(m[3])}`;
+
+    if (/^\d{4}-\d{2}-\d{2}(\s+\d{1,2}:\d{2})?$/.test(s)) return s;
+    return s;
+  }
+
   function parseKickoff(row, linkEl) {
     const dateEl = row.querySelector?.('.date_bah');
     if (dateEl) {
-      const d = dateEl.textContent.replace(/\s+/g, ' ').trim();
+      const d = normalizeForebetKickoff(dateEl.textContent);
       if (d) return d;
     }
     const blob = (linkEl?.textContent || '').replace(/\s+/g, ' ');
-    const m = blob.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/i);
-    if (m) return `${m[1]} ${m[2]}`;
+    const m = blob.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M|\d{1,2}:\d{2})/i);
+    if (m) return normalizeForebetKickoff(`${m[1]} ${m[2]}`);
     const m2 = blob.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-    return m2 ? m2[1] : '';
+    return m2 ? normalizeForebetKickoff(m2[1]) : '';
   }
 
   /** FT / live result (not prediction) */
@@ -1239,7 +1273,7 @@
           match_link: cleanMatchLink(r.link),
           country: String(r.country || '').trim(),
           league: String(r.league || '').trim(),
-          kickoff: String(r.kickoff || '').trim(),
+          kickoff: normalizeForebetKickoff(r.kickoff),
           home_team: String(r.home || '').trim(),
           away_team: String(r.away || '').trim(),
           score: String(r.ft || r.predScore || '').trim(),
@@ -1632,8 +1666,17 @@
   function syncLeagueBarVisibility(leagueBar) {
     if (!leagueBar || leagueBar.id !== 'fb-livescores-league-bar') return;
     const panel = document.getElementById(PANEL_ID);
-    const bodyHidden = panel?.querySelector('.body')?.style.display === 'none';
-    leagueBar.style.display = !bodyHidden && leagueBar.dataset.hasLeagues === '1' ? 'flex' : 'none';
+    const collapsed = panel?.classList.contains('collapsed') || panelCollapsed;
+    leagueBar.style.display = !collapsed && leagueBar.dataset.hasLeagues === '1' ? 'flex' : 'none';
+  }
+
+  function setPanelCollapsed(panel, collapsed) {
+    panelCollapsed = collapsed;
+    panel.classList.toggle('collapsed', collapsed);
+    const btn = panel.querySelector('[data-action="collapse"]');
+    if (btn) btn.textContent = collapsed ? 'Expand' : 'Collapse';
+    const leagueBar = panel.querySelector('#fb-livescores-league-bar');
+    if (leagueBar) syncLeagueBarVisibility(leagueBar);
   }
 
   function ensureLeagueBarWhitelistWrap(leagueBar) {
@@ -1680,6 +1723,7 @@
     let panel = document.getElementById(PANEL_ID);
     if (panel) {
       patchLeagueBarPanel(panel);
+      setPanelCollapsed(panel, panelCollapsed);
       return panel;
     }
 
@@ -1694,6 +1738,11 @@
         background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;
         box-shadow:0 8px 32px rgba(0,0,0,.45);font:12px/1.4 system-ui,sans-serif;
         display:flex;flex-direction:column;overflow:hidden}
+      #${PANEL_ID}.collapsed{height:auto;width:max-content;max-width:calc(100vw - 24px)}
+      #${PANEL_ID}.collapsed .hdr{border-bottom:none;flex-wrap:nowrap;gap:8px;padding:6px 10px}
+      #${PANEL_ID}.collapsed .sub,#${PANEL_ID}.collapsed .title-extra,#${PANEL_ID}.collapsed .hdr-extra-btn{display:none!important}
+      #${PANEL_ID}.collapsed .hdr button{margin-left:0}
+      #${PANEL_ID}.collapsed .upload-bar,#${PANEL_ID}.collapsed .league-bar,#${PANEL_ID}.collapsed .body{display:none!important}
       #${PANEL_ID} .hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
         gap:6px;padding:8px 12px;background:#1e293b;border-bottom:1px solid #334155}
       #${PANEL_ID} .hdr button{margin-left:6px;padding:4px 10px;border-radius:6px;
@@ -1738,19 +1787,27 @@
     const hdr = document.createElement('div');
     hdr.className = 'hdr';
     const title = document.createElement('strong');
-    title.textContent = 'Forebet | Debug';
+    const titleExtra = document.createElement('span');
+    titleExtra.className = 'title-extra';
+    titleExtra.textContent = ' | Debug';
+    title.append('Forebet', titleExtra);
     const sub = document.createElement('span');
     sub.className = 'sub';
     sub.id = 'fb-livescores-debug-count';
     sub.textContent = `v${SCRIPT_VER}`;
     const btnUpload = document.createElement('button');
     btnUpload.type = 'button';
+    btnUpload.className = 'hdr-extra-btn';
     btnUpload.dataset.action = 'upload';
     btnUpload.textContent = 'Upload';
     const btnR = document.createElement('button');
+    btnR.type = 'button';
+    btnR.className = 'hdr-extra-btn';
     btnR.textContent = 'Refresh';
     const btnT = document.createElement('button');
-    btnT.textContent = 'Collapse';
+    btnT.type = 'button';
+    btnT.dataset.action = 'collapse';
+    btnT.textContent = panelCollapsed ? 'Expand' : 'Collapse';
     const btnWrap = document.createElement('span');
     btnWrap.append(btnUpload, btnR, btnT);
     hdr.append(title, sub, btnWrap);
@@ -1841,13 +1898,10 @@
     urlInp.addEventListener('blur', () => readUploadConfigFromPanel());
     btnUpload.addEventListener('click', () => uploadRows());
     btnR.onclick = () => scheduleParse(0);
-    btnT.onclick = () => {
-      const hidden = body.style.display === 'none';
-      body.style.display = hidden ? '' : 'none';
-      uploadBar.style.display = hidden ? '' : 'none';
-      if (leagueBar.dataset.hasLeagues === '1') leagueBar.style.display = hidden ? 'flex' : 'none';
-      btnT.textContent = hidden ? 'Collapse' : 'Expand';
-    };
+    btnT.addEventListener('click', () => {
+      setPanelCollapsed(panel, !panel.classList.contains('collapsed'));
+    });
+    setPanelCollapsed(panel, panelCollapsed);
     syncUploadControls(uploadCfg);
     return panel;
   }
@@ -1857,7 +1911,7 @@
     const body = panel.querySelector('.body');
     const subtitle = opts?.subtitle || displaySubtitle(rows.length);
     updatePanelSubtitle(subtitle);
-    body.style.display = '';
+    setPanelCollapsed(panel, panelCollapsed);
     const leagueBar = panel.querySelector('#fb-livescores-league-bar');
     if (leagueBar) syncLeagueBarVisibility(leagueBar);
     body.replaceChildren();

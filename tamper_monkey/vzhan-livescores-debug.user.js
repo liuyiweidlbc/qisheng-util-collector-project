@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vzhan Livescores Debug
 // @namespace    https://www.vzhan310.com/
-// @version      2.3.13
+// @version      2.3.14
 // @description  V站：五大联赛、英冠德乙荷甲澳超日职法乙、瑞典/挪威/芬兰/韩K、欧冠欧联欧协 + 上传 + 其他联赛
 // @match        https://www.vzhan310.com/current
 // @match        https://www.vzhan310.com/current/
@@ -20,8 +20,9 @@
 
   const LOG_PREFIX = '[Vzhan Livescores]';
   const PANEL_ID = 'vz-livescores-debug-panel';
-  const SCRIPT_VER = '2.3.13';
+  const SCRIPT_VER = '2.3.14';
   const EXTRA_LEAGUE_CFG_KEY = 'vz-livescores-extra-leagues';
+  const WHITELIST_LEAGUE_CFG_KEY = 'vz-livescores-deselected-whitelist';
   const LEAGUE_BAR_EXPANDED_KEY = 'vz-livescores-league-bar-expanded';
   const LEAGUE_BAR_AUTO_COLLAPSE_N = 8;
   const UPLOAD_TIMEOUT_MS = 30000;
@@ -206,6 +207,7 @@
   let lastRows = [];
   let lastPreparedRows = [];
   let selectedExtraLeagues = loadSelectedExtraLeagues();
+  let deselectedWhitelistLeagues = loadDeselectedWhitelistLeagues();
   let leagueBarExpanded = loadLeagueBarExpanded();
   let lastNonTargetLeagues = [];
   let lastWhitelistLeagues = [];
@@ -497,6 +499,25 @@
     }
   }
 
+  function loadDeselectedWhitelistLeagues() {
+    try {
+      const raw = localStorage.getItem(WHITELIST_LEAGUE_CFG_KEY);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr.filter(Boolean) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveDeselectedWhitelistLeagues() {
+    try {
+      localStorage.setItem(WHITELIST_LEAGUE_CFG_KEY, JSON.stringify([...deselectedWhitelistLeagues]));
+    } catch (err) {
+      console.warn(LOG_PREFIX, 'save deselected whitelist failed', err);
+    }
+  }
+
   function loadLeagueBarExpanded() {
     try {
       const raw = localStorage.getItem(LEAGUE_BAR_EXPANDED_KEY);
@@ -522,6 +543,19 @@
     saveSelectedExtraLeagues();
     updateLeagueBar(lastPreparedRows);
     rerenderFromPrepared();
+  }
+
+  function toggleWhitelistLeague(label) {
+    if (deselectedWhitelistLeagues.has(label)) deselectedWhitelistLeagues.delete(label);
+    else deselectedWhitelistLeagues.add(label);
+    saveDeselectedWhitelistLeagues();
+    updateLeagueBar(lastPreparedRows);
+    rerenderFromPrepared();
+  }
+
+  function isWhitelistLeagueSelected(country, league) {
+    const label = whitelistLeagueLabel(country, league);
+    return !deselectedWhitelistLeagues.has(label);
   }
 
   function leagueLabelSearchBlob(label) {
@@ -560,8 +594,9 @@
         const row = finalizeRowLeague(r);
         if (isBlockedMatchRow(row)) return false;
         let allowed = false;
-        if (isAllowedLeague(row.country, row.league)) allowed = true;
-        else {
+        if (isAllowedLeague(row.country, row.league)) {
+          allowed = isWhitelistLeagueSelected(row.country, row.league);
+        } else {
           const extraKey = extraLeagueDisplayKey(row);
           allowed = extraKey && selectedExtraLeagues.has(extraKey);
         }
@@ -866,7 +901,7 @@
       renderPanel([], {
         subtitle: displaySubtitle(0),
         emptyMessage: lastPreparedRows.length
-          ? 'No matches for current filters. Toggle extra league buttons above or click Refresh.'
+          ? 'No matches for current filters. Toggle league buttons above or click Refresh.'
           : 'No matches for current filters. Click Refresh.',
       });
       return;
@@ -2685,9 +2720,13 @@
         display:flex;flex-direction:column;overflow:hidden;
       }
       #${PANEL_ID} .hdr{
-        flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
-        gap:6px;padding:8px 12px;background:#1e293b;border-bottom:1px solid #334155;
+        flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:nowrap;
+        gap:8px;padding:8px 12px;background:#1e293b;border-bottom:1px solid #334155;
       }
+      #${PANEL_ID} .hdr-left{
+        flex:1 1 auto;min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+      }
+      #${PANEL_ID} .hdr-actions{flex:0 0 auto;display:flex;align-items:center}
       #${PANEL_ID} .hdr button{
         margin-left:6px;padding:4px 10px;border-radius:6px;border:1px solid #475569;
         background:#334155;color:#fff;cursor:pointer;
@@ -2708,7 +2747,8 @@
       #${PANEL_ID} th{position:sticky;top:0;background:#0f172a;color:#94a3b8;z-index:1}
       #${PANEL_ID} a{color:#38bdf8}
       #${PANEL_ID} .empty{padding:16px;color:#94a3b8}
-      #${PANEL_ID} .sub{font-size:11px;color:#94a3b8;margin-left:8px}
+      #${PANEL_ID} .sub{font-size:11px;color:#94a3b8}
+      #${PANEL_ID} .hdr .ver{font-size:10px;color:#64748b;font-weight:normal}
       #${PANEL_ID} .upload-bar{
         flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:6px;
         padding:6px 12px;background:#0b1220;border-bottom:1px solid #334155;font-size:11px;
@@ -2781,21 +2821,33 @@
       }
       #${PANEL_ID} .league-bar button.league-btn.hidden{display:none}
       #${PANEL_ID} .league-bar button.league-btn.whitelist{
-        border-color:#166534;background:#14532d;color:#dcfce7;cursor:default;
+        border-color:#166534;background:#14532d;color:#dcfce7;cursor:pointer;
       }
-      #${PANEL_ID} .league-bar button.league-btn.whitelist:hover{filter:none}
+      #${PANEL_ID} .league-bar button.league-btn.whitelist.off{
+        border-color:#475569;background:#1f2937;color:#64748b;opacity:.8;
+      }
+      #${PANEL_ID} .league-bar button.league-btn.whitelist:hover{filter:brightness(1.08)}
+      #${PANEL_ID} .league-bar button.league-btn.whitelist.off:hover{filter:brightness(1.12)}
       #${PANEL_ID} .league-bar button.league-btn:hover{filter:brightness(1.08)}
     `;
 
     const hdr = document.createElement('div');
     hdr.className = 'hdr';
+    const hdrLeft = document.createElement('div');
+    hdrLeft.className = 'hdr-left';
     const title = document.createElement('strong');
-    title.textContent = 'Vzhan | Debug';
+    title.append('Vzhan | Debug ');
+    const ver = document.createElement('span');
+    ver.className = 'ver';
+    ver.textContent = `v${SCRIPT_VER}`;
+    title.append(ver);
     const sub = document.createElement('span');
     sub.className = 'sub';
     sub.id = 'vz-livescores-debug-count';
     sub.textContent = '五大+英冠德乙荷甲澳超日职法乙+瑞典/挪威/芬兰/韩K+欧冠欧联欧协';
+    hdrLeft.append(title, sub);
     const btnWrap = document.createElement('div');
+    btnWrap.className = 'hdr-actions';
     const btnUpload = document.createElement('button');
     btnUpload.type = 'button';
     btnUpload.dataset.action = 'upload';
@@ -2809,7 +2861,7 @@
     btnT.dataset.action = 'toggle';
     btnT.textContent = 'Collapse';
     btnWrap.append(btnUpload, btnR, btnT);
-    hdr.append(title, sub, btnWrap);
+    hdr.append(hdrLeft, btnWrap);
 
     const uploadCfg = loadUploadConfig();
     const uploadBar = document.createElement('div');
@@ -2944,6 +2996,8 @@
     btn.dataset.leagueKey = item.label;
     btn.textContent = `${item.label} (${item.count})`;
     btn.title = item.label;
+    if (deselectedWhitelistLeagues.has(item.label)) btn.classList.add('off');
+    btn.addEventListener('click', () => toggleWhitelistLeague(item.label));
     return btn;
   }
 
@@ -2996,8 +3050,9 @@
     const wn = lastWhitelistLeagues.length;
     const n = lastNonTargetLeagues.length;
     const sel = selectedExtraLeagues.size;
+    const wlOff = lastWhitelistLeagues.filter((x) => deselectedWhitelistLeagues.has(x.label)).length;
     const parts = [];
-    if (wn) parts.push(`默认 ${wn}`);
+    if (wn) parts.push(`默认 ${wn}${wlOff ? ` · 关闭 ${wlOff}` : ''}`);
     if (n) parts.push(`其他 ${n}${sel ? ` · 已选 ${sel}` : ''}`);
     summary.textContent = parts.join(' · ');
   }
