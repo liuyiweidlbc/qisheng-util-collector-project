@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         竞彩 赔率×支持率 返还率
 // @namespace    https://www.sporttery.cn/
-// @version      1.6.0
-// @description  胜平负：返还率=赔率×支持率；登录弹窗出现即关闭
+// @version      1.7.1
+// @description  胜平负：返还率=赔率×支持率；止售后恢复赔率可点与单关标识；登录弹窗出现即关闭
 // @match        https://www.sporttery.cn/jc/jsq/zqspf/*
 // @match        http://www.sporttery.cn/jc/jsq/zqspf/*
 // @match        https://www.sporttery.cn/jc/jsq/zqzjq/*
@@ -224,6 +224,190 @@
         });
     }
 
+    function isTruthyFlag(value) {
+        return value === 1 || value === '1' || value === true;
+    }
+
+    // 止售后 API 常把 single 清成 0，真实单关在 bettingSingle。
+    function isPoolSingle(pool) {
+        return !!(pool && (isTruthyFlag(pool.single) || isTruthyFlag(pool.bettingSingle)));
+    }
+
+    function normalizePoolSingleFlags(pool, rawPool) {
+        if (!pool) return;
+        const bettingSingle = rawPool ? rawPool.bettingSingle : pool.bettingSingle;
+        if (rawPool && rawPool.bettingSingle != null) {
+            pool.bettingSingle = rawPool.bettingSingle;
+        }
+        if (isTruthyFlag(bettingSingle) || isTruthyFlag(pool.single)) {
+            pool.single = '1';
+            // 官网角标条件：single==1 && o_type==F
+            if (pool.o_type !== 'F') pool.o_type = 'F';
+        }
+    }
+
+    function normalizeMatchPoolsFromRaw(matchObj, rawMatch) {
+        if (!matchObj || !rawMatch || !Array.isArray(rawMatch.poolList)) return;
+        rawMatch.poolList.forEach(function (rawPool) {
+            const key = String(rawPool.poolCode || '').toLowerCase();
+            if (!key || !matchObj[key]) return;
+            normalizePoolSingleFlags(matchObj[key], rawPool);
+        });
+    }
+
+    function normalizeCurDataSingles() {
+        const data = window.curData;
+        if (!Array.isArray(data)) return;
+        data.forEach(function (day) {
+            if (!Array.isArray(day)) return;
+            day.forEach(function (match) {
+                if (!match) return;
+                ['had', 'hhad', 'ttg', 'hafu', 'crs'].forEach(function (key) {
+                    normalizePoolSingleFlags(match[key]);
+                });
+            });
+        });
+    }
+
+    function getSingleMarkerStyle() {
+        const domain =
+            (window.jsCommonDataV1 && window.jsCommonDataV1.resDomain) ||
+            '//static.sporttery.cn';
+        return {
+            backgroundImage:
+                'url(' + domain + '/res_1_0/jcw/images/jc_calculator/single.gif)',
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'left top',
+        };
+    }
+
+    function applySingleMarker(el) {
+        if (!el) return;
+        const style = getSingleMarkerStyle();
+        el.style.setProperty('background-image', style.backgroundImage, 'important');
+        el.style.setProperty('background-repeat', style.backgroundRepeat, 'important');
+        el.style.setProperty('background-position', style.backgroundPosition, 'important');
+    }
+
+    // 官网止售后：cbt=2 → oddsDis（灰且不可点）；single 被清零导致单关角标消失。
+    function restoreClosedSaleUi() {
+        document.querySelectorAll('#mainTbl span.oddsItem.oddsDis').forEach(function (span) {
+            span.classList.remove('oddsDis');
+        });
+
+        normalizeCurDataSingles();
+
+        const data = window.curData;
+        if (!Array.isArray(data)) return;
+
+        for (let i = 0; i < data.length; i++) {
+            const day = data[i];
+            if (!Array.isArray(day)) continue;
+            for (let j = 0; j < day.length; j++) {
+                const match = day[j];
+                if (!match || match.id == null) continue;
+                const tr = document.getElementById('list_' + match.id);
+                if (!tr) continue;
+
+                let anySingle = false;
+                if (isPoolSingle(match.had)) {
+                    applySingleMarker(tr.querySelector('div.hadGL'));
+                    anySingle = true;
+                }
+                if (isPoolSingle(match.hhad)) {
+                    applySingleMarker(tr.querySelector('div.hhadGL'));
+                    anySingle = true;
+                }
+                if (isPoolSingle(match.ttg) || isPoolSingle(match.hafu)) {
+                    applySingleMarker(tr.querySelector('td.vsTd'));
+                    anySingle = true;
+                }
+                if (anySingle) {
+                    tr.setAttribute('singleIndex', '1');
+                }
+            }
+        }
+    }
+
+    function hookPoolListData() {
+        let tries = 0;
+        function tryHook() {
+            const dt = window.dataTransferClass;
+            if (dt && typeof dt.getPoolListData === 'function' && !dt.getPoolListData.__tmSpfWrapped) {
+                const original = dt.getPoolListData;
+                function wrapped(pData, tempMatchObj) {
+                    const result = original.call(this, pData, tempMatchObj);
+                    normalizeMatchPoolsFromRaw(result, pData);
+                    return result;
+                }
+                wrapped.__tmSpfWrapped = true;
+                dt.getPoolListData = wrapped;
+                return;
+            }
+            if (++tries < 100) {
+                setTimeout(tryHook, 50);
+            }
+        }
+        tryHook();
+    }
+
+    function patchCalculatorApiPayload(payload) {
+        if (!payload || !payload.value || !Array.isArray(payload.value.matchInfoList)) return false;
+        let changed = false;
+        payload.value.matchInfoList.forEach(function (day) {
+            (day.subMatchList || []).forEach(function (match) {
+                (match.poolList || []).forEach(function (pool) {
+                    if (isTruthyFlag(pool.bettingSingle) && !isTruthyFlag(pool.single)) {
+                        pool.single = 1;
+                        changed = true;
+                    }
+                });
+            });
+        });
+        return changed;
+    }
+
+    function hookCalculatorApiResponse() {
+        if (window.__tmSpfApiHooked) return;
+        window.__tmSpfApiHooked = true;
+
+        const rawOpen = XMLHttpRequest.prototype.open;
+        const rawSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            this.__tmSpfUrl = url == null ? '' : String(url);
+            return rawOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+            if (/getMatchCalculatorV1\.qry/i.test(this.__tmSpfUrl || '')) {
+                const xhr = this;
+                xhr.addEventListener('readystatechange', function () {
+                    if (xhr.readyState !== 4 || xhr.__tmSpfPatched) return;
+                    try {
+                        const text = xhr.responseText;
+                        if (!text) return;
+                        const json = JSON.parse(text);
+                        if (!patchCalculatorApiPayload(json)) return;
+                        xhr.__tmSpfPatched = true;
+                        const patched = JSON.stringify(json);
+                        Object.defineProperty(xhr, 'responseText', {
+                            configurable: true,
+                            get: function () { return patched; },
+                        });
+                        Object.defineProperty(xhr, 'response', {
+                            configurable: true,
+                            get: function () {
+                                return xhr.responseType && xhr.responseType !== '' && xhr.responseType !== 'text'
+                                    ? json
+                                    : patched;
+                            },
+                        });
+                    } catch (e) {}
+                });
+            }
+            return rawSend.apply(this, arguments);
+        };
+    }
+
     function buildReturnHeaderHtml() {
         const subs = PAGE.returnHeaderSubs.map(function (label, index) {
             const classes = ['uoOption', 'tLine'];
@@ -424,6 +608,9 @@
     }
 
     function processAll() {
+        restoreClosedSaleUi();
+        if (!PAGE.enableReturnRate) return;
+
         unwrapBrokenOddsLayout();
         ensureReturnHeader();
         fixDateRowColspan();
@@ -451,6 +638,26 @@
             }
             if (++tries < 50) {
                 setTimeout(tryHook, 200);
+            }
+        }
+        tryHook();
+    }
+
+    function hookInitData() {
+        let tries = 0;
+        function tryHook() {
+            const original = window.initData;
+            if (typeof original === 'function' && !original.__tmSpfWrapped) {
+                function wrapped() {
+                    original.apply(this, arguments);
+                    scheduleProcess();
+                }
+                wrapped.__tmSpfWrapped = true;
+                window.initData = wrapped;
+                return;
+            }
+            if (++tries < 80) {
+                setTimeout(tryHook, 100);
             }
         }
         tryHook();
@@ -492,16 +699,22 @@
     }
 
     function init() {
-        if (!PAGE.enableReturnRate) return;
-
-        injectStyle();
-        expandPageLayout();
-        hookSupportRateCallback();
+        hookInitData();
+        hookPoolListData();
+        if (PAGE.enableReturnRate) {
+            injectStyle();
+            expandPageLayout();
+            hookSupportRateCallback();
+            observeHeader();
+            bindRefreshButton();
+        }
         observeTable();
-        observeHeader();
-        bindRefreshButton();
         scheduleProcess();
     }
+
+    // document-start 尽早挂钩，避免首包数据漏改 single
+    hookCalculatorApiResponse();
+    hookPoolListData();
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

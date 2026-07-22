@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.14.61
+// @version      2.14.68
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -29,6 +29,8 @@
     })();
     const BET_API_WAIT_MS = 25000;
     const BET_RECOVERY_WINDOW_MS = 180000;
+    /** 查单确认无订单后，允许重试的最短等待（避免误杀慢入库；也避免干等满 3 分钟） */
+    const BET_DEDUP_VERIFY_MISS_MS = 60000;
     const PANEL_TEXT_MAX = 72;
     const ALERT_API = 'http://alert.socbeta.xyz/api/v1/soc/market/monitor/alert/trigger';
     const ALERT_MATCHES_API = 'http://alert.socbeta.xyz/api/v1/soc/market/monitor/alert/matches/active';
@@ -429,6 +431,7 @@
     let lastScanViewMode = '';
     let lastScanError = '';
     let matchRuleMeetCache = {};
+    let matchPendingWorkCache = {};
     let lastRuleMeetScanAt = 0;
     let ruleMeetScanInFlight = false;
     let lastButtonSnapshot = new Map();
@@ -518,6 +521,48 @@
         return n;
     }
 
+    /** 仍有可跟进工作：未执行 / 待确认（不含已中止、已执行） */
+    function countPendingWorkStrategies(strategies) {
+        if (!Array.isArray(strategies)) return 0;
+        let n = 0;
+        for (let i = 0; i < strategies.length; i++) {
+            const st = getStrategyExecStatusFromApi(strategies[i]);
+            if (st === 'pending' || st === 'confirming') n += 1;
+        }
+        return n;
+    }
+
+    function rememberMatchPendingWork(id, pendingCount) {
+        const mid = String(id || '');
+        if (!mid) return;
+        matchPendingWorkCache[mid] = {
+            pendingCount: Number(pendingCount) || 0,
+            known: true,
+            at: Date.now(),
+        };
+    }
+
+    function syncCurrentMatchPendingWorkCache() {
+        if (!matchId) return;
+        rememberMatchPendingWork(matchId, countPendingWorkStrategies(strategyList));
+    }
+
+    function matchHasNavigablePendingWork(item) {
+        if (!item || !item.matchId) return false;
+        const id = String(item.matchId);
+        if (isMatchLocallyEnded(id) || isMatchEndedPhase(item)) return false;
+        if (id === String(matchId) && (strategyList.length || lastMatchScanAt || strategyStatus === 'ok')) {
+            return countPendingWorkStrategies(strategyList) > 0;
+        }
+        const cached = matchPendingWorkCache[id];
+        if (cached && cached.known) return cached.pendingCount > 0;
+        if (item.pendingRuleCount != null) return Number(item.pendingRuleCount) > 0;
+        if (item.unfinishedRuleCount != null) return Number(item.unfinishedRuleCount) > 0;
+        if (item.ruleCount != null && Number(item.ruleCount) === 0) return false;
+        // 尚未扫描过策略时暂不排除，避免冷启动无处可跳
+        return true;
+    }
+
     function getCurrentMatchPendingRuleMeetCount() {
         return countPendingRuleMeet(strategyList);
     }
@@ -555,10 +600,53 @@
     }
 
     function canLeaveCurrentMatchForAutoSwitch() {
+        // 总览/列表页没有当前比赛，不应被「未扫描策略」卡住
+        if (!matchId) return true;
         if (isCurrentMatchEnded()) return true;
         if (isMatchNavStickActive()) return false;
         if (!strategyList.length && !lastMatchScanAt) return false;
         return true;
+    }
+
+    function isHubSportEventsPage() {
+        return isStrandedSportEventsPage() || isInplayListPage();
+    }
+
+    /** 总览/滚球列表：有可进场次时尽快进入，不干等 */
+    async function maybeEnterMatchFromHubPage(reason) {
+        if (!isHubSportEventsPage()) return false;
+        if (isUserManualMatchLockActive()) return false;
+        if (placing || matchEndedHandling) return false;
+        if (Date.now() - lastInplayNavAt < INPLAY_NAV_COOLDOWN_MS) return false;
+
+        if (!hasNavigableInPlayMatches()) {
+            setBetStep((isStrandedSportEventsPage() ? '总览页' : '列表页') +
+                '：暂无进行中且待执行策略的比赛');
+            renderPanel(true);
+            return false;
+        }
+        // 总览页曾因「暂无可进」静默 2 分钟；有可进场次时立即解除
+        navSuppressedUntil = 0;
+
+        let targetId = '';
+        const savedId = resolveStrandedTargetMatchId();
+        if (savedId && !isMatchLocallyEnded(savedId) && !isMatchIdEnded(savedId)) {
+            const savedItem = activeMatches.find(function (m) {
+                return String(m.matchId) === String(savedId);
+            });
+            if (savedItem && matchHasNavigablePendingWork(savedItem)) {
+                targetId = savedId;
+            }
+        }
+        if (!targetId) {
+            targetId = pickPreferredNavigableMatch('', '', activeMatches);
+        }
+        if (!targetId) return false;
+
+        console.log('[hty-inplay] 总览/列表自动进入', targetId, reason || '');
+        setBetStep((reason || '进入策略比赛') + '…');
+        renderPanel(true);
+        return navigateToInplayMatch(targetId, reason || '总览页进入策略比赛');
     }
 
     function getMatchRuleMeetCount(item) {
@@ -579,30 +667,25 @@
         return false;
     }
 
-    /** 本场有命中/可下/待扫描的未执行策略时，不要轮换或跳转到其它比赛 */
+    /** 本场有可下/正在投注时钉住；其它场已有 ruleMeet 时不因本场未下完而钉死 */
     function shouldHoldCurrentMatch() {
         if (isCurrentMatchEnded()) return false;
         if (placing) return true;
         if (targetOption) return true;
         if (strategyStates.some(function (st) { return st.actionable; })) return true;
-        const curMeet = getCurrentMatchRuleMeetCountForNav();
-        const otherMeet = hasOtherRuleMeetMatchThanCurrent();
-        if (curMeet === 0 && otherMeet) return false;
+        // 其它场已达标待下：本场即使还有未下完的 ruleMeet/半命中，也不占住（立即可下已在上方拦截）
+        if (hasOtherRuleMeetMatchThanCurrent()) return false;
         if (strategyStates.some(function (st) {
             return st.hit && st.execStatus === 'pending';
         })) return true;
         if (strategyStates.some(function (st) {
             return st.plateMatched && st.execStatus === 'pending';
-        })) {
-            if (curMeet === 0 && otherMeet) return false;
-            return true;
-        }
+        })) return true;
         if (hasPendingExecutableStrategies() && lastScanButtonCount === 0) {
             // 未开赛页暂无盘口；若有其它进行中赛事，应自动切过去而非一直钉在地址栏场次
             if (isCurrentMatchNotStarted() && hasOtherInPlayMatchesThanCurrent()) {
                 return false;
             }
-            if (curMeet === 0 && otherMeet) return false;
             return true;
         }
         return false;
@@ -718,6 +801,144 @@
     function isScriptDedupBlocked(option, recHash) {
         return isScriptDedupStored(option, recHash) ||
             isScriptDedupInflight(option, recHash);
+    }
+
+    function clearPausedDuplicateBetStep() {
+        const step = String(betStep || '');
+        if (!step) return;
+        if (step.indexOf('请勿手动重复下注') < 0 &&
+            step.indexOf('暂停重复下单') < 0 &&
+            step.indexOf('等待订单入库确认') < 0 &&
+            step.indexOf('等待订单确认') < 0 &&
+            step.indexOf('下注可能已成功') < 0) {
+            return;
+        }
+        if (betResult === 'pending' || betResult === 'skipped') {
+            betResult = 'pending';
+        }
+        setBetStep('等待策略盘口与赔率达标');
+    }
+
+    function getPendingBetDedupMeta() {
+        const inflight = getBetInFlight();
+        if (inflight && inflight.recHash) {
+            return {
+                recHash: String(inflight.recHash),
+                at: Number(inflight.at || 0) || Date.now(),
+                source: 'inflight',
+            };
+        }
+        const store = pruneBetAttemptStore(loadBetAttemptStore());
+        const keys = Object.keys(store);
+        let best = null;
+        for (let i = 0; i < keys.length; i++) {
+            const entry = store[keys[i]];
+            if (!entry) continue;
+            const at = Number(entry.at || 0) || 0;
+            if (!best || at > best.at) {
+                best = { recHash: String(keys[i]), at: at, source: 'attempt' };
+            }
+        }
+        return best;
+    }
+
+    function findOptionForRecHash(recHash) {
+        if (!recHash) return null;
+        const want = String(recHash);
+        for (let i = 0; i < strategyStates.length; i++) {
+            const st = strategyStates[i];
+            if (!st || !st.strategy || String(st.strategy.recHash || '') !== want) continue;
+            if (!st.testid && !st.plateMatched) continue;
+            return buildTargetOption(st);
+        }
+        for (let j = 0; j < strategyList.length; j++) {
+            const strategy = strategyList[j];
+            if (!strategy || String(strategy.recHash || '') !== want) continue;
+            const picked = pickStrategyButtonMatch(strategy, lastButtonSnapshot, 0);
+            if (!picked) continue;
+            return {
+                testid: picked.testid,
+                strategy: strategy,
+                side: picked.parsed.side,
+                market: picked.parsed.market,
+                lineIndex: picked.parsed.lineIndex,
+                displayLine: picked.extracted.lineText,
+                label: formatTargetOptionLabel(strategy, false),
+                minOdds: Number(strategy.plateOddsHit),
+                odds: String(picked.extracted.odds),
+                button: picked.btn,
+                bttsSubstitute: false,
+                substitutedFrom: null,
+            };
+        }
+        return null;
+    }
+
+    function clearPendingBetDedup(recHash, reason) {
+        if (recHash) clearBetAttempt(recHash);
+        clearBetInFlight();
+        clearPausedDuplicateBetStep();
+        if (reason) console.warn('[hty-inplay]', reason, recHash || '');
+    }
+
+    /**
+     * 防重卡死修复：可下被 inflight 置 0 时 targetOption 为空，原先轮询无法查单，
+     * 只能干等 BET_RECOVERY_WINDOW（3 分钟）后才突然下单。
+     * 这里用 inflight/attempt 反查策略，确认订单或超时无单后放行重试。
+     */
+    async function resolvePendingBetDedup() {
+        if (!isBetDedupEnabled() || placing || matchEndedHandling) return false;
+        releaseStaleBetInflight();
+        const meta = getPendingBetDedupMeta();
+        if (!meta) {
+            clearPausedDuplicateBetStep();
+            return false;
+        }
+
+        let option = findOptionForRecHash(meta.recHash);
+        if (!option && targetOption && targetOption.strategy &&
+            String(targetOption.strategy.recHash || '') === meta.recHash) {
+            option = targetOption;
+        }
+
+        if (option) {
+            const recovered = await tryRecoverSuccessfulBet(option, meta.at, {
+                retries: 2,
+                gapMs: 2000,
+            });
+            if (recovered) {
+                lastStrategyBetRecord = recovered;
+                placing = true;
+                try {
+                    await finalizeBetSuccess(option, recovered, true, '防重确认已有订单');
+                } finally {
+                    placing = false;
+                }
+                return true;
+            }
+        }
+
+        if (isBetSubmittedDrawerVisible()) {
+            setBetStep('检测到未完成下注抽屉，等待确认…');
+            renderPanel(true);
+            return false;
+        }
+
+        const age = Date.now() - meta.at;
+        if (age >= BET_DEDUP_VERIFY_MISS_MS) {
+            clearPendingBetDedup(
+                meta.recHash,
+                '防重查单无结果，清除标记允许重试 age=' + age + 'ms'
+            );
+            setBetResult('pending', '上次下注未确认到订单，将重试');
+            setBetStep('上次下注未确认到订单，条件满足将重试');
+            renderPanel(true);
+            return false;
+        }
+
+        const leftSec = Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - age) / 1000));
+        setBetStep('防重查单中（' + leftSec + 's 无单可重试）…');
+        return false;
     }
 
     function isDefinitiveBetFailure(err) {
@@ -839,34 +1060,54 @@
     }
 
     function bootStrandedSportEventsPage() {
-        function go() {
-            const targetId = resolveStrandedTargetMatchId();
-            const tab = getActiveMarketCategoryTab();
-            const tabArg = tab && tab !== 'all' ? tab : null;
-            if (targetId) {
-                const navId = shouldBlockAutoMatchNavigation(targetId)
-                    ? (isUserManualMatchLockActive() ? userManualMatchId : '')
-                    : targetId;
-                if (navId) {
-                    console.log('[hty-inplay] 脱离页返回赛事', navId, tab || 'all');
-                    gotoInplayMatch(navId, tabArg);
-                    return;
-                }
-            }
-            fetchActiveMatches().then(function (matches) {
-                const pick = pickPreferredNavigableMatch('', '', matches);
-                if (pick) {
-                    console.log('[hty-inplay] 脱离页进入策略赛事', pick);
-                    gotoInplayMatch(pick, tabArg || 'tg');
-                    return;
-                }
-                console.warn('[hty-inplay] 脱离页无法确定目标赛事');
-            }).catch(function (e) {
-                console.warn('[hty-inplay] 脱离页拉取赛事失败', e);
-            });
+        void ensureStrandedSportEventsBoot();
+    }
+
+    async function ensureStrandedSportEventsBoot() {
+        if (!isStrandedSportEventsPage()) return;
+        if (!document.body) {
+            document.addEventListener('DOMContentLoaded', function () {
+                void ensureStrandedSportEventsBoot();
+            }, { once: true });
+            return;
         }
-        if (document.body) go();
-        else document.addEventListener('DOMContentLoaded', go);
+        matchId = '';
+        if (!document.getElementById(PANEL_ID)) {
+            createPanel();
+            if (!document.getElementById(PANEL_ID)) return;
+        }
+        if (!started) {
+            started = true;
+            betStep = '赛事总览页：点击策略赛事可跳转';
+            betResult = 'pending';
+            scheduleLoginWatch();
+            scheduleHeartbeat();
+            setInterval(function () {
+                loginCache.ts = 0;
+                if (isLoggedIn() || reloginInProgress) return;
+                tryAutoRelogin({ lite: true }).catch(function (e) {
+                    console.warn('[hty-inplay] 总览页自动登录', e);
+                });
+            }, RELOGIN_WATCH_MS);
+        }
+        setupRouteWatcher();
+        if (matchesStatus === 'loading' || !activeMatches.length) {
+            try {
+                await loadActiveMatches(false);
+                await scanAllMatchesRuleMeet(true);
+                renderPanel(true);
+            } catch (e) {
+                console.warn('[hty-inplay] 总览页加载赛事失败', e);
+            }
+        } else {
+            renderPanel(true);
+        }
+        if (await maybeEnterMatchFromHubPage('总览页进入策略比赛')) return;
+    }
+
+    async function startStrandedPage() {
+        if (recoverFromBlockedAccessPage()) return;
+        await ensureStrandedSportEventsBoot();
     }
 
     function rememberCurrentMatchReturnUrl() {
@@ -1148,18 +1389,28 @@
             if (!isInplayListPage()) return;
             try {
                 await loadActiveMatches(true);
+                await scanAllMatchesRuleMeet(true);
                 renderPanel(true);
                 const navigable = getNavigableInPlayMatches();
                 if (!navigable.length) {
-                    setBetStep('列表页：暂无进行中比赛');
+                    setBetStep('列表页：暂无进行中且待执行策略的比赛');
                     renderPanel(true);
                     return;
                 }
                 if (!isUserManualMatchLockActive()) navSuppressedUntil = 0;
                 const savedId = resolveStrandedTargetMatchId();
-                const targetId = savedId && !isMatchLocallyEnded(savedId)
-                    ? savedId
-                    : pickPreferredNavigableMatch('', '', activeMatches);
+                let targetId = '';
+                if (savedId && !isMatchLocallyEnded(savedId)) {
+                    const savedItem = activeMatches.find(function (m) {
+                        return String(m.matchId) === String(savedId);
+                    });
+                    if (savedItem && matchHasNavigablePendingWork(savedItem)) {
+                        targetId = savedId;
+                    }
+                }
+                if (!targetId) {
+                    targetId = pickPreferredNavigableMatch('', '', activeMatches);
+                }
                 if (!targetId) return;
                 const phase = sessionStorage.getItem(KEEPALIVE_PHASE_KEY) || '';
                 if (phase === 'via-football' || phase === 'enter-match') {
@@ -1807,7 +2058,8 @@
     function parseScoreText(text) {
         const raw = String(text || '').trim();
         if (!raw) return null;
-        const m = raw.match(/^(\d+)\s*[-:：]\s*(\d+)$/);
+        let m = raw.match(/^(\d+)\s*[-:：]\s*(\d+)$/);
+        if (!m) m = raw.match(/(\d{1,2})\s*[-:：]\s*(\d{1,2})/);
         if (!m) return null;
         return {
             home: parseInt(m[1], 10),
@@ -1842,11 +2094,27 @@
     function applyBttsSubstitutionIfBetter(state, strategy, buttonMap, minOdds, originalPicked) {
         if (!originalPicked || isNaN(originalPicked.extracted.odds)) return;
         const score = getLiveMatchScore();
-        if (!getBttsSubstituteKind(strategy, score)) return;
+        if (!getBttsSubstituteKind(strategy, score)) {
+            if (isTeamOuHalfLine(strategy) && !score) {
+                console.log('[hty-inplay] BTTS替代跳过：读不到比分', strategy.market, strategy.plateOnK);
+            }
+            return;
+        }
 
         const bttsPicked = pickStrategyButtonMatch(getBttsYesStrategyStub(), buttonMap, minOdds);
-        if (!bttsPicked || !bttsPicked.oddsOk) return;
-        if (bttsPicked.extracted.odds <= originalPicked.extracted.odds) return;
+        if (!bttsPicked || !bttsPicked.oddsOk) {
+            console.log('[hty-inplay] BTTS替代跳过：未找到达标的两队进球按钮',
+                '原盘', originalPicked.extracted.odds,
+                '比分', score.raw,
+                '钮数', buttonMap ? buttonMap.size : 0);
+            return;
+        }
+        if (bttsPicked.extracted.odds <= originalPicked.extracted.odds) {
+            console.log('[hty-inplay] BTTS替代跳过：赔率未更高',
+                'hou/aou@' + originalPicked.extracted.odds,
+                'btts@' + bttsPicked.extracted.odds);
+            return;
+        }
 
         state.bttsSubstitute = true;
         state.substitutedFrom = {
@@ -2180,8 +2448,12 @@
             const map = new Map();
             snapshotOddsButtons(map);
             const minOdds = Number(option.strategy.plateOddsHit);
+            // BTTS 替代时必须按 btts 重选，不能再按原 hou/aou 策略把按钮覆盖回去
+            const pickStrategy = option.bttsSubstitute
+                ? getBttsYesStrategyStub()
+                : option.strategy;
             const picked = pickStrategyButtonMatch(
-                option.strategy,
+                pickStrategy,
                 map,
                 isNaN(minOdds) ? 0 : minOdds
             );
@@ -2201,10 +2473,11 @@
 
     async function ensureButtonVisible(option) {
         if (!option || !option.strategy) return resolveLiveButton(option.testid);
-        if (strategyMarketNeedsTgTab(option.strategy.market)) {
+        const betMarket = getOptionBetMarket(option) || option.strategy.market;
+        if (strategyMarketNeedsTgTab(betMarket) || strategyMarketNeedsTgTab(option.strategy.market)) {
             await ensureMarketCategoryTab(true, true, true);
         }
-        const markets = pageMarketsForStrategy(option.strategy.market);
+        const markets = pageMarketsForStrategy(betMarket);
         for (let i = 0; i < markets.length; i++) {
             const el = findStrategyMarketElement(markets[i]);
             if (el) el.scrollIntoView({ block: 'center', behavior: 'auto' });
@@ -2250,8 +2523,11 @@
         if (hitBlocked.length) {
             const st = hitBlocked[0];
             const line = truncatePanelText(st.displayLine || '—', 20);
+            const why = isScriptDedupInflight({ testid: st.testid, strategy: st.strategy }, st.strategy.recHash)
+                ? '防重(等待确认)'
+                : '防重(本地已记)';
             return line + ' ' + formatOddsDisplay(st.currentOdds) +
-                '≥' + formatOddsDisplay(st.strategy.plateOddsHit) + ' · 防重拦截';
+                '≥' + formatOddsDisplay(st.strategy.plateOddsHit) + ' · ' + why;
         }
         const pending = strategyStates.filter(function (st) {
             return st.execStatus === 'pending';
@@ -2457,6 +2733,25 @@
         lastButtonSnapshot = buttonMap;
         lastScanButtonCount = buttonMap.size;
         buttonMarketIndex = buildButtonMarketIndex(buttonMap);
+
+        // 已命中 hou/aou 大0.5 且比分满足替代条件，但快照里还没有 BTTS：滚到两队进球再评一次
+        const needBttsSub = strategyStates.some(function (st) {
+            if (!st.hit || st.bttsSubstitute || st.execStatus !== 'pending') return false;
+            return !!getBttsSubstituteKind(st.strategy, getLiveMatchScore());
+        });
+        if (needBttsSub) {
+            const bttsEl = findStrategyMarketElement('btts');
+            if (bttsEl) {
+                bttsEl.scrollIntoView({ block: 'center', behavior: 'auto' });
+                await humanDelay(400, 700);
+                snapshotOddsButtons(buttonMap);
+                buttonMarketIndex = buildButtonMarketIndex(buttonMap);
+                strategyStates = evaluateStrategyStatesFromMap(buttonMap);
+                lastButtonSnapshot = buttonMap;
+                lastScanButtonCount = buttonMap.size;
+            }
+        }
+
         return strategyStates;
     }
 
@@ -3006,12 +3301,14 @@
         }
         const inplayReady = resolveMatchPhase(item) === 'IN_PLAY';
         let mainHtml;
-        if (inplayReady) {
-            mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '" title="跳转滚球页">' + pickText + '</a>';
-        } else if (isMatchEndedPhase(item)) {
+        if (isMatchEndedPhase(item)) {
             mainHtml = '<span class="tm-hty-match-pick" title="比赛已结束">' + pickText + '</span>';
+        } else if (inplayReady) {
+            mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '" title="跳转滚球页">' + pickText + '</a>';
         } else {
-            mainHtml = '<span class="tm-hty-match-pick" title="比赛尚未开始，滚球页暂不可进">' + pickText + '</span>';
+            // 未开赛也可点进即将开赛页，总览/列表页方便快捷跳转
+            mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, 'incoming') +
+                '" title="跳转即将开赛页">' + pickText + '</a>';
         }
         return '<div class="' + rowClass + '">' +
             '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
@@ -3075,6 +3372,18 @@
             console.log('[hty-inplay] 用户手动选场锁定，跳过直跳', id);
             return false;
         }
+        if (isMatchIdEnded(id) || isMatchLocallyEnded(id)) {
+            console.log('[hty-inplay] 跳过已结束赛事直跳', id);
+            return false;
+        }
+        const item = activeMatches.find(function (m) {
+            return String(m.matchId) === String(id);
+        });
+        if (item && !matchHasNavigablePendingWork(item) &&
+            !isUserManualMatchPickReason(reason)) {
+            console.log('[hty-inplay] 跳过无待执行策略赛事直跳', id);
+            return false;
+        }
         if (isAlreadyOnMatchBetUrl(id, tab)) return true;
         const url = inplayMatchUrl(id, tab);
         if (normalizeMatchBetHref(window.location.href) === normalizeMatchBetHref(url)) return true;
@@ -3095,17 +3404,21 @@
             console.log('[hty-inplay] 用户手动选场锁定，跳过打开', targetId);
             return false;
         }
-        if (isMatchIdEnded(targetId)) {
+        if (isMatchIdEnded(targetId) || isMatchLocallyEnded(targetId)) {
             console.log('[hty-inplay] 跳过打开已结束赛事', targetId);
+            return false;
+        }
+        const item = activeMatches.find(function (m) {
+            return String(m.matchId) === String(targetId);
+        });
+        if (!userPick && item && !matchHasNavigablePendingWork(item)) {
+            console.log('[hty-inplay] 跳过打开无待执行策略赛事', targetId);
             return false;
         }
         if (isAlreadyOnMatchBetUrl(targetId)) return true;
         if (!userPick && !shouldAllowAutoNavigation(reason || 'open-match')) return false;
         const url = inplayMatchUrl(targetId);
         if (normalizeMatchBetHref(window.location.href) === normalizeMatchBetHref(url)) return true;
-        const item = activeMatches.find(function (m) {
-            return String(m.matchId) === String(targetId);
-        });
         const label = item ? formatActiveMatchItem(item) : ('#' + targetId);
         if (reason) {
             setBetStep(reason + '：' + label);
@@ -3248,9 +3561,15 @@
                 renderActiveMatches(document.getElementById(PANEL_ID));
             }
             if (!hasNavigableInPlayMatches()) {
-                suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, '策略列表无进行中');
+                // 总览/列表页不要静默 2 分钟，否则有比赛后仍要干等很久
+                if (!isHubSportEventsPage()) {
+                    suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, '策略列表无进行中');
+                }
             } else {
                 void scanAllMatchesRuleMeet(false).then(async function () {
+                    if (isHubSportEventsPage()) {
+                        if (await maybeEnterMatchFromHubPage('策略赛事就绪，进入比赛')) return;
+                    }
                     if (await maybeNavigateToRuleMeetMatch()) return;
                     if (!isUserManualMatchLockActive()) void maybeAutoNavigateToInplay();
                 });
@@ -3359,14 +3678,25 @@
             const parsed = parseScoreText(item.finalScore);
             if (parsed) return parsed;
         }
-        const page = document.querySelector(PAGE_READY_SEL);
+        const page = document.querySelector(PAGE_READY_SEL) || document.body;
         if (!page) return null;
         const scoreNodes = page.querySelectorAll(
-            '[data-testid*="score" i], [data-testid*="Score"], [data-testid*="match-score" i]'
+            '[data-testid*="score" i], [data-testid*="Score"], [data-testid*="match-score" i],' +
+            '[class*="score" i], [class*="Score"]'
         );
         for (let i = 0; i < scoreNodes.length; i++) {
             const parsed = parseScoreText((scoreNodes[i].textContent || '').trim());
             if (parsed) return parsed;
+        }
+        // 宽松匹配页面可见比分文本，如 "0 - 2" / "0:2"
+        const blob = (page.innerText || '').slice(0, 4000);
+        const loose = blob.match(/(?:^|\s)(\d{1,2})\s*[-:：]\s*(\d{1,2})(?:\s|$)/m);
+        if (loose) {
+            return {
+                home: parseInt(loose[1], 10),
+                away: parseInt(loose[2], 10),
+                raw: loose[1] + '-' + loose[2],
+            };
         }
         return null;
     }
@@ -3397,7 +3727,9 @@
 
     function getNavigableInPlayMatches(sourceList) {
         return getSortedInPlayMatches(sourceList).filter(function (item) {
-            return !isMatchLocallyEnded(item.matchId);
+            if (isMatchLocallyEnded(item.matchId)) return false;
+            if (isMatchEndedPhase(item)) return false;
+            return matchHasNavigablePendingWork(item);
         });
     }
 
@@ -3437,14 +3769,18 @@
     function pickRuleMeetNavigableMatch(excludeId, sourceList) {
         const ex = excludeId ? String(excludeId) : '';
         const cur = matchId ? String(matchId) : '';
-        const candidates = getSortedInPlayMatches(sourceList).filter(function (item) {
+        const candidates = getNavigableInPlayMatches(sourceList).filter(function (item) {
             const id = String(item.matchId);
             if (ex && id === ex) return false;
             return getMatchRuleMeetCount(item) > 0;
         });
         if (!candidates.length) return '';
 
-        candidates.sort(function (a, b) {
+        // 其它场也有达标时优先切走，不因本场条数更多/并列而钉住（本场可能半小时才可下）
+        const pool = cur
+            ? candidates.filter(function (item) { return String(item.matchId) !== cur; })
+            : candidates;
+        const ranked = (pool.length ? pool : candidates).slice().sort(function (a, b) {
             const diff = getMatchRuleMeetCount(b) - getMatchRuleMeetCount(a);
             if (diff !== 0) return diff;
             const ka = parseKickoffMs(a.kickoffTime) || 0;
@@ -3453,17 +3789,7 @@
             return String(a.matchId).localeCompare(String(b.matchId));
         });
 
-        const bestId = String(candidates[0].matchId);
-        const bestCount = getMatchRuleMeetCount(candidates[0]);
-        if (cur) {
-            for (let i = 0; i < candidates.length; i++) {
-                if (String(candidates[i].matchId) === cur &&
-                    getMatchRuleMeetCount(candidates[i]) === bestCount) {
-                    return cur;
-                }
-            }
-        }
-        if (bestId === cur && getCurrentMatchRuleMeetCountForNav() > 0) return cur;
+        const bestId = String(ranked[0].matchId);
         if (bestId !== cur) return bestId;
         return '';
     }
@@ -3471,8 +3797,10 @@
     async function scanAllMatchesRuleMeet(force) {
         if (ruleMeetScanInFlight) return matchRuleMeetCache;
         const inPlay = getSortedInPlayMatches();
-        if (inPlay.length < 2) {
+        if (!inPlay.length) {
             if (matchId) {
+                const curPending = countPendingWorkStrategies(strategyList);
+                rememberMatchPendingWork(matchId, curPending);
                 const curMeet = getCurrentMatchPendingRuleMeetCount();
                 if (curMeet > 0) {
                     matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
@@ -3491,31 +3819,46 @@
         try {
             const tasks = inPlay.map(function (item) {
                 const id = String(item.matchId);
-                if (id === String(matchId) && strategyList.length) {
+                if (id === String(matchId) && (strategyList.length || strategyStatus === 'ok')) {
                     return Promise.resolve({
                         id: id,
                         meetCount: getCurrentMatchPendingRuleMeetCount(),
+                        pendingCount: countPendingWorkStrategies(strategyList),
                     });
                 }
                 return fetchAlertStrategies(id).then(function (payload) {
                     const list = Array.isArray(payload.data) ? payload.data : [];
-                    return { id: id, meetCount: countPendingRuleMeet(list) };
+                    return {
+                        id: id,
+                        meetCount: countPendingRuleMeet(list),
+                        pendingCount: countPendingWorkStrategies(list),
+                    };
                 }).catch(function () {
-                    const prev = matchRuleMeetCache[id];
-                    return { id: id, meetCount: prev ? prev.meetCount : 0 };
+                    const prevMeet = matchRuleMeetCache[id];
+                    const prevWork = matchPendingWorkCache[id];
+                    return {
+                        id: id,
+                        meetCount: prevMeet ? prevMeet.meetCount : 0,
+                        pendingCount: prevWork && prevWork.known ? prevWork.pendingCount : -1,
+                    };
                 });
             });
             const results = await Promise.all(tasks);
-            const next = {};
+            const nextMeet = {};
             results.forEach(function (r) {
-                if (r.meetCount > 0) next[r.id] = { meetCount: r.meetCount, at: Date.now() };
+                if (r.pendingCount >= 0) rememberMatchPendingWork(r.id, r.pendingCount);
+                if (r.meetCount > 0) nextMeet[r.id] = { meetCount: r.meetCount, at: Date.now() };
             });
-            matchRuleMeetCache = next;
+            matchRuleMeetCache = nextMeet;
             lastRuleMeetScanAt = Date.now();
             lastMatchesListKey = '';
-            console.log('[hty-inplay] ruleMeet 扫描', Object.keys(next).map(function (id) {
-                return id + ':' + next[id].meetCount;
-            }).join(', ') || '无达标');
+            console.log('[hty-inplay] ruleMeet 扫描', Object.keys(nextMeet).map(function (id) {
+                return id + ':' + nextMeet[id].meetCount;
+            }).join(', ') || '无达标',
+                '| pending',
+                results.map(function (r) {
+                    return r.id + ':' + (r.pendingCount >= 0 ? r.pendingCount : '?');
+                }).join(', ') || '无');
             return matchRuleMeetCache;
         } finally {
             ruleMeetScanInFlight = false;
@@ -3523,12 +3866,14 @@
     }
 
     async function maybeNavigateToRuleMeetMatch() {
-        if (placing || matchEndedHandling || targetOption) return false;
+        if (placing || matchEndedHandling) return false;
+        // 本场已有立即可下的盘口时先下完；仅 ruleMeet 未可下时允许切到其它达标场
+        if (targetOption || strategyStates.some(function (st) { return st.actionable; })) {
+            return false;
+        }
         if (!canLeaveCurrentMatchForAutoSwitch()) return false;
         if (!shouldAllowAutoNavigation('ruleMeet')) return false;
         if (getNavigableInPlayMatches().length < 2) return false;
-        if (strategyStates.some(function (st) { return st.actionable; })) return false;
-        if (getCurrentMatchRuleMeetCountForNav() > 0) return false;
 
         await scanAllMatchesRuleMeet(false);
         const targetId = pickRuleMeetNavigableMatch(matchId);
@@ -3538,7 +3883,12 @@
         if (navGap < RULE_MEET_NAV_COOLDOWN_MS) return false;
 
         const meetCount = getMatchRuleMeetCount({ matchId: targetId });
-        console.log('[hty-inplay] ruleMeet 优先切换', matchId, '->', targetId, meetCount, '条');
+        const curMeet = getCurrentMatchRuleMeetCountForNav();
+        console.log(
+            '[hty-inplay] ruleMeet 优先切换',
+            matchId, '(' + curMeet + ')',
+            '->', targetId, meetCount, '条'
+        );
         clearUserManualMatchLock();
         return navigateToInplayMatch(targetId, '规则已达标，切换下单(' + meetCount + '条)');
     }
@@ -3552,10 +3902,9 @@
         }
         const now = Date.now();
 
-        const navigable = getSortedInPlayMatches(list).filter(function (item) {
+        const navigable = getNavigableInPlayMatches(list).filter(function (item) {
             const id = String(item.matchId);
             if (ex && id === ex) return false;
-            if (isMatchLocallyEnded(id)) return false;
             return true;
         });
         if (!navigable.length) return '';
@@ -3575,9 +3924,13 @@
         const ruleMeetId = pickRuleMeetNavigableMatch(ex, list);
         if (ruleMeetId && (!cur || String(ruleMeetId) !== cur)) return ruleMeetId;
 
+        // 本场已无未执行/待确认策略时，不要钉住当前场
         if (cur) {
-            for (let j = 0; j < navigable.length; j++) {
-                if (String(navigable[j].matchId) === cur) return cur;
+            const curItem = navigable.find(function (item) {
+                return String(item.matchId) === cur;
+            });
+            if (curItem && matchHasNavigablePendingWork(curItem)) {
+                return cur;
             }
         }
 
@@ -3605,7 +3958,9 @@
     }
 
     function pickRotatingInplayMatch(currentId, sourceList) {
-        const ids = getSortedInPlayMatchIds(sourceList);
+        const ids = getNavigableInPlayMatches(sourceList).map(function (item) {
+            return String(item.matchId);
+        });
         if (!ids.length) return '';
         if (ids.length === 1) return ids[0];
 
@@ -3632,7 +3987,9 @@
         if (excludeId) {
             const next = pickRotatingInplayMatch(excludeId, sourceList);
             if (next && String(next) !== String(excludeId)) return next;
-            const ids = getSortedInPlayMatchIds(sourceList);
+            const ids = getNavigableInPlayMatches(sourceList).map(function (item) {
+                return String(item.matchId);
+            });
             for (let i = 0; i < ids.length; i++) {
                 if (String(ids[i]) !== String(excludeId)) return ids[i];
             }
@@ -3670,7 +4027,7 @@
         (excludeIds || []).forEach(function (id) {
             if (id != null && id !== '') ex[String(id)] = true;
         });
-        const navigable = getSortedInPlayMatches();
+        const navigable = getNavigableInPlayMatches();
         for (let i = 0; i < navigable.length; i++) {
             const id = String(navigable[i].matchId);
             if (ex[id]) continue;
@@ -3681,10 +4038,20 @@
 
     async function navigateToInplayMatch(targetId, reason) {
         if (!targetId || String(targetId) === String(matchId)) return false;
-        if (isMatchLocallyEnded(targetId)) {
-            console.warn('[hty-inplay] 跳过本地已结束赛事', targetId);
+        if (isMatchLocallyEnded(targetId) || isMatchIdEnded(targetId)) {
+            console.warn('[hty-inplay] 跳过已结束赛事', targetId);
             const altId = pickNextNavigableMatchId([targetId, matchId]);
             if (altId) return navigateToInplayMatch(altId, reason || '跳过已结束赛事');
+            return false;
+        }
+        const item = activeMatches.find(function (m) {
+            return String(m.matchId) === String(targetId);
+        });
+        if (item && !matchHasNavigablePendingWork(item)) {
+            console.warn('[hty-inplay] 跳过无待执行策略赛事', targetId);
+            rememberMatchPendingWork(targetId, 0);
+            const altId = pickNextNavigableMatchId([targetId, matchId]);
+            if (altId) return navigateToInplayMatch(altId, reason || '跳过无待执行策略');
             return false;
         }
         return openInplayMatchPage(targetId, reason || '跳转滚球页');
@@ -3762,6 +4129,18 @@
                 void ensureListPageBoot();
                 return;
             }
+            if (isStrandedSportEventsPage()) {
+                void ensureStrandedSportEventsBoot();
+                try {
+                    await loadActiveMatches(true);
+                    await scanAllMatchesRuleMeet(heartbeatTick % 2 === 0);
+                    renderPanel(true);
+                    if (await maybeEnterMatchFromHubPage('总览页进入策略比赛')) return;
+                } catch (e) {
+                    console.warn('[hty-inplay] 总览页刷新/进场', e);
+                }
+                return;
+            }
             if (isIdleLoginModalVisible()) {
                 dismissIdleLoginModal();
                 return;
@@ -3783,6 +4162,7 @@
                 return;
             }
             await loadActiveMatches(true);
+            if (isBetDedupEnabled() && !placing && await resolvePendingBetDedup()) return;
             if (hasNavigableInPlayMatches() && getNavigableInPlayMatches().length >= 2) {
                 await scanAllMatchesRuleMeet(false);
                 if (!placing && !targetOption && await maybeNavigateToRuleMeetMatch()) return;
@@ -3859,10 +4239,9 @@
             rememberCurrentMatchReturnUrl();
             return;
         }
-        if (matchId && isStrandedSportEventsPage()) {
-            if (shouldAllowAutoNavigation('url-stranded')) {
-                recoverStrandedFromMatchContext();
-            }
+        if (isStrandedSportEventsPage()) {
+            matchId = '';
+            void ensureStrandedSportEventsBoot();
             return;
         }
         if (isInplayListPage()) {
@@ -5158,7 +5537,9 @@
     async function tryRotateInplayMatch(reason) {
         if (await maybeNavigateToRuleMeetMatch()) return true;
         if (isUserManualMatchLockActive()) return false;
-        const ids = getSortedInPlayMatchIds();
+        const ids = getNavigableInPlayMatches().map(function (item) {
+            return String(item.matchId);
+        });
         if (ids.length < 2) return false;
         if (placing || shouldAutoBet() || shouldHoldCurrentMatch()) return false;
         if (Date.now() - lastMatchRotateAt < MATCH_ROTATE_MS) return false;
@@ -5219,15 +5600,17 @@
         if (isCurrentMatchEnded() || isMatchEndedModalVisible()) {
             return pickInplayNavigableMatch(matchId);
         }
-        const inplayIds = getInPlayMatchIds();
-        if (inplayIds.length >= 2) {
+        const navigableIds = getNavigableInPlayMatches().map(function (item) {
+            return String(item.matchId);
+        });
+        if (navigableIds.length >= 2) {
             return pickInplayNavigableMatch(matchId);
         }
-        if (matchId && inplayIds.indexOf(String(matchId)) >= 0) {
+        if (matchId && navigableIds.indexOf(String(matchId)) >= 0) {
             return String(matchId);
         }
-        if (inplayIds.length === 1) {
-            return inplayIds[0];
+        if (navigableIds.length === 1) {
+            return navigableIds[0];
         }
         return pickInplayNavigableMatch('') || '';
     }
@@ -5558,7 +5941,7 @@
                 recHash: recHash || '',
                 testid: meta && meta.testid ? String(meta.testid) : '',
                 stake: meta && meta.stake != null ? String(meta.stake) : '',
-                at: Date.now(),
+                at: meta && meta.at ? Number(meta.at) : Date.now(),
                 bttsSubstitute: !!(meta && meta.bttsSubstitute),
                 substitutedFrom: meta && meta.substitutedFrom ? meta.substitutedFrom : null,
                 market: meta && meta.market ? String(meta.market) : '',
@@ -6326,6 +6709,7 @@
             } else {
                 delete matchRuleMeetCache[String(matchId)];
             }
+            syncCurrentMatchPendingWorkCache();
             lastMatchesListKey = '';
             if (reconciled) {
                 lastStrategyListKey = '';
@@ -6348,6 +6732,17 @@
         }
         if (panelReady && strategyList.length) {
             syncOddsObserverState();
+        }
+
+        // 本场已无未执行/待确认策略：离开去其它有工作的场，勿继续钉在本场
+        if (strategyStatus === 'ok' && matchId &&
+            countPendingWorkStrategies(strategyList) === 0 &&
+            !placing && !isUserManualMatchLockActive()) {
+            if (hasNavigableInPlayMatches()) {
+                void maybeAutoNavigateToInplay();
+            } else if (!isCurrentMatchEnded()) {
+                setBetStep('本场策略已全部结束，暂无其它待执行比赛');
+            }
         }
 
         try {
@@ -6403,7 +6798,13 @@
         const dedupToggle = panel.querySelector('.tm-hty-dedup-toggle');
 
         if (matchEl) {
-            matchEl.textContent = '赛事 ' + matchId + '（滚球）· 策略自动下注（' + stakeModeLabel(stakeMode) + '）';
+            if (isStrandedSportEventsPage()) {
+                matchEl.textContent = '赛事总览 · 点击下方策略赛事跳转';
+            } else if (isInplayListPage()) {
+                matchEl.textContent = '滚球列表 · 点击策略赛事跳转（' + stakeModeLabel(stakeMode) + '）';
+            } else {
+                matchEl.textContent = '赛事 ' + matchId + '（滚球）· 策略自动下注（' + stakeModeLabel(stakeMode) + '）';
+            }
         }
         if (scanEl) {
             const full = scanStatusFull();
@@ -6441,6 +6842,13 @@
         }
         if (stakeSelect && stakeSelect.value !== stakeMode) {
             stakeSelect.value = stakeMode;
+        }
+        const stakeRow = panel.querySelector('.tm-hty-stake-row');
+        if (stakeRow) {
+            stakeRow.classList.toggle('tm-hty-stake-alert', stakeMode !== 'strategy');
+            stakeRow.title = stakeMode !== 'strategy'
+                ? '当前为固定金额，非策略实际金额'
+                : '';
         }
         if (dedupToggle) {
             dedupToggle.checked = isBetDedupEnabled();
@@ -6544,8 +6952,14 @@
             } else if (state.dedupBlocked) {
                 markClass += ' plate';
                 markText = '◎';
+                const waitingConfirm = isScriptDedupInflight(
+                    { testid: state.testid, strategy: state.strategy },
+                    state.strategy && state.strategy.recHash
+                );
                 markTitle = state.hit
-                    ? '未执行 · 已达阈值，脚本防重拦截（同按钮其它档位已下或进行中）'
+                    ? (waitingConfirm
+                        ? '未执行 · 已达阈值，防重等待订单确认（查无单约 60s 后可重试）'
+                        : '未执行 · 已达阈值，脚本防重拦截（同按钮其它档位已下或进行中）')
                     : '未执行 · 脚本防重：本策略已下单，跳过重复';
             } else if (state.actionable) {
                 markClass += ' hit';
@@ -6607,8 +7021,11 @@
         if (strategyStatus !== 'ok' || !strategyList.length) return false;
         if (placing || autoBetInFlight) return false;
         if (betResult === 'pending' && betStep &&
-            (betStep.indexOf('请勿手动重复下注') >= 0 || betStep.indexOf('暂停重复下单') >= 0)) {
-            return false;
+            (betStep.indexOf('请勿手动重复下注') >= 0 ||
+                betStep.indexOf('暂停重复下单') >= 0 ||
+                betStep.indexOf('防重查单中') >= 0)) {
+            if (getPendingBetDedupMeta()) return false;
+            clearPausedDuplicateBetStep();
         }
         syncTargetOptionFromStates();
         if (!targetOption) return false;
@@ -8113,17 +8530,19 @@
                 return true;
             }
             if (!isBetSubmittedDrawerVisible()) {
-                if (attempt && Date.now() - Number(attempt.at || 0) < BET_RECOVERY_WINDOW_MS) {
+                const age = attempt ? Date.now() - Number(attempt.at || 0) : 0;
+                if (age < BET_DEDUP_VERIFY_MISS_MS) {
                     console.warn('[hty-inplay] 防重拦截：近期尝试未确认，暂停重复下单', recHash);
                     setBetResult('pending', '暂停重复下单，等待确认');
-                    setBetStep('等待订单入库确认，请勿手动重复下注');
+                    setBetStep('防重查单中（' +
+                        Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - age) / 1000)) +
+                        's 无单可重试）…');
                     renderPanel(true);
                     schedulePoll();
                     return false;
                 }
                 console.log('[hty-inplay] 上次下注未成功，清除防重标记并重试', recHash);
-                clearBetAttempt(recHash);
-                clearBetInFlight();
+                clearPendingBetDedup(recHash, 'attempt 超时无单，允许重试');
                 betResult = 'pending';
                 setBetStep('上次下注失败，条件满足将重新尝试');
                 renderPanel(true);
@@ -8151,12 +8570,17 @@
                 placing = false;
                 return true;
             }
-            if (Date.now() - Number(inflight.at || 0) > BET_RECOVERY_WINDOW_MS) {
+            const inflightAge = Date.now() - Number(inflight.at || 0);
+            if (inflightAge > BET_DEDUP_VERIFY_MISS_MS && !isBetSubmittedDrawerVisible()) {
+                clearPendingBetDedup(recHash, 'inflight 超时无单，允许重试');
+            } else if (inflightAge > BET_RECOVERY_WINDOW_MS) {
                 clearBetInFlight();
             } else {
                 console.warn('[hty-inplay] 下注进行中且未确认，跳过重复下单', recHash);
                 setBetResult('pending', '暂停重复下单，等待确认');
-                setBetStep('等待订单入库确认，请勿手动重复下注');
+                setBetStep('防重查单中（' +
+                    Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - inflightAge) / 1000)) +
+                    's 无单可重试）…');
                 renderPanel(true);
                 schedulePoll();
                 return false;
@@ -8404,20 +8828,17 @@
             }
             await ensureMarketView(false);
             await refreshTargetOption(!targetOption);
-            const inflight = getBetInFlight();
-            const attemptRec = targetOption && targetOption.strategy
-                ? getBetAttempt(targetOption.strategy.recHash) : null;
-            const sinceAt = (attemptRec && attemptRec.at) || (inflight && inflight.at);
-            if (sinceAt && targetOption && isBetDedupEnabled() && !placing) {
-                const recovered = await tryRecoverSuccessfulBet(targetOption, sinceAt, {
-                    retries: 2,
-                    gapMs: 2500,
-                });
-                if (recovered) {
-                    lastStrategyBetRecord = recovered;
-                    await finalizeBetSuccess(targetOption, recovered, true, '轮询确认已有订单');
+            if (isBetDedupEnabled() && !placing) {
+                if (await resolvePendingBetDedup()) {
                     schedulePoll();
                     return;
+                }
+                // 刚清除防重后立刻尝试下单，避免再空等一轮
+                syncTargetOptionFromStates();
+                if (!targetOption) {
+                    const states = evaluateStrategyStates();
+                    strategyStates = states;
+                    targetOption = findStrategyMatch();
                 }
             }
             if (targetOption && betStep.indexOf('等待策略盘口') >= 0) {
@@ -8612,6 +9033,11 @@
                 '#' + PANEL_ID + ' .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}' +
                 '#' + PANEL_ID + ' .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}' +
                 '#' + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}' +
+                '#' + PANEL_ID + ' .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}' +
+                '#' + PANEL_ID + ' .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}' +
+                '#' + PANEL_ID + ' .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}' +
+                '#' + PANEL_ID + ' .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{' +
+                'border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}' +
                 '#' + PANEL_ID + ' .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;' +
                 'background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}' +
                 '#' + PANEL_ID + ' .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}' +
@@ -8654,7 +9080,7 @@
             '<div class="tm-hty-strategy-list"></div>' +
             '</div>' +
             '<div class="tm-hty-bet-section">' +
-            '<div class="tm-hty-row"><span class="tm-hty-label">投注金额</span><span class="tm-hty-value">' +
+            '<div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">投注金额</span><span class="tm-hty-value">' +
             '<select class="tm-hty-stake-select" title="投注金额规则">' +
             '<option value="0.3">0.3</option>' +
             '<option value="1">1</option>' +
@@ -8686,6 +9112,13 @@
         const stakeSelect = panel.querySelector('.tm-hty-stake-select');
         if (stakeSelect) {
             stakeSelect.value = stakeMode;
+            const stakeRow = panel.querySelector('.tm-hty-stake-row');
+            if (stakeRow) {
+                stakeRow.classList.toggle('tm-hty-stake-alert', stakeMode !== 'strategy');
+                stakeRow.title = stakeMode !== 'strategy'
+                    ? '当前为固定金额，非策略实际金额'
+                    : '';
+            }
             stakeSelect.addEventListener('change', function (e) {
                 e.stopPropagation();
                 const mode = stakeSelect.value;
@@ -8835,7 +9268,7 @@
             return;
         }
         if (!matchId && isStrandedSportEventsPage()) {
-            bootStrandedSportEventsPage();
+            startStrandedPage();
             return;
         }
         if (!matchId) return;
