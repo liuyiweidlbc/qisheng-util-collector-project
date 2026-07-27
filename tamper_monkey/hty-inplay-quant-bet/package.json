@@ -1,0 +1,13 @@
+{
+  "name": "hty-inplay-quant-bet",
+  "version": "2.16.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-app": "node scripts/prepare-app.mjs",
+    "build": "node scripts/prepare-app.mjs && node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

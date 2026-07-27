@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.23
+// @version      1.9.66
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、备注初盘盘口、实时终盘盘口、快捷筛选、主客相同复制盘口（含联赛）；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」左侧赛果序列；任一点击六表同联赛同步
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同复制盘口（含联赛）；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -494,6 +494,8 @@
     function collectJiaozhanSaiguoSeries(root) {
         const table = root.querySelector('table.pub_table');
         if (!table) return [];
+        const cols = getJiaozhanYapanBeizhuIndices(table);
+        const sgIdx = cols.saiguo >= 0 ? cols.saiguo : 4;
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
@@ -503,8 +505,8 @@
             const st = tr.getAttribute('style') || '';
             if (/display\s*:\s*none/i.test(st)) return;
             const tds = tr.querySelectorAll('td');
-            if (tds.length < 5) return;
-            const sg = (tds[4].textContent || '').replace(/\s/g, '');
+            if (tds.length <= sgIdx) return;
+            const sg = (tds[sgIdx].textContent || '').replace(/\s/g, '');
             if (sg === '-' || sg === '') return;
             if (sg !== '胜' && sg !== '平' && sg !== '负') return;
             raw.push(sg);
@@ -516,6 +518,10 @@
         const c = { ying: 0, shu: 0, zou: 0 };
         const table = root.querySelector('table.pub_table');
         if (!table) return c;
+        const cols = getJiaozhanYapanBeizhuIndices(table);
+        const sgIdx = cols.saiguo >= 0 ? cols.saiguo : 4;
+        const plIdx = cols.panlu >= 0 ? cols.panlu : 7;
+        const need = Math.max(sgIdx, plIdx);
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
@@ -524,11 +530,11 @@
             const st = tr.getAttribute('style') || '';
             if (/display\s*:\s*none/i.test(st)) return;
             const tds = tr.querySelectorAll('td');
-            if (tds.length < 8) return;
-            const sg = (tds[4].textContent || '').replace(/\s/g, '');
+            if (tds.length <= need) return;
+            const sg = (tds[sgIdx].textContent || '').replace(/\s/g, '');
             if (sg === '-' || sg === '') return;
             if (sg !== '胜' && sg !== '平' && sg !== '负') return;
-            const pl = (tds[7].textContent || '').replace(/\s/g, '');
+            const pl = (tds[plIdx].textContent || '').replace(/\s/g, '');
             if (pl === '赢') c.ying++;
             else if (pl === '输') c.shu++;
             else if (pl === '走') c.zou++;
@@ -657,8 +663,10 @@
         const ths = thRow.querySelectorAll('th');
         let i, t;
         for (i = 0; i < ths.length; i++) {
+            if (ths[i].classList.contains('tm500-jz-bz-col')) return i;
             t = (ths[i].textContent || '').replace(/\s+/g, '');
-            if (t === '备注' || t.indexOf('备注') >= 0) return i;
+            // 仅精确匹配，避免误命中亚盘下拉里的「初盘」选项文案
+            if (t === '备注' || t === '初盘') return i;
         }
         return ths.length ? ths.length - 1 : -1;
     }
@@ -669,35 +677,281 @@
         else refNode.parentNode.appendChild(newNode);
     }
 
+    /**
+     * 交战历史列地图：优先表头文案 / select / 脚本 class，兼容未登录少列与登录多列（平均欧指、*门等）。
+     * 返回 { saiguo, panlu, daxiao, oupeiNative, yapan, beizhu, oupei, shishi }
+     */
     function getJiaozhanYapanBeizhuIndices(table) {
-        const trs = table.querySelectorAll('tr');
-        let n = 0;
+        const thRow = findJiaozhanHeaderThRow(table);
+        const ths = thRow ? thRow.querySelectorAll('th') : [];
+        const n = ths.length;
+        let saiguo = -1;
+        let panlu = -1;
+        let daxiao = -1;
+        let oupeiNative = -1;
+        let yapan = -1;
+        let beizhu = -1;
+        let shishi = -1;
+        let oupei = -1;
         let i;
-        for (i = 0; i < trs.length; i++) {
-            if (trs[i].querySelector('th')) {
-                n = trs[i].querySelectorAll('th').length;
-                break;
+        let t;
+
+        for (i = 0; i < n; i++) {
+            const th = ths[i];
+            t = (th.textContent || '').replace(/\s+/g, '');
+            if (saiguo < 0 && t.indexOf('赛果') !== -1) saiguo = i;
+            if (panlu < 0 && t.indexOf('盘路') !== -1) panlu = i;
+            // 「大小」独立列；与「盘路大小」合并列时由 panlu 覆盖，不再重复
+            if (daxiao < 0 && t.indexOf('大小') !== -1 && t.indexOf('盘路') === -1) daxiao = i;
+            if (oupeiNative < 0 && th.querySelector('select[name="oupei"]')) oupeiNative = i;
+            // 亚盘公司列：只认 data-t=yp，避免误命中「初盘/终盘」的 pk 下拉
+            if (yapan < 0 && th.querySelector('select[name="yapan"][data-t="yp"]')) yapan = i;
+            if (beizhu < 0 && (
+                th.classList.contains('tm500-jz-bz-col') || t === '备注' || t === '初盘'
+            )) beizhu = i;
+            if (oupei < 0 && (
+                th.classList.contains('tm500-jz-op-col') || t === '欧赔'
+            )) oupei = i;
+            if (shishi < 0 && (
+                th.classList.contains('tm500-jz-ss-col') || t === '实时'
+            )) shishi = i;
+        }
+        // 无 yp 时再退到任意 yapan select（登录 *门 列常见）
+        if (yapan < 0) {
+            for (i = 0; i < n; i++) {
+                if (ths[i].querySelector('select[name="yapan"]')) {
+                    yapan = i;
+                    break;
+                }
             }
         }
-        const yapan = n >= 10 ? 6 : (n < 2 ? 6 : Math.max(0, n - 4));
-        let beizhu = findJiaozhanBeizhuThIndex(table);
-        if (beizhu < 0) beizhu = n >= 10 ? 9 : (n < 2 ? 9 : n - 1);
-        let shishi = -1;
-        const thRow = findJiaozhanHeaderThRow(table);
-        if (thRow && beizhu >= 0) {
-            const ths = thRow.querySelectorAll('th');
-            if (beizhu + 1 < ths.length) {
+
+        // 兜底：旧版未登录少列 / 异常表头
+        if (saiguo < 0) saiguo = n > 4 ? 4 : -1;
+        if (panlu < 0) {
+            if (yapan >= 0 && yapan + 1 < n) panlu = yapan + 1;
+            else if (n >= 8) panlu = 7;
+        }
+        if (yapan < 0) {
+            yapan = n >= 10 ? 6 : (n < 2 ? 6 : Math.max(0, n - 4));
+        }
+        if (beizhu < 0) {
+            beizhu = findJiaozhanBeizhuThIndex(table);
+            if (beizhu < 0) beizhu = n >= 10 ? 9 : (n < 2 ? 9 : n - 1);
+        }
+        if (oupeiNative < 0 && n > 5) {
+            // 未登录常见固定欧指列；登录则已由 select 命中
+            if (n < 10) oupeiNative = 5;
+        }
+        // 登录「平均欧指」无 select 时：表头文案兜底（勿命中脚本「欧赔」列）
+        if (oupeiNative < 0) {
+            for (i = 0; i < n; i++) {
+                t = (ths[i].textContent || '').replace(/\s+/g, '');
+                if (ths[i].classList.contains('tm500-jz-op-col') || t === '欧赔') continue;
+                if (t.indexOf('平均欧指') !== -1 || t.indexOf('欧指') !== -1) {
+                    oupeiNative = i;
+                    break;
+                }
+            }
+        }
+
+        // 脚本插入列：相对备注列左右邻接再确认一次
+        if (beizhu >= 0 && n > 0) {
+            if (shishi < 0 && beizhu + 1 < n) {
                 const nextTh = ths[beizhu + 1];
                 const nt = nextTh ? (nextTh.textContent || '').replace(/\s+/g, '') : '';
-                if (nt === '实时' || (nextTh && nextTh.classList.contains('tm500-jz-ss-col'))) shishi = beizhu + 1;
+                if (nt === '实时' || (nextTh && nextTh.classList.contains('tm500-jz-ss-col'))) {
+                    shishi = beizhu + 1;
+                }
             }
             if (shishi < 0 && beizhu > 0) {
                 const prevTh = ths[beizhu - 1];
                 const pt = prevTh ? (prevTh.textContent || '').replace(/\s+/g, '') : '';
-                if (pt === '实时' || (prevTh && prevTh.classList.contains('tm500-jz-ss-col'))) shishi = beizhu - 1;
+                if (pt === '实时' || (prevTh && prevTh.classList.contains('tm500-jz-ss-col'))) {
+                    shishi = beizhu - 1;
+                }
+            }
+            if (oupei < 0 && beizhu > 0) {
+                const leftTh = ths[beizhu - 1];
+                const lt = leftTh ? (leftTh.textContent || '').replace(/\s+/g, '') : '';
+                if (lt === '欧赔' || (leftTh && leftTh.classList.contains('tm500-jz-op-col'))) {
+                    oupei = beizhu - 1;
+                }
             }
         }
-        return { yapan: yapan, shishi: shishi, beizhu: beizhu };
+
+        return {
+            saiguo: saiguo,
+            panlu: panlu,
+            daxiao: daxiao,
+            oupeiNative: oupeiNative,
+            yapan: yapan,
+            shishi: shishi,
+            beizhu: beizhu,
+            oupei: oupei
+        };
+    }
+
+    const HIDE_NATIVE_COL_STYLE_ID = 'tm500-hide-native-col-style-158';
+    const HIDE_NATIVE_COL_CLASS = 'tm500-hide-native-col';
+
+    function injectHideNativeColStyle() {
+        if (document.getElementById(HIDE_NATIVE_COL_STYLE_ID)) return;
+        const s = document.createElement('style');
+        s.id = HIDE_NATIVE_COL_STYLE_ID;
+        s.textContent =
+            '.' + HIDE_NATIVE_COL_CLASS + '{' +
+            'display:none!important;' +
+            'width:0!important;min-width:0!important;max-width:0!important;' +
+            'padding:0!important;margin:0!important;border:none!important;' +
+            'overflow:hidden!important;font-size:0!important;line-height:0!important;' +
+            '}';
+        document.head.appendChild(s);
+    }
+
+    function clearPubTableHiddenNativeCols(table) {
+        if (!table) return;
+        const marked = table.querySelectorAll('.' + HIDE_NATIVE_COL_CLASS);
+        let i;
+        for (i = 0; i < marked.length; i++) {
+            marked[i].classList.remove(HIDE_NATIVE_COL_CLASS);
+        }
+    }
+
+    function hidePubTableColumnsByIndices(table, indices) {
+        if (!table || !indices || !indices.length) return;
+        const uniq = [];
+        let i, j, idx;
+        for (i = 0; i < indices.length; i++) {
+            idx = indices[i];
+            if (typeof idx !== 'number' || idx < 0 || uniq.indexOf(idx) !== -1) continue;
+            uniq.push(idx);
+        }
+        if (!uniq.length) return;
+        injectHideNativeColStyle();
+        const rows = table.querySelectorAll('tr');
+        for (i = 0; i < rows.length; i++) {
+            const cells = [];
+            const kids = rows[i].children;
+            for (j = 0; j < kids.length; j++) {
+                if (kids[j].tagName === 'TH' || kids[j].tagName === 'TD') cells.push(kids[j]);
+            }
+            for (j = 0; j < uniq.length; j++) {
+                idx = uniq[j];
+                if (cells[idx]) cells[idx].classList.add(HIDE_NATIVE_COL_CLASS);
+            }
+        }
+        const cols = table.querySelectorAll('colgroup col');
+        for (j = 0; j < uniq.length; j++) {
+            idx = uniq[j];
+            if (cols[idx]) cols[idx].classList.add(HIDE_NATIVE_COL_CLASS);
+        }
+    }
+
+    /**
+     * 交战历史：隐藏原生平均欧指 / 亚盘(*门) / 盘路 / 大小（DOM 保留，供 AJAX/读数）。
+     * 不隐藏脚本插入的欧赔 / 初盘 / 实时。
+     * 仅按表头/select 明确命中隐藏，不用列数兜底，避免未登录少列误伤。
+     */
+    function hideJiaozhanNativeOddsColumns(table) {
+        if (!table) return;
+        clearPubTableHiddenNativeCols(table);
+        const thRow = findJiaozhanHeaderThRow(table);
+        if (!thRow) return;
+        const ths = thRow.querySelectorAll('th');
+        const n = ths.length;
+        const cols = getJiaozhanYapanBeizhuIndices(table);
+        const keep = {};
+        if (cols.oupei >= 0) keep[cols.oupei] = 1;
+        if (cols.beizhu >= 0) keep[cols.beizhu] = 1;
+        if (cols.shishi >= 0) keep[cols.shishi] = 1;
+        const hideIdx = [];
+        function pushHide(i) {
+            if (i < 0 || keep[i] || hideIdx.indexOf(i) !== -1) return;
+            hideIdx.push(i);
+        }
+        let i;
+        let t;
+        for (i = 0; i < n; i++) {
+            if (keep[i]) continue;
+            const th = ths[i];
+            t = (th.textContent || '').replace(/\s+/g, '');
+            if (th.querySelector('select[name="oupei"]')) {
+                pushHide(i);
+                continue;
+            }
+            if (th.querySelector('select[name="yapan"][data-t="yp"]') ||
+                th.querySelector('select[name="yapan"]')) {
+                pushHide(i);
+                continue;
+            }
+            if (t.indexOf('平均欧指') !== -1 || (t.indexOf('欧指') !== -1 && t !== '欧赔')) {
+                pushHide(i);
+                continue;
+            }
+            if (t.indexOf('盘路') !== -1 || (t.indexOf('大小') !== -1 && t.indexOf('盘路') === -1)) {
+                pushHide(i);
+            }
+        }
+        hidePubTableColumnsByIndices(table, hideIdx);
+    }
+
+    function findZhanjiHeaderCellIndices(table) {
+        const out = { panlu: -1, daxiao: -1, panikou: -1 };
+        if (!table) return out;
+        const trs = table.querySelectorAll('tr');
+        let header = null;
+        let i;
+        for (i = 0; i < trs.length; i++) {
+            if (trs[i].querySelector('th')) {
+                header = trs[i];
+                break;
+            }
+        }
+        if (!header) return out;
+        const cells = [];
+        const kids = header.children;
+        for (i = 0; i < kids.length; i++) {
+            if (kids[i].tagName === 'TH' || kids[i].tagName === 'TD') cells.push(kids[i]);
+        }
+        for (i = 0; i < cells.length; i++) {
+            const t = (cells[i].textContent || '').replace(/\s+/g, '');
+            if (out.panlu < 0 && t.indexOf('盘路') !== -1) out.panlu = i;
+            if (out.daxiao < 0 && t.indexOf('大小') !== -1 && t.indexOf('盘路') === -1) out.daxiao = i;
+            if (out.panikou < 0 && t.indexOf('盘口') !== -1 &&
+                !cells[i].classList.contains('tm500-zj-yp-col') &&
+                !cells[i].classList.contains('tm500-zj2-yp-col')) {
+                out.panikou = i;
+            }
+        }
+        return out;
+    }
+
+    /** 近期战绩 / 主客场等表：隐藏原生盘路、大小、盘口列（不碰脚本「亚盘」列） */
+    function hideZhanjiNativePanluDaxiaoColumns(table) {
+        if (!table) return;
+        clearPubTableHiddenNativeCols(table);
+        const idx = findZhanjiHeaderCellIndices(table);
+        const hideIdx = [];
+        if (idx.panlu >= 0) hideIdx.push(idx.panlu);
+        if (idx.daxiao >= 0) hideIdx.push(idx.daxiao);
+        if (idx.panikou >= 0) hideIdx.push(idx.panikou);
+        hidePubTableColumnsByIndices(table, hideIdx);
+    }
+
+    function hideAllZhanjiNativePanluDaxiaoColumns() {
+        if (!isShujuFenxiPage()) return;
+        const ids = [
+            'team_zhanji_0', 'team_zhanji_1',
+            'team_zhanji1_0', 'team_zhanji1_1',
+            'team_zhanji2_0', 'team_zhanji2_1'
+        ];
+        ids.forEach(function(tid) {
+            const root = document.getElementById(tid);
+            if (!root) return;
+            const table = findZhanjiPubTable(root);
+            if (table) hideZhanjiNativePanluDaxiaoColumns(table);
+        });
     }
 
     function relocateJiaozhanShishiColumnToRight(table, beizhuIdx) {
@@ -719,20 +973,60 @@
         });
     }
 
-    /** 在「备注」列右侧插入「实时」列（终盘盘口，仅中文盘名） */
-    function ensureJiaozhanShishiColumn(table) {
+    /** 在「备注」列左侧插入「欧赔」列（初盘 胜/平/负） */
+    function ensureJiaozhanOupeiColumn(table) {
         let cols = getJiaozhanYapanBeizhuIndices(table);
         const beizhuIdx = cols.beizhu;
         if (beizhuIdx < 0) return cols;
-        if (cols.shishi >= 0 && cols.shishi === beizhuIdx - 1) {
-            relocateJiaozhanShishiColumnToRight(table, beizhuIdx);
-            return getJiaozhanYapanBeizhuIndices(table);
-        }
-        if (cols.shishi >= 0) return cols;
+        if (cols.oupei >= 0) return cols;
         const thRow = findJiaozhanHeaderThRow(table);
         if (!thRow) return cols;
         const ths = thRow.querySelectorAll('th');
         const refTh = ths[beizhuIdx];
+        if (!refTh || !refTh.parentNode) return cols;
+        const newTh = document.createElement('th');
+        newTh.textContent = '欧赔';
+        newTh.className = 'tm500-jz-op-col';
+        newTh.setAttribute('title', '欧赔实时：胜 平 负；悬停赔率看初盘对比弹窗');
+        refTh.parentNode.insertBefore(newTh, refTh);
+        const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+            return tr.querySelector('td') && !tr.querySelector('th');
+        });
+        rows.forEach(function(tr) {
+            const tds = tr.querySelectorAll('td');
+            const refTd = tds[beizhuIdx];
+            if (!refTd || !refTd.parentNode) return;
+            const newTd = document.createElement('td');
+            newTd.className = 'tm500-jz-op-cell';
+            newTd.textContent = '-';
+            refTd.parentNode.insertBefore(newTd, refTd);
+        });
+        table.dataset.tm500JzOupeiCol = '1';
+        return getJiaozhanYapanBeizhuIndices(table);
+    }
+
+    /** 确保列顺序：… | 欧赔 | 备注 | 实时 */
+    function ensureJiaozhanShishiColumn(table) {
+        let cols = getJiaozhanYapanBeizhuIndices(table);
+        const beizhuIdx = cols.beizhu;
+        if (beizhuIdx < 0) return cols;
+        // 旧版「实时」曾在备注左侧：先挪到右侧，再插欧赔
+        if (cols.shishi >= 0 && cols.shishi === beizhuIdx - 1) {
+            const thRow0 = findJiaozhanHeaderThRow(table);
+            const ths0 = thRow0 ? thRow0.querySelectorAll('th') : [];
+            const leftTh = ths0[beizhuIdx - 1];
+            if (leftTh && (leftTh.classList.contains('tm500-jz-ss-col') ||
+                ((leftTh.textContent || '').replace(/\s+/g, '') === '实时'))) {
+                relocateJiaozhanShishiColumnToRight(table, beizhuIdx);
+            }
+        }
+        ensureJiaozhanOupeiColumn(table);
+        cols = getJiaozhanYapanBeizhuIndices(table);
+        if (cols.shishi >= 0) return cols;
+        const thRow = findJiaozhanHeaderThRow(table);
+        if (!thRow) return cols;
+        const ths = thRow.querySelectorAll('th');
+        const refTh = ths[cols.beizhu];
         if (!refTh) return cols;
         const newTh = document.createElement('th');
         newTh.textContent = '实时';
@@ -743,7 +1037,7 @@
         });
         rows.forEach(function(tr) {
             const tds = tr.querySelectorAll('td');
-            const refTd = tds[beizhuIdx];
+            const refTd = tds[cols.beizhu];
             if (!refTd) return;
             const newTd = document.createElement('td');
             newTd.className = 'tm500-jz-ss-cell';
@@ -754,8 +1048,10 @@
         return getJiaozhanYapanBeizhuIndices(table);
     }
 
-    const JZ_BEIZHU_STYLE_ID = 'tm500-jz-beizhu-style-194';
-    const JZ_SHISHI_STYLE_ID = 'tm500-jz-shishi-style-201';
+    const JZ_BEIZHU_STYLE_ID = 'tm500-jz-beizhu-style-196';
+    const JZ_SHISHI_STYLE_ID = 'tm500-jz-shishi-style-205';
+    const JZ_OUPEI_STYLE_ID = 'tm500-jz-oupei-style-209';
+    const JZ_OUPEI_TIP_ID = 'tm500-jz-op-tip';
     const JZ_TABLE_WIDE_STYLE_ID = 'tm500-jz-table-wide-198';
 
     /** 解除站点 table/colgroup/th 定宽，否则仅改 CSS 无法撑开备注列（每张表只执行一次，避免反复触发布局抖动） */
@@ -788,6 +1084,153 @@
     }
 
     /** 放宽交战历史表格外层与 .M_content 的定宽，表格随可视区域变宽（为备注/盘口留空间） */
+    const DZ_NAME_STYLE_ID = 'tm500-dz-name-style-212';
+
+    /** 对阵列：战绩表主/客约6.5字超长省略（双表并排不挤爆亚盘）；交战历史约9字 */
+    function injectDzTeamNameStyle() {
+        const legacyIds = [
+            'tm500-dz-name-style-199', 'tm500-dz-name-style-202',
+            'tm500-dz-name-style-203', 'tm500-dz-name-style-204',
+            'tm500-dz-name-style-205', 'tm500-dz-name-style-206',
+            'tm500-dz-name-style-207', 'tm500-dz-name-style-208',
+            'tm500-dz-name-style-209', 'tm500-dz-name-style-210',
+            'tm500-dz-name-style-211'
+        ];
+        legacyIds.forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        if (document.getElementById(DZ_NAME_STYLE_ID)) return;
+        const s = document.createElement('style');
+        s.id = DZ_NAME_STYLE_ID;
+        s.textContent =
+            '.odds_zj_tubiao table.pub_table,' +
+            '.M_box.record table.pub_table{' +
+            'table-layout:fixed!important;width:100%!important;' +
+            'border-collapse:collapse;' +
+            'overflow:hidden!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table th.th_one,' +
+            '.odds_zj_tubiao .pub_table td.td_one,' +
+            '.M_box.record .pub_table th.th_one,' +
+            '.M_box.record .pub_table td.td_one{' +
+            'width:48px!important;min-width:48px!important;max-width:48px!important;' +
+            'white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;' +
+            'box-sizing:border-box!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table th:nth-child(2),' +
+            '.odds_zj_tubiao .pub_table td:nth-child(2),' +
+            '.M_box.record .pub_table th:nth-child(2),' +
+            '.M_box.record .pub_table td:nth-child(2){' +
+            'width:58px!important;min-width:58px!important;max-width:58px!important;' +
+            'white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;' +
+            'box-sizing:border-box!important;' +
+            '}' +
+            /* 战绩对阵格：主6.5 + 比分 + 客6.5，给亚盘留位 */
+            '.odds_zj_tubiao .pub_table td.dz,' +
+            '.odds_zj_tubiao .pub_table th .dz,' +
+            '.M_box.record .pub_table td.dz,' +
+            '.M_box.record .pub_table th .dz{' +
+            'width:auto!important;' +
+            'min-width:0!important;' +
+            'max-width:none!important;' +
+            'box-sizing:border-box!important;overflow:hidden!important;' +
+            'padding-left:2px!important;padding-right:2px!important;' +
+            '}' +
+            '#team_jiaozhan .pub_table td.dz,' +
+            '#team_jiaozhan .pub_table th .dz{' +
+            'width:calc(18em + 44px)!important;' +
+            'min-width:calc(18em + 44px)!important;' +
+            'max-width:none!important;' +
+            'box-sizing:border-box!important;overflow:hidden!important;' +
+            'padding-left:4px!important;padding-right:4px!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table td.dz > a,' +
+            '.odds_zj_tubiao .pub_table th .dz,' +
+            '.M_box.record .pub_table td.dz > a,' +
+            '.M_box.record .pub_table th .dz,' +
+            '#team_jiaozhan .pub_table td.dz > a,' +
+            '#team_jiaozhan .pub_table th .dz{' +
+            'display:flex!important;' +
+            'flex-direction:row!important;' +
+            'align-items:center!important;' +
+            'justify-content:center!important;' +
+            'width:100%!important;' +
+            'max-width:100%!important;' +
+            'box-sizing:border-box!important;' +
+            'overflow:hidden!important;' +
+            'gap:0;' +
+            '}' +
+            /* 战绩主/客：定宽 + 超长省略（悬停 title 看全称） */
+            '.odds_zj_tubiao .pub_table .dz .dz-l,' +
+            '.odds_zj_tubiao .pub_table .dz .dz-r,' +
+            '.M_box.record .pub_table .dz .dz-l,' +
+            '.M_box.record .pub_table .dz .dz-r{' +
+            'float:none!important;' +
+            'display:block!important;' +
+            'flex:1 1 0!important;' +
+            'width:0!important;' +
+            'min-width:0!important;' +
+            'max-width:6.5em!important;' +
+            'white-space:nowrap!important;' +
+            'word-break:keep-all!important;' +
+            'overflow:hidden!important;' +
+            'text-overflow:ellipsis!important;' +
+            'box-sizing:border-box!important;' +
+            '}' +
+            '#team_jiaozhan .pub_table .dz .dz-l,' +
+            '#team_jiaozhan .pub_table .dz .dz-r{' +
+            'float:none!important;' +
+            'display:block!important;' +
+            'flex:0 0 9em!important;' +
+            'width:9em!important;' +
+            'min-width:9em!important;' +
+            'max-width:9em!important;' +
+            'white-space:nowrap!important;' +
+            'word-break:keep-all!important;' +
+            'overflow:hidden!important;' +
+            'text-overflow:ellipsis!important;' +
+            'box-sizing:border-box!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table .dz .dz-l,' +
+            '.M_box.record .pub_table .dz .dz-l,' +
+            '#team_jiaozhan .pub_table .dz .dz-l{' +
+            'text-align:right!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table .dz .dz-r,' +
+            '.M_box.record .pub_table .dz .dz-r,' +
+            '#team_jiaozhan .pub_table .dz .dz-r{' +
+            'text-align:left!important;' +
+            '}' +
+            '.odds_zj_tubiao .pub_table .dz em,' +
+            '.M_box.record .pub_table .dz em,' +
+            '#team_jiaozhan .pub_table .dz em{' +
+            'float:none!important;' +
+            'display:block!important;' +
+            'flex:0 0 36px!important;' +
+            'width:36px!important;min-width:36px!important;max-width:36px!important;' +
+            'text-align:center!important;' +
+            'box-sizing:border-box!important;' +
+            'overflow:hidden!important;' +
+            '}' +
+            '.tm500-zj2-expand-wrap .tm500-zj2-expand{' +
+            'width:auto!important;min-width:0!important;max-width:none!important;' +
+            'display:inline-block!important;padding:2px 5px!important;' +
+            '}';
+        document.head.appendChild(s);
+    }
+
+    function ensureDzTeamNameTitles(scope) {
+        const root = scope || document;
+        root.querySelectorAll(
+            '#team_jiaozhan td.dz .dz-l, #team_jiaozhan td.dz .dz-r,' +
+            '.M_box.record td.dz .dz-l, .M_box.record td.dz .dz-r'
+        ).forEach(function(el) {
+            const name = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (name) el.setAttribute('title', name);
+        });
+    }
+
     function injectJiaozhanTableWideStyle() {
         const legacy192 = document.getElementById('tm500-jz-table-wide-192');
         const legacy193 = document.getElementById('tm500-jz-table-wide-193');
@@ -797,6 +1240,7 @@
         if (legacy193) legacy193.remove();
         if (legacy195) legacy195.remove();
         if (legacy196) legacy196.remove();
+        injectDzTeamNameStyle();
         if (document.getElementById(JZ_TABLE_WIDE_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = JZ_TABLE_WIDE_STYLE_ID;
@@ -837,6 +1281,10 @@
             '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell{' +
             'width:auto!important;min-width:128px!important;max-width:none!important;' +
             '}' +
+            '#team_jiaozhan table.pub_table th.tm500-jz-op-col,' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell{' +
+            'width:auto!important;min-width:88px!important;max-width:none!important;' +
+            '}' +
             '#team_jiaozhan table.pub_table th.tm500-jz-ss-col,' +
             '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell{' +
             'width:auto!important;min-width:96px!important;max-width:none!important;' +
@@ -847,8 +1295,12 @@
     function injectJiaozhanBeizhuStyle() {
         const legacy189 = document.getElementById('tm500-jz-beizhu-style-189');
         const legacy190 = document.getElementById('tm500-jz-beizhu-style-190');
+        const legacy194 = document.getElementById('tm500-jz-beizhu-style-194');
+        const legacy195 = document.getElementById('tm500-jz-beizhu-style-195');
         if (legacy189) legacy189.remove();
         if (legacy190) legacy190.remove();
+        if (legacy194) legacy194.remove();
+        if (legacy195) legacy195.remove();
         if (document.getElementById(JZ_BEIZHU_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = JZ_BEIZHU_STYLE_ID;
@@ -856,40 +1308,92 @@
             '#team_jiaozhan table.pub_table th.tm500-jz-bz-col,' +
             '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell{' +
             'min-width:128px!important;width:auto!important;max-width:none!important;' +
-            'padding:5px 6px!important;white-space:normal;word-break:break-word;' +
-            'vertical-align:middle;line-height:1.38;font-size:12px;' +
+            'padding:5px 4px!important;white-space:nowrap!important;word-break:keep-all!important;' +
+            'vertical-align:middle;line-height:1.25;font-size:12px;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-yp-align{' +
+            'display:inline-grid;grid-template-columns:2.6em 6.2em 2.6em;column-gap:2px;' +
+            'align-items:center;white-space:nowrap;vertical-align:middle;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-yp-l{' +
+            'text-align:right;justify-self:stretch;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-yp-m{' +
+            'text-align:center;justify-self:stretch;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-yp-r{' +
+            'text-align:left;justify-self:stretch;' +
             '}' +
             '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-bz-pk{' +
-            'display:inline-block;margin:0 2px;padding:1px 5px;border-radius:3px;' +
-            'font-size:10px!important;line-height:1.25;font-weight:600;' +
-            'background:#e7f1ff;color:#0d47a1;' +
-            'border:1px solid #b6d4fe;' +
+            'display:inline-block;margin:0;padding:1px 3px;border-radius:3px;' +
+            'font-size:10px!important;line-height:1.2;font-weight:600;' +
+            'color:#66bb6a!important;background:transparent;border:none;' +
+            'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+            'box-sizing:border-box;vertical-align:middle;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-bz-pk.tm500-jz-pk-shou{' +
+            'color:#64b5f6!important;' +
             '}' +
             '#team_jiaozhan table.pub_table td.tm500-jz-bz-cell .tm500-jz-bz-odds{' +
-            'font-size:11px;font-weight:600;color:#333;' +
+            'font-size:11px;font-weight:600;color:#333;font-variant-numeric:tabular-nums;' +
             '}';
         document.head.appendChild(s);
     }
 
     function injectJiaozhanShishiStyle() {
+        const legacy201 = document.getElementById('tm500-jz-shishi-style-201');
+        const legacy202 = document.getElementById('tm500-jz-shishi-style-202');
+        const legacy203 = document.getElementById('tm500-jz-shishi-style-203');
+        const legacy204 = document.getElementById('tm500-jz-shishi-style-204');
+        if (legacy201) legacy201.remove();
+        if (legacy202) legacy202.remove();
+        if (legacy203) legacy203.remove();
+        if (legacy204) legacy204.remove();
         if (document.getElementById(JZ_SHISHI_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = JZ_SHISHI_STYLE_ID;
         s.textContent =
             '#team_jiaozhan table.pub_table th.tm500-jz-ss-col,' +
             '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell{' +
-            'min-width:96px!important;width:auto!important;max-width:none!important;' +
-            'padding:5px 6px!important;white-space:normal;word-break:break-word;' +
-            'vertical-align:middle;line-height:1.38;font-size:12px;' +
+            'min-width:110px!important;width:auto!important;max-width:none!important;' +
+            'padding:5px 4px!important;white-space:nowrap!important;word-break:keep-all!important;' +
+            'vertical-align:middle;line-height:1.25;font-size:12px;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-yp-align{' +
+            'display:inline-grid;grid-template-columns:2.6em 6.2em 2.6em;column-gap:2px;' +
+            'align-items:center;white-space:nowrap;vertical-align:middle;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-yp-l{' +
+            'text-align:right;justify-self:stretch;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-yp-m{' +
+            'text-align:center;justify-self:stretch;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-yp-r{' +
+            'text-align:left;justify-self:stretch;' +
             '}' +
             '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-pk{' +
-            'display:inline-block;margin:0 2px;padding:1px 5px;border-radius:3px;' +
-            'font-size:10px!important;line-height:1.25;font-weight:600;' +
-            'background:#e8f5e9;color:#1b5e20;' +
-            'border:1px solid #a5d6a7;' +
+            'display:inline-block;margin:0;padding:1px 4px;border-radius:3px;' +
+            'font-size:10px!important;line-height:1.2;font-weight:600;' +
+            'color:#66bb6a!important;background:transparent;border:1px solid transparent;' +
+            'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+            'box-sizing:border-box;vertical-align:middle;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-pk.tm500-jz-pk-shou{' +
+            'color:#64b5f6!important;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-pk.tm500-jz-ss-pk-up{' +
+            'background:#fde2e4!important;border-color:#f5b5ba!important;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-pk.tm500-jz-ss-pk-down{' +
+            'background:#e3f2fd!important;border-color:#90caf9!important;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-pk-arr{' +
+            'display:inline-block;margin-left:1px;font-size:10px;font-weight:700;line-height:1;' +
+            'color:inherit;' +
             '}' +
             '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-odds{' +
-            'font-size:11px;font-weight:600;color:#333;' +
+            'font-size:11px;font-weight:600;color:#333;font-variant-numeric:tabular-nums;' +
             '}' +
             '#team_jiaozhan table.pub_table td.tm500-jz-ss-cell .tm500-jz-ss-odds.tm500-jz-ss-odds-up{' +
             'color:#c62828!important;' +
@@ -903,13 +1407,108 @@
         document.head.appendChild(s);
     }
 
+    function injectJiaozhanOupeiStyle() {
+        const legacy202 = document.getElementById('tm500-jz-oupei-style-202');
+        const legacy203 = document.getElementById('tm500-jz-oupei-style-203');
+        const legacy204 = document.getElementById('tm500-jz-oupei-style-204');
+        const legacy205 = document.getElementById('tm500-jz-oupei-style-205');
+        const legacy206 = document.getElementById('tm500-jz-oupei-style-206');
+        const legacy207 = document.getElementById('tm500-jz-oupei-style-207');
+        const legacy208 = document.getElementById('tm500-jz-oupei-style-208');
+        if (legacy202) legacy202.remove();
+        if (legacy203) legacy203.remove();
+        if (legacy204) legacy204.remove();
+        if (legacy205) legacy205.remove();
+        if (legacy206) legacy206.remove();
+        if (legacy207) legacy207.remove();
+        if (legacy208) legacy208.remove();
+        if (document.getElementById(JZ_OUPEI_STYLE_ID)) {
+            bindJiaozhanOupeiTipOnce();
+            return;
+        }
+        const s = document.createElement('style');
+        s.id = JZ_OUPEI_STYLE_ID;
+        s.textContent =
+            '#team_jiaozhan table.pub_table th.tm500-jz-op-col,' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell{' +
+            'min-width:96px!important;width:auto!important;max-width:none!important;' +
+            'padding:5px 5px!important;white-space:nowrap;' +
+            'vertical-align:middle;line-height:1.38;font-size:12px;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds{' +
+            'display:inline-block;font-size:11px;font-weight:600;color:#333;cursor:help;' +
+            'padding:1px 3px;border-radius:2px;line-height:1.25;box-sizing:border-box;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds + .tm500-jz-op-odds{' +
+            'margin-left:3px;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds.tm500-jz-op-odds-up{' +
+            'color:#c62828!important;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds.tm500-jz-op-odds-down{' +
+            'color:#2e7d32!important;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds.tm500-jz-op-odds-bg-up{' +
+            'color:#842029!important;background:#fde2e4!important;border:1px solid #f5b5ba;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-odds.tm500-jz-op-odds-bg-down{' +
+            'color:#0f5132!important;background:#d1e7dd!important;border:1px solid #a3cfbb;' +
+            '}' +
+            '#team_jiaozhan table.pub_table td.tm500-jz-op-cell .tm500-jz-op-arr{' +
+            'display:inline-block;margin-left:1px;font-size:10px;font-weight:700;line-height:1;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + '{' +
+            'position:fixed;z-index:2147483000;display:none;pointer-events:none;' +
+            'box-sizing:border-box;padding:8px 10px;border-radius:6px;' +
+            'background:#fff;color:#222;' +
+            'border:1px solid #e2e5ea;' +
+            'box-shadow:0 6px 18px rgba(20,28,40,.12);' +
+            'font:12px/1.45 "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table{' +
+            'border-collapse:collapse;border-spacing:0;margin:0;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table th,' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table td{' +
+            'padding:2px 8px;white-space:nowrap;text-align:right;' +
+            'font-variant-numeric:tabular-nums;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table th{' +
+            'font-weight:700;color:#111;border-bottom:1px solid #eef0f3;' +
+            'padding-bottom:4px;margin-bottom:2px;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table th:first-child,' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table td:first-child{' +
+            'text-align:left;color:#6b7280;font-weight:500;padding-left:0;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table td{' +
+            'color:#111;font-weight:600;' +
+            '}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table td.up{color:#c62828;}' +
+            '#' + JZ_OUPEI_TIP_ID + ' table.tm500-jz-op-tip-table td.down{color:#2e7d32;}';
+        document.head.appendChild(s);
+        bindJiaozhanOupeiTipOnce();
+    }
+
     function tagJiaozhanBeizhuHeaderTh(table, cols) {
         if (cols.beizhu < 0) return;
         const thRow = findJiaozhanHeaderThRow(table);
         if (!thRow) return;
         const ths = thRow.querySelectorAll('th');
+        if (cols.oupei >= 0 && ths[cols.oupei]) {
+            ths[cols.oupei].classList.add('tm500-jz-op-col');
+            ths[cols.oupei].setAttribute('title', '欧赔实时：胜 平 负；悬停赔率看初盘对比弹窗');
+        }
         if (cols.shishi >= 0 && ths[cols.shishi]) ths[cols.shishi].classList.add('tm500-jz-ss-col');
-        if (ths[cols.beizhu]) ths[cols.beizhu].classList.add('tm500-jz-bz-col');
+        if (ths[cols.beizhu]) {
+            const bzTh = ths[cols.beizhu];
+            bzTh.classList.add('tm500-jz-bz-col');
+            const cur = (bzTh.textContent || '').replace(/\s+/g, '');
+            if (cur === '备注' || cur === '' || cur === '-') {
+                bzTh.textContent = '初盘';
+            }
+            if (!bzTh.getAttribute('title')) bzTh.setAttribute('title', '亚盘初盘');
+        }
     }
 
     function widenJiaozhanBeizhuColumnCells(table, cols) {
@@ -919,6 +1518,7 @@
             const tr = rows[ri];
             const tds = tr.querySelectorAll('td');
             if (!tds.length) continue;
+            if (cols.oupei >= 0 && tds.length > cols.oupei) tds[cols.oupei].classList.add('tm500-jz-op-cell');
             if (cols.shishi >= 0 && tds.length > cols.shishi) tds[cols.shishi].classList.add('tm500-jz-ss-cell');
             if (cols.beizhu >= 0 && tds.length > cols.beizhu) tds[cols.beizhu].classList.add('tm500-jz-bz-cell');
         }
@@ -1055,11 +1655,13 @@
         const cellCls = opts.cellClass || 'tm500-jz-bz-cell';
         const oddsCls = opts.oddsClass || 'tm500-jz-bz-odds';
         const pkCls = opts.pkClass || 'tm500-jz-bz-pk';
+        const align = opts.align !== false;
         const norm = (txt || '').replace(/\s+/g, ' ').trim();
         let seg = splitJiaozhanRemarkDisplayParts(txt);
         if (seg) seg = formatJiaozhanOddsPairInSeg(seg);
-        const normKey = seg ?
-            [seg.left, seg.mid, seg.right].filter(function(x) { return x; }).join(' ') : norm;
+        const normKey = (seg ?
+            [seg.left, seg.mid, seg.right].filter(function(x) { return x; }).join(' ') : norm) +
+            (align ? '|a1' : '');
         if (td.getAttribute('data-tm500-jz-cell-val') === normKey) return;
         td.setAttribute('data-tm500-jz-cell-val', normKey);
         td.classList.add(cellCls);
@@ -1069,20 +1671,32 @@
         }
         td.textContent = '';
         const spL = document.createElement('span');
-        spL.className = oddsCls;
-        spL.textContent = seg.left;
+        spL.className = oddsCls + (align ? ' tm500-jz-yp-l' : '');
+        spL.textContent = seg.left || '';
         const spM = document.createElement('span');
-        spM.className = pkCls;
-        spM.textContent = seg.mid;
-        td.appendChild(spL);
-        td.appendChild(document.createTextNode(' '));
-        td.appendChild(spM);
-        if (seg.right) {
+        spM.className = pkCls + (align ? ' tm500-jz-yp-m' : '');
+        spM.textContent = seg.mid || '';
+        if (seg.mid) spM.setAttribute('title', seg.mid);
+        if ((seg.mid || '').indexOf('受') !== -1) spM.classList.add('tm500-jz-pk-shou');
+        else spM.classList.add('tm500-jz-pk-rang');
+        const spR = document.createElement('span');
+        spR.className = oddsCls + (align ? ' tm500-jz-yp-r' : '');
+        spR.textContent = seg.right || '';
+        if (align) {
+            const row = document.createElement('span');
+            row.className = 'tm500-jz-yp-align';
+            row.appendChild(spL);
+            row.appendChild(spM);
+            row.appendChild(spR);
+            td.appendChild(row);
+        } else {
+            td.appendChild(spL);
             td.appendChild(document.createTextNode(' '));
-            const spR = document.createElement('span');
-            spR.className = oddsCls;
-            spR.textContent = seg.right;
-            td.appendChild(spR);
+            td.appendChild(spM);
+            if (seg.right) {
+                td.appendChild(document.createTextNode(' '));
+                td.appendChild(spR);
+            }
         }
     }
 
@@ -1090,7 +1704,8 @@
         renderJiaozhanYapanOddsCell(bTd, txt, {
             cellClass: 'tm500-jz-bz-cell',
             oddsClass: 'tm500-jz-bz-odds',
-            pkClass: 'tm500-jz-bz-pk'
+            pkClass: 'tm500-jz-bz-pk',
+            align: true
         });
     }
 
@@ -1098,7 +1713,393 @@
         renderJiaozhanYapanOddsCell(sTd, txt, {
             cellClass: 'tm500-jz-ss-cell',
             oddsClass: 'tm500-jz-ss-odds',
-            pkClass: 'tm500-jz-ss-pk'
+            pkClass: 'tm500-jz-ss-pk',
+            align: true
+        });
+    }
+
+    function formatJiaozhanOupeiAjaxText(o) {
+        if (!o || typeof o !== 'object') return '';
+        const w = formatJiaozhanOddsTwoDecimals(String(o.WIN != null ? o.WIN : '').trim());
+        const d = formatJiaozhanOddsTwoDecimals(String(o.DRAW != null ? o.DRAW : '').trim());
+        const l = formatJiaozhanOddsTwoDecimals(String(o.LOST != null ? o.LOST : '').trim());
+        if (!w && !d && !l) return '';
+        const parts = [];
+        if (w) parts.push(w);
+        if (d) parts.push(d);
+        if (l) parts.push(l);
+        return parts.join(' ');
+    }
+
+    function formatJiaozhanOupeiSignedNum(n, digits) {
+        if (!isFinite(n)) return '';
+        const d = digits == null ? 2 : digits;
+        const s = n.toFixed(d);
+        if (n > 0) return '+' + s;
+        return s;
+    }
+
+    /** 百分比 = 差额 / (初盘 - 1) */
+    function formatJiaozhanOupeiPct(diff, chu) {
+        if (!isFinite(diff) || !isFinite(chu)) return '';
+        const den = chu - 1;
+        if (Math.abs(den) < 1e-9) return '';
+        return formatJiaozhanOupeiSignedNum(diff / den * 100, 1) + '%';
+    }
+
+    function buildJiaozhanOupeiTipMetric(chuN, zhN) {
+        const m = {
+            chu: isFinite(chuN) ? chuN.toFixed(2) : '-',
+            zh: isFinite(zhN) ? zhN.toFixed(2) : '-',
+            diff: '-',
+            pct: '-',
+            d: ''
+        };
+        if (isFinite(chuN) && isFinite(zhN)) {
+            const diff = zhN - chuN;
+            m.d = Math.abs(diff) < 0.0005 ? '' : (diff > 0 ? 'up' : 'down');
+            m.diff = formatJiaozhanOupeiSignedNum(diff, 2);
+            m.pct = formatJiaozhanOupeiPct(diff, chuN) || '-';
+        }
+        return m;
+    }
+
+    /**
+     * 表格数据：表头 胜/平/负；行标签 初盘/实时/差额/百分比 只出现一次
+     * { headers:['胜','平','负'], metrics:[{k:'初盘', cells:[{v,d},...]}, ...] }
+     */
+    function buildJiaozhanOupeiTipTable(chuObj, zhObj) {
+        const keys = ['WIN', 'DRAW', 'LOST'];
+        const labels = ['胜', '平', '负'];
+        const headers = [];
+        const mets = [];
+        let i;
+        for (i = 0; i < keys.length; i++) {
+            const chuN = getJiaozhanOupeiOutcomeNum(chuObj, keys[i]);
+            const zhN = getJiaozhanOupeiOutcomeNum(zhObj, keys[i]);
+            const showN = isFinite(zhN) ? zhN : chuN;
+            if (!isFinite(chuN) && !isFinite(showN)) continue;
+            headers.push(labels[i]);
+            mets.push(buildJiaozhanOupeiTipMetric(chuN, isFinite(zhN) ? zhN : showN));
+        }
+        if (!headers.length) return null;
+        return {
+            headers: headers,
+            metrics: [
+                { k: '初盘', cells: mets.map(function(m) { return { v: m.chu, d: '' }; }) },
+                { k: '实时', cells: mets.map(function(m) { return { v: m.zh, d: '' }; }) },
+                { k: '差额', cells: mets.map(function(m) { return { v: m.diff, d: m.d }; }) },
+                { k: '百分比', cells: mets.map(function(m) { return { v: m.pct, d: m.d }; }) }
+            ]
+        };
+    }
+
+    function getJiaozhanOupeiOutcomeNum(o, key) {
+        if (!o || typeof o !== 'object') return NaN;
+        return parseJiaozhanOddsNumber(o[key]);
+    }
+
+    function ensureJiaozhanOupeiTipEl() {
+        let tip = document.getElementById(JZ_OUPEI_TIP_ID);
+        if (tip) return tip;
+        tip = document.createElement('div');
+        tip.id = JZ_OUPEI_TIP_ID;
+        tip.setAttribute('role', 'tooltip');
+        document.body.appendChild(tip);
+        return tip;
+    }
+
+    function hideJiaozhanOupeiTip() {
+        const tip = document.getElementById(JZ_OUPEI_TIP_ID);
+        if (!tip) return;
+        tip.style.display = 'none';
+        tip.textContent = '';
+    }
+
+    function positionJiaozhanOupeiTip(tip, anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
+        const pad = 8;
+        tip.style.display = 'block';
+        tip.style.left = '0px';
+        tip.style.top = '0px';
+        const tw = tip.offsetWidth || 260;
+        const th = tip.offsetHeight || 110;
+        let left = rect.left + rect.width / 2 - tw / 2;
+        let top = rect.top - th - pad;
+        if (top < pad) top = rect.bottom + pad;
+        if (left < pad) left = pad;
+        if (left + tw > window.innerWidth - pad) left = window.innerWidth - tw - pad;
+        if (top + th > window.innerHeight - pad) {
+            top = Math.max(pad, window.innerHeight - th - pad);
+        }
+        tip.style.left = Math.round(left) + 'px';
+        tip.style.top = Math.round(top) + 'px';
+    }
+
+    function showJiaozhanOupeiTip(anchorEl, tableData) {
+        if (!anchorEl || !tableData || !tableData.headers || !tableData.metrics) return;
+        injectJiaozhanOupeiStyle();
+        const tip = ensureJiaozhanOupeiTipEl();
+        tip.textContent = '';
+        const table = document.createElement('table');
+        table.className = 'tm500-jz-op-tip-table';
+        const thead = document.createElement('thead');
+        const hr = document.createElement('tr');
+        const corner = document.createElement('th');
+        corner.textContent = '';
+        hr.appendChild(corner);
+        let i;
+        for (i = 0; i < tableData.headers.length; i++) {
+            const th = document.createElement('th');
+            th.textContent = tableData.headers[i];
+            hr.appendChild(th);
+        }
+        thead.appendChild(hr);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        let r;
+        for (r = 0; r < tableData.metrics.length; r++) {
+            const metric = tableData.metrics[r];
+            const tr = document.createElement('tr');
+            const lab = document.createElement('td');
+            lab.textContent = metric.k;
+            tr.appendChild(lab);
+            const cells = metric.cells || [];
+            for (i = 0; i < cells.length; i++) {
+                const td = document.createElement('td');
+                const c = cells[i] || {};
+                td.textContent = c.v == null ? '-' : String(c.v);
+                if (c.d === 'up') td.className = 'up';
+                else if (c.d === 'down') td.className = 'down';
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        tip.appendChild(table);
+        positionJiaozhanOupeiTip(tip, anchorEl);
+    }
+
+    function bindJiaozhanOupeiTipOnce() {
+        if (document.documentElement.dataset.tm500JzOpTipBound === '1') return;
+        document.documentElement.dataset.tm500JzOpTipBound = '1';
+        document.addEventListener('mouseover', function(ev) {
+            const t = ev.target;
+            if (!t || !t.closest) return;
+            const cell = t.closest('td.tm500-jz-op-cell');
+            if (!cell || !cell.closest('#team_jiaozhan')) return;
+            const raw = cell.getAttribute('data-tm500-jz-op-tip');
+            if (!raw) return;
+            let tableData;
+            try {
+                tableData = JSON.parse(raw);
+            } catch (e0) {
+                return;
+            }
+            if (!tableData || !tableData.headers || !tableData.metrics) return;
+            showJiaozhanOupeiTip(cell, tableData);
+        }, true);
+        document.addEventListener('mouseout', function(ev) {
+            const t = ev.target;
+            if (!t || !t.closest) return;
+            const cell = t.closest('td.tm500-jz-op-cell');
+            if (!cell || !cell.closest('#team_jiaozhan')) return;
+            const rel = ev.relatedTarget;
+            if (rel && (cell === rel || cell.contains(rel))) return;
+            hideJiaozhanOupeiTip();
+        }, true);
+        window.addEventListener('scroll', hideJiaozhanOupeiTip, true);
+        window.addEventListener('resize', hideJiaozhanOupeiTip);
+    }
+
+    /**
+     * 欧赔列显示实时(终盘)；相对初盘：升红↑、降绿↓。
+     * 背景仅标在「比分」对应的 1X2 项：主队进球>客→主胜，相等→平，主<客→客胜。
+     * （不用赛果列：赛果是关注队视角，会与欧赔主客相反。）
+     * 悬停表格：行=初盘/实时/差额/百分比（各一次），列=胜/平/负
+     */
+    function parseJiaozhanDzScoreToOupeiKey(tr) {
+        if (!tr) return '';
+        const dz = tr.querySelector('td.dz em') || tr.querySelector('td.dz');
+        if (!dz) return '';
+        const raw = (dz.textContent || '').replace(/\s+/g, '');
+        const m = raw.match(/(\d+)\s*[:：\-]\s*(\d+)/);
+        if (!m) return '';
+        const hg = parseInt(m[1], 10);
+        const ag = parseInt(m[2], 10);
+        if (!isFinite(hg) || !isFinite(ag)) return '';
+        if (hg > ag) return 'WIN';
+        if (hg < ag) return 'LOST';
+        return 'DRAW';
+    }
+
+    function resolveJiaozhanOupeiResultKey(oTd) {
+        if (!oTd) return '';
+        const tr = oTd.closest ? oTd.closest('tr') : null;
+        return parseJiaozhanDzScoreToOupeiKey(tr);
+    }
+
+    function renderJiaozhanOupeiCellWithChg(oTd, chuObj, zhObj) {
+        if (!oTd) return;
+        const keys = ['WIN', 'DRAW', 'LOST'];
+        const EPS = 0.0005;
+        const zhTxt = formatJiaozhanOupeiAjaxText(zhObj);
+        const chuTxt = formatJiaozhanOupeiAjaxText(chuObj);
+        const displayTxt = zhTxt || chuTxt;
+        const resultKey = resolveJiaozhanOupeiResultKey(oTd);
+        const normKey = (displayTxt || '-') + '|' + (chuTxt || '') + '|' + (zhTxt || '') + '|sc:' + resultKey;
+        if (oTd.getAttribute('data-tm500-jz-cell-val') === normKey) return;
+        oTd.setAttribute('data-tm500-jz-cell-val', normKey);
+        oTd.classList.add('tm500-jz-op-cell');
+        oTd.textContent = '';
+        oTd.removeAttribute('title');
+        if (!displayTxt) {
+            oTd.removeAttribute('data-tm500-jz-op-tip');
+            oTd.textContent = '-';
+            return;
+        }
+        const tipTable = buildJiaozhanOupeiTipTable(chuObj, zhObj);
+        if (tipTable) {
+            oTd.setAttribute('data-tm500-jz-op-tip', JSON.stringify(tipTable));
+        } else {
+            oTd.removeAttribute('data-tm500-jz-op-tip');
+        }
+        let i;
+        for (i = 0; i < keys.length; i++) {
+            const chuN = getJiaozhanOupeiOutcomeNum(chuObj, keys[i]);
+            const zhN = getJiaozhanOupeiOutcomeNum(zhObj, keys[i]);
+            const showN = isFinite(zhN) ? zhN : chuN;
+            if (!isFinite(showN)) continue;
+            if (oTd.childNodes.length) oTd.appendChild(document.createTextNode(' '));
+            const sp = document.createElement('span');
+            sp.className = 'tm500-jz-op-odds';
+            sp.textContent = showN.toFixed(2);
+            if (isFinite(chuN) && isFinite(zhN)) {
+                const diff = zhN - chuN;
+                const isResult = resultKey && keys[i] === resultKey;
+                if (diff > EPS) {
+                    sp.classList.add('tm500-jz-op-odds-up');
+                    if (isResult) sp.classList.add('tm500-jz-op-odds-bg-up');
+                    const arr = document.createElement('span');
+                    arr.className = 'tm500-jz-op-arr';
+                    arr.textContent = '↑';
+                    sp.appendChild(arr);
+                } else if (diff < -EPS) {
+                    sp.classList.add('tm500-jz-op-odds-down');
+                    if (isResult) sp.classList.add('tm500-jz-op-odds-bg-down');
+                    const arr = document.createElement('span');
+                    arr.className = 'tm500-jz-op-arr';
+                    arr.textContent = '↓';
+                    sp.appendChild(arr);
+                }
+            }
+            oTd.appendChild(sp);
+        }
+    }
+
+    function renderJiaozhanOupeiCell(oTd, txt) {
+        renderJiaozhanOupeiCellWithChg(oTd, null, {
+            WIN: (txt || '').split(/\s+/)[0] || '',
+            DRAW: (txt || '').split(/\s+/)[1] || '',
+            LOST: (txt || '').split(/\s+/)[2] || ''
+        });
+    }
+
+    function applyJiaozhanOupeiFromAjaxPayload(table, cols, pairs, chuMap, zhongMap) {
+        if (cols.oupei < 0) return 0;
+        chuMap = chuMap || {};
+        zhongMap = zhongMap || {};
+        let filled = 0;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.oupei) return;
+            const chu = chuMap[p.fid];
+            const zh = zhongMap[p.fid];
+            if (!formatJiaozhanOupeiAjaxText(chu) && !formatJiaozhanOupeiAjaxText(zh)) return;
+            const oTd = tds[cols.oupei];
+            renderJiaozhanOupeiCellWithChg(oTd, chu, zh);
+            oTd.setAttribute('data-tm500-jz-op-cp', '1');
+            filled++;
+        });
+        return filled;
+    }
+
+    function extractJiaozhanOupeiFromNativeTd(td) {
+        if (!td) return '';
+        const spans = td.querySelectorAll('.pub_table_pl span, p.pub_table_pl span');
+        if (spans.length >= 3) {
+            const w = formatJiaozhanOddsTwoDecimals((spans[0].textContent || '').trim());
+            const d = formatJiaozhanOddsTwoDecimals((spans[1].textContent || '').trim());
+            const l = formatJiaozhanOddsTwoDecimals((spans[2].textContent || '').trim());
+            if (w || d || l) return [w, d, l].filter(function(x) { return x; }).join(' ');
+        }
+        const raw = (td.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!raw || raw === '-') return '';
+        const nums = raw.match(/\d+(?:\.\d+)?/g);
+        if (nums && nums.length >= 3) {
+            return [
+                formatJiaozhanOddsTwoDecimals(nums[0]),
+                formatJiaozhanOddsTwoDecimals(nums[1]),
+                formatJiaozhanOddsTwoDecimals(nums[2])
+            ].join(' ');
+        }
+        return '';
+    }
+
+    function findJiaozhanNativeOupeiColIndex(table) {
+        const cols = getJiaozhanYapanBeizhuIndices(table);
+        if (cols.oupeiNative >= 0) return cols.oupeiNative;
+        const thRow = findJiaozhanHeaderThRow(table);
+        if (!thRow) return 5;
+        const ths = thRow.querySelectorAll('th');
+        let i;
+        for (i = 0; i < ths.length; i++) {
+            if (ths[i].querySelector('select[name="oupei"]')) return i;
+        }
+        return 5;
+    }
+
+    function fillJiaozhanOupeiFromNativeDom(table, cols, pairs) {
+        if (cols.oupei < 0) return;
+        const nativeIdx = findJiaozhanNativeOupeiColIndex(table);
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.oupei || tds.length <= nativeIdx) return;
+            const oTd = tds[cols.oupei];
+            if (oTd.getAttribute('data-tm500-jz-op-cp') === '1') return;
+            const txt = extractJiaozhanOupeiFromNativeTd(tds[nativeIdx]);
+            if (!txt) return;
+            renderJiaozhanOupeiCell(oTd, txt);
+            oTd.setAttribute('data-tm500-jz-op-dom', '1');
+        });
+    }
+
+    function fetchAndApplyJiaozhanOupei(table, cols, pairs, reqId) {
+        if (cols.oupei < 0 || !pairs || !pairs.length) return;
+        const opSel = table.querySelector('select[name="oupei"][data-t="op"]');
+        let opCid = (opSel && opSel.value !== undefined && opSel.value !== null && String(opSel.value).trim() !== '') ?
+            String(opSel.value).trim() : '0';
+        const origin = location.origin || (location.protocol + '//' + location.host);
+        const urlChu = origin + '/fenxi1/inc/ajax.php?' + buildJiaozhanOddsAjaxQuery('oupei', opCid, pairs, '1');
+        const urlZhong = origin + '/fenxi1/inc/ajax.php?' + buildJiaozhanOddsAjaxQuery('oupei', opCid, pairs, '0');
+
+        function parseMap(text) {
+            try {
+                return sanitizeJiaozhanYapanAjaxMap(JSON.parse((text || '').replace(/^\uFEFF?\s*/, '')));
+            } catch (e0) {
+                return {};
+            }
+        }
+
+        jiaozhanRemarkAjaxGet(urlChu, reqId, function(err1, text1) {
+            if (!jiaozhanRemarkAjaxReqActive(reqId)) return;
+            const chuMap = (!err1 && text1) ? parseMap(text1) : {};
+            jiaozhanRemarkAjaxGet(urlZhong, reqId, function(err2, text2) {
+                if (!jiaozhanRemarkAjaxReqActive(reqId)) return;
+                const zhongMap = (!err2 && text2) ? parseMap(text2) : {};
+                const n = applyJiaozhanOupeiFromAjaxPayload(table, cols, pairs, chuMap, zhongMap);
+                if (n === 0) fillJiaozhanOupeiFromNativeDom(table, cols, pairs);
+            });
         });
     }
 
@@ -1112,14 +2113,65 @@
         }
     }
 
+    function extractJiaozhanYapanTripleFromTd(yapanTd) {
+        if (!yapanTd) return null;
+        const left = yapanTd.querySelector('.table_pl_left') ||
+            yapanTd.querySelector('.pub_table_pl .table_pl_left');
+        const midEl = yapanTd.querySelector('.table_pl_center') ||
+            yapanTd.querySelector('.pub_table_pl .table_pl_center');
+        const right = yapanTd.querySelector('.table_pl_right') ||
+            yapanTd.querySelector('.pub_table_pl .table_pl_right');
+        let h = left ? (left.textContent || '').trim() : '';
+        let mid = midEl ? (midEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        let a = right ? (right.textContent || '').trim() : '';
+        // 站点本场行常见无 left/right class，仅三个并列 span
+        if ((!h || !a) && midEl && midEl.parentNode) {
+            const kids = midEl.parentNode.children;
+            const spans = [];
+            let si;
+            for (si = 0; si < kids.length; si++) {
+                if (kids[si].tagName === 'SPAN') spans.push(kids[si]);
+            }
+            if (spans.length >= 3) {
+                if (!h) h = (spans[0].textContent || '').trim();
+                if (!mid) mid = (spans[1].textContent || '').replace(/\s+/g, ' ').trim();
+                if (!a) a = (spans[2].textContent || '').trim();
+            }
+        }
+        if (!h && !mid && !a) {
+            const p = yapanTd.querySelector('p.pub_table_pl') || yapanTd.querySelector('.pub_table_pl');
+            if (p) {
+                const spans = p.querySelectorAll('span');
+                if (spans.length >= 3) {
+                    h = (spans[0].textContent || '').trim();
+                    mid = (spans[1].textContent || '').replace(/\s+/g, ' ').trim();
+                    a = (spans[2].textContent || '').trim();
+                }
+            }
+        }
+        h = formatJiaozhanOddsTwoDecimals(h);
+        a = formatJiaozhanOddsTwoDecimals(a);
+        if (!h && !mid && !a) return null;
+        return { left: h, mid: mid, right: a };
+    }
+
     function extractJiaozhanChupanYapanText(yapanTd) {
         if (!yapanTd) return '';
+        const triple = extractJiaozhanYapanTripleFromTd(yapanTd);
+        if (triple && (triple.left || triple.right || triple.mid)) {
+            // 有赔率时优先完整「主赔 盘口 客赔」；勿只返回盘名
+            if (triple.left || triple.right) {
+                const parts = [];
+                if (triple.left) parts.push(triple.left);
+                if (triple.mid) parts.push(triple.mid);
+                if (triple.right) parts.push(triple.right);
+                return parts.join(' ');
+            }
+        }
         const ti = (yapanTd.getAttribute('title') || '').trim();
-        const mid = yapanTd.querySelector('.pub_table_pl .table_pl_center');
-        const midTxt = mid ? (mid.textContent || '').trim() : '';
-        if (ti && midTxt && ti !== midTxt) return ti + ' ' + midTxt;
+        if (ti && triple && triple.mid && ti !== triple.mid) return ti + ' ' + triple.mid;
         if (ti) return ti;
-        if (midTxt) return midTxt;
+        if (triple && triple.mid) return triple.mid;
         const p = yapanTd.querySelector('p.pub_table_pl');
         if (p) {
             const raw = (p.textContent || '').replace(/\s+/g, ' ').trim();
@@ -1146,16 +2198,39 @@
         return '5';
     }
 
-    /** 与站点初盘 ajax 一致：fenxi1/inc/ajax.php（fid[]/sid[] 与各行 tr 对应） */
+    function isJiaozhanIncludeBmatchChecked(root) {
+        const scope = root || document.getElementById('team_jiaozhan') || document;
+        const cb = scope.querySelector('input[name="bhbc"]');
+        if (!cb) return false;
+        return !!(cb.checked || cb.getAttribute('checked'));
+    }
+
+    function isJiaozhanDataRowVisible(tr) {
+        if (!tr) return false;
+        const st = tr.getAttribute('style') || '';
+        if (/display\s*:\s*none/i.test(st)) return false;
+        try {
+            if (typeof window.getComputedStyle === 'function' &&
+                window.getComputedStyle(tr).display === 'none') return false;
+        } catch (eVis) {}
+        return true;
+    }
+
+    /** 与站点初盘 ajax 一致：fenxi1/inc/ajax.php（fid[]/sid[] 与各行 tr 对应；勾选「包含本场」时强制含 bmatch） */
     function collectJiaozhanRemarkAjaxPairs(table) {
         const out = [];
+        const root = document.getElementById('team_jiaozhan');
+        const includeBmatch = isJiaozhanIncludeBmatchChecked(root);
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
         rows.forEach(function(tr) {
-            if (tr.classList.contains('bmatch')) return;
-            const st = tr.getAttribute('style') || '';
-            if (/display\s*:\s*none/i.test(st)) return;
+            const isBmatch = tr.classList.contains('bmatch');
+            if (isBmatch) {
+                if (!includeBmatch && !isJiaozhanDataRowVisible(tr)) return;
+            } else if (!isJiaozhanDataRowVisible(tr)) {
+                return;
+            }
             const fid = getJiaozhanTrFid(tr);
             if (!fid) return;
             out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr) });
@@ -1163,13 +2238,14 @@
         return out;
     }
 
-    /** 与站点亚盘 ajax 一致：t=yapan；p_t 1=初盘 0=终盘；fid[]/sid[] 各两轮 */
-    function buildJiaozhanYapanChupanAjaxQuery(cid, pairs, pT) {
+    /** 与站点亚盘/欧赔 ajax 一致：t=yapan|oupei；p_t 1=初盘 0=终盘；fid[]/sid[] 各两轮 */
+    function buildJiaozhanOddsAjaxQuery(tName, cid, pairs, pT) {
+        const t = tName || 'yapan';
         const pt = pT == null || pT === '' ? '1' : String(pT);
         const ts = Date.now();
         const enc = encodeURIComponent;
         const c = enc(String(cid));
-        const parts = ['_=' + ts, 't=yapan', 'cid=' + c];
+        const parts = ['_=' + ts, 't=' + enc(t), 'cid=' + c];
         let rep, i;
         for (rep = 0; rep < 2; rep++) {
             for (i = 0; i < pairs.length; i++) {
@@ -1184,6 +2260,10 @@
         }
         parts.push('r=1');
         return parts.join('&');
+    }
+
+    function buildJiaozhanYapanChupanAjaxQuery(cid, pairs, pT) {
+        return buildJiaozhanOddsAjaxQuery('yapan', cid, pairs, pT);
     }
 
     function sanitizeJiaozhanYapanAjaxMap(raw) {
@@ -1331,6 +2411,74 @@
         });
     }
 
+    /** 读取盘口名（去掉升降箭头） */
+    function getJiaozhanPkNameFromTd(td, pkSel) {
+        if (!td) return '';
+        const pk = td.querySelector(pkSel);
+        if (!pk) return '';
+        const clone = pk.cloneNode(true);
+        const arrs = clone.querySelectorAll('.tm500-jz-ss-pk-arr, .tm500-jz-yp-chg-arr');
+        let i;
+        for (i = 0; i < arrs.length; i++) arrs[i].remove();
+        return (clone.textContent || '').replace(/\s+/g, '').replace(/[↑↓]/g, '').trim();
+    }
+
+    function resolveJiaozhanYapanLineForCompare(ajaxObj, td, pkSel) {
+        let n = parseJiaozhanYapanCompareLine(ajaxObj);
+        if (isFinite(n)) return n;
+        const name = getJiaozhanPkNameFromTd(td, pkSel);
+        if (name) return parseJiaozhanYapanHandicapNameToFloat(name);
+        return NaN;
+    }
+
+    function markJiaozhanShishiPkDir(pk, dir) {
+        if (!pk) return;
+        pk.classList.remove('tm500-jz-ss-pk-up', 'tm500-jz-ss-pk-down');
+        const oldArr = pk.querySelector('.tm500-jz-ss-pk-arr');
+        if (oldArr) oldArr.remove();
+        if (dir !== 'up' && dir !== 'down') return;
+        pk.classList.add(dir === 'up' ? 'tm500-jz-ss-pk-up' : 'tm500-jz-ss-pk-down');
+        const arr = document.createElement('span');
+        arr.className = 'tm500-jz-ss-pk-arr';
+        arr.textContent = dir === 'up' ? '↑' : '↓';
+        pk.appendChild(arr);
+    }
+
+    /**
+     * 实时列盘口相对初盘：按「上盘让球绝对值」升降。
+     * 升盘（让球加深，如 平手→受* / 半球→一球）→ 浅红↑；
+     * 退盘（让球变浅，如 半球→平手/半球）→ 浅蓝↓。
+     */
+    function applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap, zhongMap) {
+        if (!pairs || !pairs.length || cols.shishi < 0) return;
+        injectJiaozhanShishiStyle();
+        const EPS = 1e-4;
+        chuMap = chuMap || {};
+        zhongMap = zhongMap || {};
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.shishi) return;
+            const sTd = tds[cols.shishi];
+            const bTd = cols.beizhu >= 0 && tds.length > cols.beizhu ? tds[cols.beizhu] : null;
+            const pk = sTd.querySelector('.tm500-jz-ss-pk');
+            if (!pk) return;
+            const chuName = getJiaozhanPkNameFromTd(bTd, '.tm500-jz-bz-pk');
+            const zhName = getJiaozhanPkNameFromTd(sTd, '.tm500-jz-ss-pk');
+            let a = chuName ? parseJiaozhanYapanHandicapNameToFloat(chuName) : NaN;
+            let b = zhName ? parseJiaozhanYapanHandicapNameToFloat(zhName) : NaN;
+            if (!isFinite(a)) a = parseJiaozhanYapanCompareLine(chuMap[p.fid]);
+            if (!isFinite(b)) b = parseJiaozhanYapanCompareLine(zhongMap[p.fid]);
+            if (!isFinite(a) || !isFinite(b)) {
+                markJiaozhanShishiPkDir(pk, '');
+                return;
+            }
+            const absDiff = Math.abs(b) - Math.abs(a);
+            if (absDiff > EPS) markJiaozhanShishiPkDir(pk, 'up');
+            else if (absDiff < -EPS) markJiaozhanShishiPkDir(pk, 'down');
+            else markJiaozhanShishiPkDir(pk, '');
+        });
+    }
+
     function jiaozhanYapanFetchChuZhongAndApplyMarks(table, cols, pairs, cid, reqId) {
         injectJiaozhanYapanChgStyle();
         const origin = location.origin || (location.protocol + '//' + location.host);
@@ -1353,13 +2501,11 @@
                     } catch (e1) {}
                 }
                 applyJiaozhanYapanChgMarks(table, cols, pairs, chuMap, zhongMap);
-                const nSs = applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, zhongMap);
+                applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, zhongMap);
+                fillMissingJiaozhanShishiFromYapanDom(table, cols, pairs);
+                fillMissingJiaozhanRemarkFromZhongMap(table, cols, pairs, zhongMap);
                 applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, chuMap, zhongMap);
-                if (nSs === 0) {
-                    const root = document.getElementById('team_jiaozhan');
-                    const pk = table.querySelector('select[name="yapan"][data-t="pk"]');
-                    if (root && pk) fillJiaozhanShishiFromZhongpanDomFallback(root, table, pk, cols, null, reqId);
-                }
+                applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap, zhongMap);
             });
         });
     }
@@ -1377,13 +2523,11 @@
                 } catch (e2) {}
             }
             applyJiaozhanYapanChgMarks(table, cols, pairs, chuMap || {}, zhongMap);
-            const nSs = applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, zhongMap);
+            applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, zhongMap);
+            fillMissingJiaozhanShishiFromYapanDom(table, cols, pairs);
+            fillMissingJiaozhanRemarkFromZhongMap(table, cols, pairs, zhongMap);
             applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, chuMap || {}, zhongMap);
-            if (nSs === 0) {
-                const root = document.getElementById('team_jiaozhan');
-                const pk = table.querySelector('select[name="yapan"][data-t="pk"]');
-                if (root && pk) fillJiaozhanShishiFromZhongpanDomFallback(root, table, pk, cols, null, reqId);
-            }
+            applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap || {}, zhongMap);
         });
     }
 
@@ -1452,21 +2596,16 @@
 
     function extractJiaozhanShishiFromYapanTd(yapanTd) {
         if (!yapanTd) return '';
-        const left = yapanTd.querySelector('.table_pl_left') ||
-            yapanTd.querySelector('.pub_table_pl .table_pl_left');
-        const mid = yapanTd.querySelector('.table_pl_center') ||
-            yapanTd.querySelector('.pub_table_pl .table_pl_center');
-        const right = yapanTd.querySelector('.table_pl_right') ||
-            yapanTd.querySelector('.pub_table_pl .table_pl_right');
-        const h = left ? formatJiaozhanOddsTwoDecimals((left.textContent || '').trim()) : '';
-        const mRaw = mid ? stripJiaozhanNumericHandicapFromMid((mid.textContent || '').trim()) : '';
-        const a = right ? formatJiaozhanOddsTwoDecimals((right.textContent || '').trim()) : '';
-        if (h || mRaw || a) {
-            const parts = [];
-            if (h) parts.push(h);
-            if (mRaw) parts.push(mRaw);
-            if (a) parts.push(a);
-            return parts.join(' ');
+        const triple = extractJiaozhanYapanTripleFromTd(yapanTd);
+        if (triple) {
+            const mRaw = stripJiaozhanNumericHandicapFromMid(triple.mid || '');
+            if (triple.left || mRaw || triple.right) {
+                const parts = [];
+                if (triple.left) parts.push(triple.left);
+                if (mRaw) parts.push(mRaw);
+                if (triple.right) parts.push(triple.right);
+                return parts.join(' ');
+            }
         }
         return sanitizeJiaozhanShishiDisplayText(extractJiaozhanChupanYapanText(yapanTd));
     }
@@ -1725,7 +2864,27 @@
                         zhongMap = sanitizeJiaozhanYapanAjaxMap(JSON.parse((text2 || '').replace(/^\uFEFF?\s*/, '')));
                     } catch (eCp2) {}
                 }
-                onDone(chuMap, zhongMap);
+                const needYazhi = pairs.filter(function(p) {
+                    return !formatJiaozhanYapanCopyLine(chuMap[p.fid]);
+                });
+                if (!needYazhi.length) {
+                    onDone(chuMap, zhongMap);
+                    return;
+                }
+                let pending = needYazhi.length;
+                needYazhi.forEach(function(p) {
+                    const yUrl = origin + '/fenxi1/inc/yazhiajax.php?fid=' + encodeURIComponent(p.fid) +
+                        '&id=' + encodeURIComponent(String(cid || '5')) +
+                        '&t=' + Date.now() + '&r=1';
+                    jiaozhanRemarkAjaxGet(yUrl, -1, function(errY, textY) {
+                        if (!errY && textY) {
+                            const obj = parseJiaozhanYazhiAjaxOpeningObj(textY);
+                            if (obj) chuMap[p.fid] = obj;
+                        }
+                        pending--;
+                        if (pending <= 0) onDone(chuMap, zhongMap);
+                    });
+                });
             });
         });
     }
@@ -1813,6 +2972,134 @@
         return filled;
     }
 
+    function isJiaozhanBeizhuCellFilled(bTd) {
+        if (!bTd) return false;
+        const t = (bTd.getAttribute('data-tm500-jz-cell-val') || bTd.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!t || t === '-') return false;
+        // 仅有盘名、无主客赔率数字 → 视为未填全（本场旧 DOM 兜底会踩中）
+        if (!/\d+(?:\.\d+)?/.test(t)) return false;
+        return true;
+    }
+
+    /** 初盘仍缺赔率时，用终盘 AJAX 数据补全（本场常见仅有即时盘） */
+    function fillMissingJiaozhanRemarkFromZhongMap(table, cols, pairs, zhongMap) {
+        if (cols.beizhu < 0 || !zhongMap || !pairs || !pairs.length) return;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.beizhu) return;
+            const bTd = tds[cols.beizhu];
+            if (isJiaozhanBeizhuCellFilled(bTd)) return;
+            const txt = formatJiaozhanYapanAjaxRemark(zhongMap[p.fid]);
+            if (!txt) return;
+            renderJiaozhanBeizhuCell(bTd, txt);
+            bTd.setAttribute('data-tm500-jz-bz-cp', '1');
+            bTd.setAttribute('data-tm500-jz-bz-zhong', '1');
+        });
+    }
+
+    function collectJiaozhanPairsMissingBeizhu(cols, pairs) {
+        const out = [];
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.beizhu) {
+                out.push(p);
+                return;
+            }
+            if (!isJiaozhanBeizhuCellFilled(tds[cols.beizhu])) out.push(p);
+        });
+        return out;
+    }
+
+    function stripJiaozhanHtmlText(raw) {
+        return String(raw || '')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    /**
+     * yazhiajax 返回盘口变动（新→旧），末条为初盘。
+     * 用于 p_t=1 无初盘数据时的备注列兜底。
+     */
+    function parseJiaozhanYazhiAjaxOpeningObj(text) {
+        let arr;
+        try {
+            arr = JSON.parse((text || '').replace(/^\uFEFF?\s*/, ''));
+        } catch (e0) {
+            return null;
+        }
+        if (!Array.isArray(arr) || !arr.length) return null;
+        const html = String(arr[arr.length - 1] || '');
+        const m = html.match(/<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+        if (!m) return null;
+        let h = stripJiaozhanHtmlText(m[1]);
+        let name = stripJiaozhanHtmlText(m[2]);
+        let a = stripJiaozhanHtmlText(m[3]);
+        name = name.replace(/\s*[升降]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+        if (h === '-') h = '';
+        if (name === '-') name = '';
+        if (a === '-') a = '';
+        if (!h && !name && !a) return null;
+        return {
+            HOMEMONEYLINE: h,
+            HANDICAPLINE: '',
+            AWAYMONEYLINE: a,
+            HANDICAPLINENAME: name
+        };
+    }
+
+    /** 对备注仍空的行，按公司 id 拉 yazhiajax 取末条初盘写入备注 */
+    function fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, pairs, cid, reqId, onDone) {
+        const missing = collectJiaozhanPairsMissingBeizhu(cols, pairs);
+        const extraMap = {};
+        if (!missing.length) {
+            if (onDone) onDone(extraMap);
+            return;
+        }
+        const origin = location.origin || (location.protocol + '//' + location.host);
+        const companyId = String(cid || '5');
+        let pending = missing.length;
+        let settled = false;
+        function finishOne() {
+            if (settled) return;
+            pending--;
+            if (pending > 0) return;
+            settled = true;
+            if (onDone) onDone(extraMap);
+        }
+        missing.forEach(function(p) {
+            const url = origin + '/fenxi1/inc/yazhiajax.php?fid=' + encodeURIComponent(p.fid) +
+                '&id=' + encodeURIComponent(companyId) +
+                '&t=' + Date.now() + '&r=1';
+            jiaozhanRemarkAjaxGet(url, reqId, function(err, text) {
+                if (!jiaozhanRemarkAjaxReqActive(reqId)) {
+                    finishOne();
+                    return;
+                }
+                if (!err && text) {
+                    const obj = parseJiaozhanYazhiAjaxOpeningObj(text);
+                    if (obj) {
+                        extraMap[p.fid] = obj;
+                        const txt = formatJiaozhanYapanAjaxRemark(obj);
+                        if (txt) {
+                            const tds = p.tr.querySelectorAll('td');
+                            if (tds.length > cols.beizhu) {
+                                const bTd = tds[cols.beizhu];
+                                renderJiaozhanBeizhuCell(bTd, txt);
+                                bTd.setAttribute('data-tm500-jz-bz-cp', '1');
+                                bTd.setAttribute('data-tm500-jz-bz-yazhi', '1');
+                            }
+                        }
+                    }
+                }
+                finishOne();
+            });
+        });
+    }
+
     function applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, data) {
         if (cols.shishi < 0 || !data || typeof data !== 'object') return 0;
         let filled = 0;
@@ -1833,9 +3120,7 @@
     function fillJiaozhanShishiFromYapanDom(table, cols, pairs) {
         if (cols.shishi < 0) return;
         pairs.forEach(function(p) {
-            if (p.tr.classList.contains('bmatch')) return;
-            const st = p.tr.getAttribute('style') || '';
-            if (/display\s*:\s*none/i.test(st)) return;
+            if (!isJiaozhanDataRowVisible(p.tr) && !p.tr.classList.contains('bmatch')) return;
             const tds = p.tr.querySelectorAll('td');
             if (tds.length <= cols.shishi || tds.length <= cols.yapan) return;
             const txt = extractJiaozhanShishiFromYapanTd(tds[cols.yapan]);
@@ -1845,6 +3130,39 @@
             sTd.setAttribute('data-tm500-jz-ss-dom', '1');
         });
         applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, null, null);
+    }
+
+    /** 仅补填仍空的实时格（避免其它行已有 AJAX 数据时跳过本场） */
+    function fillMissingJiaozhanShishiFromYapanDom(table, cols, pairs) {
+        if (cols.shishi < 0 || cols.yapan < 0 || !pairs || !pairs.length) return;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.shishi || tds.length <= cols.yapan) return;
+            const sTd = tds[cols.shishi];
+            if (sTd.getAttribute('data-tm500-jz-ss-zp') === '1') return;
+            const cur = (sTd.textContent || '').replace(/\s+/g, '').trim();
+            if (cur && cur !== '-') return;
+            const txt = extractJiaozhanShishiFromYapanTd(tds[cols.yapan]);
+            if (!txt) return;
+            renderJiaozhanShishiCell(sTd, txt);
+            sTd.setAttribute('data-tm500-jz-ss-dom', '1');
+        });
+    }
+
+    /** 备注仍空时，用当前亚盘列兜底（本场初盘接口常为空） */
+    function fillMissingJiaozhanRemarkFromYapanDom(table, cols, pairs) {
+        if (cols.beizhu < 0 || cols.yapan < 0 || !pairs || !pairs.length) return;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            if (tds.length <= cols.beizhu) return;
+            const bTd = tds[cols.beizhu];
+            if (isJiaozhanBeizhuCellFilled(bTd)) return;
+            const txt = extractJiaozhanChupanYapanText(tds[cols.yapan]);
+            if (!txt || txt === '-') return;
+            renderJiaozhanBeizhuCell(bTd, txt);
+            bTd.setAttribute('data-tm500-jz-bz-cp', '1');
+            bTd.setAttribute('data-tm500-jz-bz-dom', '1');
+        });
     }
 
     function fillJiaozhanShishiFromZhongpanDomFallback(root, table, pk, cols, done, reqId) {
@@ -1863,6 +3181,7 @@
 
         function finish() {
             if (needSwitch) document.documentElement.dataset.tm500JzJzZpBusy = '';
+            flushJiaozhanNeedRefillAfterBusy();
             if (done) done();
         }
 
@@ -1905,13 +3224,13 @@
                 return tr.querySelector('td') && !tr.querySelector('th');
             });
             rows.forEach(function(tr) {
-                if (tr.classList.contains('bmatch')) return;
                 const st = tr.getAttribute('style') || '';
                 if (/display\s*:\s*none/i.test(st)) return;
                 const tds = tr.querySelectorAll('td');
                 if (tds.length <= cols.beizhu) return;
                 const yTd = tds[cols.yapan];
                 const bTd = tds[cols.beizhu];
+                if (bTd.getAttribute('data-tm500-jz-bz-cp') === '1') return;
                 const txt = extractJiaozhanChupanYapanText(yTd);
                 if (txt) {
                     renderJiaozhanBeizhuCell(bTd, txt);
@@ -1922,6 +3241,7 @@
 
         function finish() {
             if (needSwitch) document.documentElement.dataset.tm500JzJzCpBusy = '';
+            flushJiaozhanNeedRefillAfterBusy();
             if (done) done();
         }
 
@@ -2007,15 +3327,23 @@
         const table = (form && form.querySelector('table.pub_table')) || root.querySelector('table.pub_table');
         if (!table) return;
         const pk = table.querySelector('select[name="yapan"][data-t="pk"]');
-        if (!pk) return;
+        if (!pk) {
+            hideJiaozhanNativeOddsColumns(table);
+            return;
+        }
         let cols = ensureJiaozhanShishiColumn(table);
-        if (cols.yapan < 0 || cols.beizhu < 0) return;
+        if (cols.yapan < 0 || cols.beizhu < 0) {
+            hideJiaozhanNativeOddsColumns(table);
+            return;
+        }
         injectJiaozhanTableWideStyle();
         relaxJiaozhanPubTableWidths(table);
         injectJiaozhanBeizhuStyle();
         injectJiaozhanShishiStyle();
+        injectJiaozhanOupeiStyle();
         tagJiaozhanBeizhuHeaderTh(table, cols);
         widenJiaozhanBeizhuColumnCells(table, cols);
+        hideJiaozhanNativeOddsColumns(table);
 
         const pairs = collectJiaozhanRemarkAjaxPairs(table);
         if (!pairs.length) return;
@@ -2026,6 +3354,7 @@
 
         const reqId = ++jiaozhanRemarkAjaxReqId;
         const origin = location.origin || (location.protocol + '//' + location.host);
+        fetchAndApplyJiaozhanOupei(table, cols, pairs, reqId);
         const url = origin + '/fenxi1/inc/ajax.php?' + buildJiaozhanYapanChupanAjaxQuery(cid, pairs, '1');
 
         function runFallback(chuMapOpt) {
@@ -2055,19 +3384,105 @@
                 return;
             }
             const chuMap = sanitizeJiaozhanYapanAjaxMap(data);
-            const n = applyJiaozhanRemarkFromAjaxPayload(table, cols, pairs, chuMap);
-            if (n === 0) runFallback(chuMap);
-            else jiaozhanYapanFetchZhongAndApplyMarks(table, cols, pairs, cid, reqId, chuMap);
+            applyJiaozhanRemarkFromAjaxPayload(table, cols, pairs, chuMap);
+            fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, pairs, cid, reqId, function(extraChuMap) {
+                if (!jiaozhanRemarkAjaxReqActive(reqId)) return;
+                if (extraChuMap && typeof extraChuMap === 'object') {
+                    Object.keys(extraChuMap).forEach(function(k) {
+                        chuMap[k] = extraChuMap[k];
+                    });
+                }
+                fillMissingJiaozhanRemarkFromYapanDom(table, cols, pairs);
+                const stillMissing = collectJiaozhanPairsMissingBeizhu(cols, pairs);
+                const filledAny = pairs.length > stillMissing.length;
+                if (!filledAny) runFallback(chuMap);
+                else jiaozhanYapanFetchZhongAndApplyMarks(table, cols, pairs, cid, reqId, chuMap);
+            });
         });
     }
 
     const debounceFillJiaozhanChupanRemark = debounce(fillJiaozhanRemarkFromChupanYapan, 320);
 
+    /** DomFallback 切换初/终盘期间若发生 getJiaozhan 整表替换，MO 会被 busy 挡住；结束后补一次 */
+    function markJiaozhanNeedRefillAfterBusy() {
+        document.documentElement.dataset.tm500JzNeedRefill = '1';
+    }
+
+    function flushJiaozhanNeedRefillAfterBusy() {
+        if (document.documentElement.dataset.tm500JzNeedRefill !== '1') return;
+        if (document.documentElement.dataset.tm500JzJzCpBusy === '1' ||
+            document.documentElement.dataset.tm500JzJzZpBusy === '1') return;
+        document.documentElement.dataset.tm500JzNeedRefill = '';
+        scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
+    }
+
+    /** getJiaozhan 整表替换后：重新显示权益列 + 触发站点亚盘/欧指拉取 + 重插欧赔/备注 */
+    function refreshJiaozhanAfterTableReplace() {
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return;
+        try {
+            if (window.UsergrowthRights && typeof window.UsergrowthRights.apply === 'function') {
+                window.UsergrowthRights.apply(root);
+            }
+        } catch (eRights) {}
+        try {
+            if (typeof window.jQuery === 'function') {
+                const $ = window.jQuery;
+                const op = root.querySelector('select[name="oupei"][data-t="op"]');
+                const yp = root.querySelector('select[name="yapan"][data-t="yp"]');
+                // 站点 getOddsPL 用固定 td.eq(5/6)；须在插入欧赔列之前或之后均可（我们插在备注侧，不影响 5/6）
+                if (op) $(op).trigger('change');
+                if (yp) $(yp).trigger('change');
+            }
+        } catch (ePl) {}
+        ensureJiaozhanSaiguoStrip();
+        fillJiaozhanRemarkFromChupanYapan();
+        const form = document.getElementById('jiaozhan');
+        const table = (form && form.querySelector('table.pub_table')) || root.querySelector('table.pub_table');
+        if (table) hideJiaozhanNativeOddsColumns(table);
+    }
+
     /** 站点 getJiaozhan 异步替换表格行时，仅靠 Mutation 防抖可能在空表阶段执行或不再触发；与 yapan/pk 下拉一致多拍补拉初盘备注 */
     function scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav() {
         debounceFillJiaozhanChupanRemark();
-        window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 280);
-        window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 1000);
+        window.setTimeout(function() {
+            refreshJiaozhanAfterTableReplace();
+        }, 280);
+        window.setTimeout(function() {
+            refreshJiaozhanAfterTableReplace();
+        }, 700);
+        window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 1200);
+    }
+
+    /** 挂钩 getJiaozhan：联赛勾选/快捷筛选都会走这里，整表 html 替换后必须重填 */
+    function hookJiaozhanTableRefresh() {
+        if (document.documentElement.dataset.tm500JzGetHook === '1') return;
+        function tryHook() {
+            if (typeof window.getJiaozhan !== 'function') return false;
+            if (window.getJiaozhan._tm500Hooked) {
+                document.documentElement.dataset.tm500JzGetHook = '1';
+                return true;
+            }
+            const orig = window.getJiaozhan;
+            window.getJiaozhan = function(li, o) {
+                // 作废进行中的备注/盘口请求与 DomFallback，避免写到已卸载的旧表并长期占 busy
+                jiaozhanRemarkAjaxReqId++;
+                document.documentElement.dataset.tm500JzJzCpBusy = '';
+                document.documentElement.dataset.tm500JzJzZpBusy = '';
+                const ret = orig.apply(this, arguments);
+                scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
+                return ret;
+            };
+            window.getJiaozhan._tm500Hooked = true;
+            document.documentElement.dataset.tm500JzGetHook = '1';
+            return true;
+        }
+        if (tryHook()) return;
+        let n = 0;
+        const iv = setInterval(function() {
+            n++;
+            if (tryHook() || n >= 40) clearInterval(iv);
+        }, 250);
     }
 
     /** 赛果条+盘路条固定在表格区上方（.M_content_t 前），不插入筛选行 .selt，避免改动站点原有布局与序列观感 */
@@ -2097,6 +3512,7 @@
         injectJiaozhanTableWideStyle();
         relaxJiaozhanPubTableWidths(table);
         injectJiaozhanSaiguoStripStyle();
+        ensureDzTeamNameTitles(root);
         const series = collectJiaozhanSaiguoSeries(root);
         const panluCounts = collectJiaozhanPanluCounts(root);
         const maxSlot = getJiaozhanStripMaxSlots(series.length);
@@ -2140,10 +3556,10 @@
             t = m.target;
             if (!t || t.nodeType !== 1) continue;
             el = t;
-            if (el.classList && (el.classList.contains('tm500-jz-bz-cell') || el.classList.contains('tm500-jz-ss-cell'))) {
+            if (el.classList && (el.classList.contains('tm500-jz-bz-cell') || el.classList.contains('tm500-jz-ss-cell') || el.classList.contains('tm500-jz-op-cell'))) {
                 return true;
             }
-            if (el.closest && el.closest('.tm500-jz-bz-cell, .tm500-jz-ss-cell, .tm500-jz-bz-odds, .tm500-jz-ss-odds, .tm500-jz-bz-pk, .tm500-jz-ss-pk, .tm500-jz-ss-arr')) {
+            if (el.closest && el.closest('.tm500-jz-bz-cell, .tm500-jz-ss-cell, .tm500-jz-op-cell, .tm500-jz-bz-odds, .tm500-jz-ss-odds, .tm500-jz-op-odds, .tm500-jz-bz-pk, .tm500-jz-ss-pk, .tm500-jz-ss-arr, .tm500-jz-op-arr')) {
                 return true;
             }
         }
@@ -2159,7 +3575,10 @@
             root.dataset.tm500JzCpRemarkMo = '1';
             new MutationObserver(function(muts) {
                 if (document.documentElement.dataset.tm500JzJzCpBusy === '1' ||
-                    document.documentElement.dataset.tm500JzJzZpBusy === '1') return;
+                    document.documentElement.dataset.tm500JzJzZpBusy === '1') {
+                    markJiaozhanNeedRefillAfterBusy();
+                    return;
+                }
                 if (isJiaozhanRemarkMoNoise(muts)) return;
                 deb();
             }).observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'val', 'class', 'fid', 'sid'] });
@@ -2198,6 +3617,19 @@
                     window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 900);
                 }
             }, true);
+            jzRoot.addEventListener('click', function(ev) {
+                const t = ev.target;
+                if (!t) return;
+                let cb = null;
+                if (t.tagName === 'INPUT' && t.name === 'bhbc') cb = t;
+                else if (t.closest) {
+                    const wrap = t.closest('span, label');
+                    if (wrap) cb = wrap.querySelector('input[name="bhbc"]');
+                }
+                if (!cb) return;
+                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 100);
+                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 450);
+            }, true);
         }
         function ensureJiaozhanRemarkSelectHook() {
             const jz = document.getElementById('team_jiaozhan');
@@ -2227,7 +3659,7 @@
         }, 300);
     }
 
-    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-180';
+    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-204';
 
     /** 近期战绩三组：team_zhanji_* / getZhanji + zj0_；team_zhanji1_* / getZhanji1 + zj1_；team_zhanji2_* / getZhanji2 + zj2_（主场/客场块无 limit 下拉） */
     const ZHANJI_SAME_LEAGUE_PANELS = [
@@ -2245,6 +3677,14 @@
         if (legacy172) legacy172.remove();
         const legacy173 = document.getElementById('tm500-zj-same-league-style-173');
         if (legacy173) legacy173.remove();
+        const legacy180 = document.getElementById('tm500-zj-same-league-style-180');
+        if (legacy180) legacy180.remove();
+        const legacy201 = document.getElementById('tm500-zj-same-league-style-201');
+        if (legacy201) legacy201.remove();
+        const legacy202 = document.getElementById('tm500-zj-same-league-style-202');
+        if (legacy202) legacy202.remove();
+        const legacy203 = document.getElementById('tm500-zj-same-league-style-203');
+        if (legacy203) legacy203.remove();
         if (document.getElementById(ZJ_SL_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = ZJ_SL_STYLE_ID;
@@ -2258,12 +3698,22 @@
             'display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;' +
             'justify-content:flex-start;' +
             '}' +
-            '.tm500-zj-sl-right{' +
-            'margin-left:auto;margin-right:10px;display:inline-flex;align-items:center;' +
-            'gap:8px;flex-shrink:0;flex-wrap:nowrap;' +
+            /* 主客场：展开后赛果条变宽也不把按钮挤到下一行 */
+            '#team_zhanji2_0 form .M_content_t .selt,' +
+            '#team_zhanji2_1 form .M_content_t .selt{' +
+            'flex-wrap:nowrap!important;' +
             '}' +
-            '.tm500-zj-same-league-wrap{' +
-            'margin-left:0;margin-right:0;display:inline-flex;justify-content:flex-end;flex-shrink:0;' +
+            '#team_zhanji2_0 .tm500-jz-zhanji-sg-strip,' +
+            '#team_zhanji2_1 .tm500-jz-zhanji-sg-strip{' +
+            'flex:1 1 auto;min-width:0;overflow:hidden;' +
+            '}' +
+            '.tm500-zj-sl-right{' +
+            'margin-left:auto;margin-right:6px;display:inline-flex;align-items:center;' +
+            'gap:4px;flex-shrink:0;flex-wrap:nowrap;' +
+            '}' +
+            '.tm500-zj-same-league-wrap,' +
+            '.tm500-zj2-expand-wrap{' +
+            'margin:0;display:inline-flex;justify-content:flex-end;flex-shrink:0;' +
             '}' +
             '.tm500-zj-same-league{' +
             'box-sizing:border-box;min-width:0;width:auto;padding:4px 8px;font-size:12px;line-height:1.35;' +
@@ -2288,6 +3738,32 @@
             '}' +
             '.tm500-zj-same-league.tm500-zj-sl-on:hover{' +
             'background:linear-gradient(180deg,#9cddb3 0%,#68c48a 100%);' +
+            '}' +
+            '.tm500-zj2-expand{' +
+            'box-sizing:border-box;min-width:0!important;width:auto!important;max-width:none!important;' +
+            'padding:2px 5px!important;font-size:11px;line-height:1.2;' +
+            'white-space:nowrap;cursor:pointer;border:none;border-radius:3px;' +
+            'transition:opacity .18s ease,box-shadow .18s ease,filter .18s ease,background .18s ease;' +
+            'opacity:.85;filter:saturate(.8) brightness(1);font-weight:500;' +
+            'color:#3a5a78;' +
+            'background:linear-gradient(180deg,#d4e8f6 0%,#bddcf0 100%);' +
+            'box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(0,0,0,.08);' +
+            '}' +
+            '.tm500-zj2-expand:hover{' +
+            'background:linear-gradient(180deg,#deeff9 0%,#cae4f5 100%);' +
+            '}' +
+            '.tm500-zj2-expand.tm500-zj2-exp-on{' +
+            'opacity:1;filter:saturate(1) brightness(1);font-weight:600;' +
+            'color:#142a3d;' +
+            'background:linear-gradient(180deg,#9bc5eb 0%,#6ba6d8 100%);' +
+            'box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(0,0,0,.08),' +
+            '0 2px 8px rgba(48,110,168,.22);' +
+            '}' +
+            '#team_zhanji2_0:not([data-tm500-zj2-exp="1"]) tr.tm500-zj2-overflow,' +
+            '#team_zhanji2_1:not([data-tm500-zj2-exp="1"]) tr.tm500-zj2-overflow,' +
+            '#team_zhanji2_0 tr.tm500-zj2-overflow-max,' +
+            '#team_zhanji2_1 tr.tm500-zj2-overflow-max{' +
+            'display:none!important;' +
             '}';
         document.head.appendChild(s);
     }
@@ -2425,8 +3901,7 @@
         const raw = [];
         rows.forEach(function(tr) {
             if (tr.classList.contains('bmatch')) return;
-            const st = tr.getAttribute('style') || '';
-            if (/display\s*:\s*none/i.test(st)) return;
+            if (!isJiaozhanDataRowVisible(tr)) return;
             const tds = tr.querySelectorAll('td');
             if (tds.length <= idx) return;
             const sg = (tds[idx].textContent || '').replace(/\s/g, '');
@@ -2435,6 +3910,197 @@
             raw.push(sg);
         });
         return raw.slice().reverse();
+    }
+
+    const ZJ2_COLLAPSE_DEFAULT = 6;
+    const ZJ2_COLLAPSE_EXPANDED = 10;
+
+    function getZhanji2DataRows(table) {
+        return Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+            if (!tr.querySelector('td') || tr.querySelector('th')) return false;
+            if (tr.classList.contains('bmatch')) return false;
+            if (tr.querySelector('.record_msg')) return false;
+            return true;
+        });
+    }
+
+    /** 仅识别站点联赛筛选的 inline display:none（不含本脚本折叠 class） */
+    function isZhanji2RowLeagueHidden(tr) {
+        const st = tr.getAttribute('style') || '';
+        return /display\s*:\s*none/i.test(st);
+    }
+
+    function applyZhanji2OverflowMarks(teamRoot) {
+        if (!teamRoot) return;
+        const table = findZhanjiPubTable(teamRoot);
+        if (!table) return;
+        const rows = getZhanji2DataRows(table);
+        rows.forEach(function(tr) {
+            tr.classList.remove('tm500-zj2-overflow', 'tm500-zj2-overflow-max');
+        });
+        const candidates = rows.filter(function(tr) {
+            return !isZhanji2RowLeagueHidden(tr);
+        });
+        candidates.forEach(function(tr, i) {
+            if (i >= ZJ2_COLLAPSE_EXPANDED) {
+                tr.classList.add('tm500-zj2-overflow-max');
+            } else if (i >= ZJ2_COLLAPSE_DEFAULT) {
+                tr.classList.add('tm500-zj2-overflow');
+            }
+        });
+        return candidates.length;
+    }
+
+    function syncZhanji2ExpandButton(teamRoot, candidateCount) {
+        if (!teamRoot) return;
+        const n = typeof candidateCount === 'number'
+            ? candidateCount
+            : applyZhanji2OverflowMarks(teamRoot);
+        const expanded = teamRoot.getAttribute('data-tm500-zj2-exp') === '1';
+        const canExpand = n > ZJ2_COLLAPSE_DEFAULT;
+        const label = expanded ? '收起' : '展开';
+        const title = expanded
+            ? ('收起为近' + ZJ2_COLLAPSE_DEFAULT + '场')
+            : ('展开显示近' + ZJ2_COLLAPSE_EXPANDED + '场');
+        teamRoot.querySelectorAll('.tm500-zj-sl-right button.tm500-zj2-expand').forEach(function(btn) {
+            if (!canExpand) {
+                btn.style.display = 'none';
+                return;
+            }
+            btn.style.display = '';
+            btn.textContent = label;
+            btn.setAttribute('title', title);
+            if (expanded) {
+                btn.classList.add('tm500-zj2-exp-on');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.classList.remove('tm500-zj2-exp-on');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        });
+    }
+
+    function toggleZhanji2Expand(teamRoot) {
+        const roots = ['team_zhanji2_0', 'team_zhanji2_1'].map(function(tid) {
+            return document.getElementById(tid);
+        }).filter(Boolean);
+        if (!roots.length) return;
+        // 以当前点击侧为准；两侧统一切换
+        const cur = teamRoot && roots.indexOf(teamRoot) >= 0 ? teamRoot : roots[0];
+        const nextOn = cur.getAttribute('data-tm500-zj2-exp') !== '1';
+        roots.forEach(function(root) {
+            if (nextOn) root.setAttribute('data-tm500-zj2-exp', '1');
+            else root.removeAttribute('data-tm500-zj2-exp');
+            syncZhanji2ExpandButton(root);
+        });
+        ensureZhanjiSameLeagueButtons();
+    }
+
+    function bindZhanji2ExpandClick(btn) {
+        if (!btn || btn.dataset.tm500Zj2ExpBound === '1') return;
+        btn.dataset.tm500Zj2ExpBound = '1';
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const root = btn.closest('[id^="team_zhanji2_"]');
+            toggleZhanji2Expand(root);
+        });
+    }
+
+    function createZhanji2ExpandButtonWrap() {
+        const wrap = document.createElement('span');
+        wrap.className = 'tm500-zj2-expand-wrap';
+        wrap.setAttribute('data-tm500-zj2-exp-btn', '1');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tm500-zj2-expand';
+        btn.textContent = '展开';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('title', '展开显示近' + ZJ2_COLLAPSE_EXPANDED + '场');
+        bindZhanji2ExpandClick(btn);
+        wrap.appendChild(btn);
+        return wrap;
+    }
+
+    function removeZhanji2ExpandFooters(teamRoot) {
+        if (!teamRoot) return;
+        teamRoot.querySelectorAll('.tm500-zj2-expand-foot').forEach(function(el) {
+            el.remove();
+        });
+    }
+
+    function ensureZhanji2Collapse(teamRoot) {
+        if (!teamRoot || !/^team_zhanji2_/.test(teamRoot.id)) return;
+        removeZhanji2ExpandFooters(teamRoot);
+        const selt = teamRoot.querySelector('form .M_content_t .selt');
+        if (!selt) return;
+        const cluster = ensureZhanjiSameLeagueClusterInSelt(selt);
+        if (!cluster.querySelector('[data-tm500-zj2-exp-btn="1"]')) {
+            cluster.appendChild(createZhanji2ExpandButtonWrap());
+        }
+        const n = applyZhanji2OverflowMarks(teamRoot);
+        syncZhanji2ExpandButton(teamRoot, n);
+    }
+
+    function ensureZhanji2CollapseAll() {
+        ['team_zhanji2_0', 'team_zhanji2_1'].forEach(function(tid) {
+            ensureZhanji2Collapse(document.getElementById(tid));
+        });
+    }
+
+    const ZJ_WIN_BORDER_STYLE_ID = 'tm500-zj-win-border-style-200';
+
+    function injectZhanjiWinBorderStyle() {
+        if (document.getElementById(ZJ_WIN_BORDER_STYLE_ID)) return;
+        const s = document.createElement('style');
+        s.id = ZJ_WIN_BORDER_STYLE_ID;
+        s.textContent =
+            '.M_box.record table.pub_table td.dz.tm500-zj-win-home{' +
+            'box-shadow:inset 3px 0 0 0 #f5a0a0;' +
+            '}' +
+            '.M_box.record table.pub_table td.dz.tm500-zj-win-away{' +
+            'box-shadow:inset -3px 0 0 0 #f5a0a0;' +
+            '}';
+        document.head.appendChild(s);
+    }
+
+    /** 目标队取胜：主场 → 对阵格左边框浅红；客场 → 右边框浅红（覆盖主队主场/近期战绩等） */
+    function markZhanjiWinSideBorders(teamRoot) {
+        if (!teamRoot) return;
+        const table = findZhanjiPubTable(teamRoot);
+        if (!table) return;
+        injectZhanjiWinBorderStyle();
+        const sgIdx = getZhanjiTableSaiguoColumnIndex(table);
+        const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+            return tr.querySelector('td') && !tr.querySelector('th');
+        });
+        rows.forEach(function(tr) {
+            const dzTd = tr.querySelector('td.dz');
+            if (!dzTd) return;
+            dzTd.classList.remove('tm500-zj-win-home', 'tm500-zj-win-away');
+            if (tr.classList.contains('bmatch')) return;
+            const st = tr.getAttribute('style') || '';
+            if (/display\s*:\s*none/i.test(st)) return;
+            const tds = tr.querySelectorAll('td');
+            if (tds.length <= sgIdx) return;
+            const sg = (tds[sgIdx].textContent || '').replace(/\s/g, '');
+            if (sg !== '胜') return;
+            const left = dzTd.querySelector('.dz-l');
+            const right = dzTd.querySelector('.dz-r');
+            if (left && left.classList.contains('zhu')) {
+                dzTd.classList.add('tm500-zj-win-home');
+            } else if (right && right.classList.contains('zhu')) {
+                dzTd.classList.add('tm500-zj-win-away');
+            }
+        });
+    }
+
+    function ensureZhanjiWinSideBorders() {
+        ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
+            panel.teamIds.forEach(function(tid) {
+                markZhanjiWinSideBorders(document.getElementById(tid));
+            });
+        });
     }
 
     function getZhanjiStripMaxSlots(teamRoot, panel) {
@@ -2474,10 +4140,48 @@
         return cluster;
     }
 
+    /** 主客场(team_zhanji2) 置顶；近期战绩标题+图表/数据模块移到其下 */
+    function reorderZhanjiRecordSections() {
+        if (!isShujuFenxiPage()) return;
+        const zjChart = document.getElementById('team_zhanji_1');
+        const zjHome = document.getElementById('team_zhanji2_1');
+        if (!zjChart || !zjHome) return;
+        const box = zjChart.closest('.M_box.record');
+        if (!box || box.getAttribute('data-tm500-zj-reordered') === '1') return;
+        const title = box.querySelector('.M_title');
+        const chartWrap = zjChart.closest('.odds_zj_tubiao');
+        const homeAwayWrap = zjHome.closest('.odds_zj_tubiao');
+        if (!title || !chartWrap || !homeAwayWrap || chartWrap === homeAwayWrap) return;
+        if (title.parentNode !== box || homeAwayWrap.parentNode !== box) return;
+        box.insertBefore(homeAwayWrap, title);
+        box.setAttribute('data-tm500-zj-reordered', '1');
+    }
+
+    /** 页面就绪后默认开启「同联赛」（等同点击一次） */
+    function ensureZhanjiSameLeagueDefaultOn() {
+        if (document.documentElement.dataset.tm500ZjSlDefaultDone === '1') return;
+        if (!getZhanjiFixtureLeagueId()) return;
+        let ready = false;
+        ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
+            [0, 1].forEach(function(side) {
+                const root = document.getElementById(panel.teamIds[side]);
+                if (!root) return;
+                if (root.querySelector('input.zj' + panel.zjMid + '_' + side)) ready = true;
+            });
+        });
+        if (!ready) return;
+        document.documentElement.dataset.tm500ZjSlDefaultDone = '1';
+        document.documentElement.dataset.tm500ZjSlFilter = '1';
+        applyZhanjiSameLeagueOnly();
+    }
+
     function ensureZhanjiSameLeagueButtons() {
         if (!isShujuFenxiPage()) return;
         injectJiaozhanSaiguoStripStyle();
         injectZhanjiSameLeagueStyle();
+        injectDzTeamNameStyle();
+        reorderZhanjiRecordSections();
+        ensureZhanji2CollapseAll();
         ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
             [0, 1].forEach(function(side) {
                 const root = document.getElementById(panel.teamIds[side]);
@@ -2497,7 +4201,414 @@
                 strip.appendChild(inner);
             });
         });
+        ensureZhanjiSameLeagueDefaultOn();
         syncZhanjiSameLeagueButtonsActive();
+        ensureDzTeamNameTitles(document);
+        ensureZhanjiYapanColumns();
+        ensureZhanjiWinSideBorders();
+        hideAllZhanjiNativePanluDaxiaoColumns();
+    }
+
+    /** 近期战绩(team_zhanji_*) + 主场/客场(team_zhanji2_*)：插入脚本亚盘列；隐藏原生盘路/大小/盘口 */
+    const ZHANJI_YP_TEAM_IDS = [
+        'team_zhanji_0', 'team_zhanji_1',
+        'team_zhanji2_0', 'team_zhanji2_1'
+    ];
+    const ZJ_YP_STYLE_ID = 'tm500-zj-yp-style-208';
+    const ZHANJI_YP_ROOT_SEL = ZHANJI_YP_TEAM_IDS.map(function(id) { return '#' + id; }).join(',');
+
+    function injectZhanjiYapanStyle() {
+        const legacyIds = [
+            'tm500-zj2-yp-style-194',
+            'tm500-zj-yp-style-195', 'tm500-zj-yp-style-196', 'tm500-zj-yp-style-197',
+            'tm500-zj-yp-style-205', 'tm500-zj-yp-style-206', 'tm500-zj-yp-style-207'
+        ];
+        legacyIds.forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        if (document.getElementById(ZJ_YP_STYLE_ID)) return;
+        const s = document.createElement('style');
+        s.id = ZJ_YP_STYLE_ID;
+        s.textContent =
+            /* 亚盘列定宽，双表并排不溢出；三列网格对齐 */
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table th.tm500-zj-yp-col,' + r + ' table.pub_table td.tm500-zj-yp-cell';
+            }).join(',') + '{' +
+            'width:142px!important;min-width:142px!important;max-width:142px!important;' +
+            'padding:2px 2px!important;white-space:nowrap!important;word-break:keep-all!important;' +
+            'vertical-align:middle;line-height:1.2;font-size:11px;' +
+            'box-sizing:border-box!important;overflow:hidden!important;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-jz-yp-align';
+            }).join(',') + '{' +
+            'display:grid!important;grid-template-columns:2.3em 6em 2.3em;column-gap:2px;' +
+            'align-items:center;white-space:nowrap;vertical-align:middle;' +
+            'width:100%!important;max-width:100%!important;box-sizing:border-box;' +
+            'overflow:hidden!important;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-jz-yp-l';
+            }).join(',') + '{' +
+            'text-align:right;justify-self:stretch;font-variant-numeric:tabular-nums;' +
+            'overflow:hidden;min-width:0;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-jz-yp-m';
+            }).join(',') + '{' +
+            'text-align:center;justify-self:stretch;overflow:hidden;min-width:0;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-jz-yp-r';
+            }).join(',') + '{' +
+            'text-align:left;justify-self:stretch;font-variant-numeric:tabular-nums;' +
+            'overflow:hidden;min-width:0;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-zj-yp-pk';
+            }).join(',') + '{' +
+            'display:block;margin:0;padding:0;' +
+            'font-size:10px!important;line-height:1.2;font-weight:600;' +
+            'color:#66bb6a!important;background:transparent;border:none;' +
+            'max-width:100%!important;overflow:hidden!important;' +
+            'text-overflow:ellipsis!important;white-space:nowrap!important;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-zj-yp-pk.tm500-jz-pk-shou';
+            }).join(',') + '{' +
+            'color:#64b5f6!important;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table td.tm500-zj-yp-cell .tm500-zj-yp-odds';
+            }).join(',') + '{' +
+            'font-size:10px!important;font-weight:600;color:#333;white-space:nowrap!important;' +
+            '}' +
+            /* 独立「主队/客队」列（非 .dz 结构时）：定宽超长省略，避免挤爆亚盘 */
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table th.tm500-zj-home-col,' +
+                    r + ' table.pub_table td.tm500-zj-home-col,' +
+                    r + ' table.pub_table th.tm500-zj-away-col,' +
+                    r + ' table.pub_table td.tm500-zj-away-col';
+            }).join(',') + '{' +
+            'width:6.5em!important;min-width:4em!important;max-width:6.5em!important;' +
+            'white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;' +
+            'box-sizing:border-box!important;' +
+            '}' +
+            ZHANJI_YP_ROOT_SEL.split(',').map(function(r) {
+                return r + ' table.pub_table th.tm500-zj-score-col,' +
+                    r + ' table.pub_table td.tm500-zj-score-col';
+            }).join(',') + '{' +
+            'width:36px!important;min-width:36px!important;max-width:36px!important;' +
+            'white-space:nowrap!important;box-sizing:border-box!important;' +
+            '}';
+        document.head.appendChild(s);
+    }
+
+    /** 若表头为独立「主队/比分/客队」列，打标以便定宽省略 */
+    function tagZhanjiHomeAwayScoreColumns(table) {
+        if (!table) return;
+        const trs = table.querySelectorAll('tr');
+        let header = null;
+        let i;
+        for (i = 0; i < trs.length; i++) {
+            if (trs[i].querySelector('th')) {
+                header = trs[i];
+                break;
+            }
+        }
+        if (!header) return;
+        const cells = Array.from(header.children).filter(function(el) {
+            return el.tagName === 'TH' || el.tagName === 'TD';
+        });
+        let homeIdx = -1;
+        let scoreIdx = -1;
+        let awayIdx = -1;
+        for (i = 0; i < cells.length; i++) {
+            const t = (cells[i].textContent || '').replace(/\s+/g, '');
+            if (homeIdx < 0 && t === '主队') homeIdx = i;
+            else if (scoreIdx < 0 && t === '比分') scoreIdx = i;
+            else if (awayIdx < 0 && t === '客队') awayIdx = i;
+        }
+        if (homeIdx < 0 && awayIdx < 0) return;
+        function tagRow(tr, idx, cls) {
+            if (idx < 0) return;
+            const rowCells = Array.from(tr.children).filter(function(el) {
+                return el.tagName === 'TH' || el.tagName === 'TD';
+            });
+            if (rowCells[idx]) rowCells[idx].classList.add(cls);
+        }
+        for (i = 0; i < trs.length; i++) {
+            tagRow(trs[i], homeIdx, 'tm500-zj-home-col');
+            tagRow(trs[i], scoreIdx, 'tm500-zj-score-col');
+            tagRow(trs[i], awayIdx, 'tm500-zj-away-col');
+        }
+        if (homeIdx >= 0 || awayIdx >= 0) {
+            const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+                return tr.querySelector('td') && !tr.querySelector('th');
+            });
+            rows.forEach(function(tr) {
+                const rowCells = Array.from(tr.children).filter(function(el) {
+                    return el.tagName === 'TD';
+                });
+                [homeIdx, awayIdx].forEach(function(idx) {
+                    if (idx < 0 || !rowCells[idx]) return;
+                    const el = rowCells[idx];
+                    const name = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (name) el.setAttribute('title', name);
+                });
+            });
+        }
+    }
+
+    function getDefaultYapanCompanyId() {
+        const root = document.getElementById('team_jiaozhan');
+        const yp = root && (root.querySelector('select[name="yapan"][data-t="yp"]') ||
+            root.querySelector('select[name="yapan"]'));
+        let cid = (yp && yp.value !== undefined && yp.value !== null && String(yp.value).trim() !== '')
+            ? String(yp.value).trim() : '5';
+        if (cid === '0' || cid === '') cid = '5';
+        return cid;
+    }
+
+    function findZhanjiYapanTableHeaderRow(table) {
+        const trs = table.querySelectorAll('tr');
+        let i;
+        for (i = 0; i < trs.length; i++) {
+            if (trs[i].querySelector('th')) return trs[i];
+        }
+        return null;
+    }
+
+    function getZhanjiYapanColumnIndex(table) {
+        const th = table.querySelector('th.tm500-zj-yp-col, th.tm500-zj2-yp-col');
+        if (!th || !th.parentElement) return -1;
+        const cells = Array.from(th.parentElement.children).filter(function(el) {
+            return el.tagName === 'TH' || el.tagName === 'TD';
+        });
+        return cells.indexOf(th);
+    }
+
+    function insertZhanjiYapanCellAfter(tr, afterIdx, tagName) {
+        const cells = Array.from(tr.children).filter(function(el) {
+            return el.tagName === 'TH' || el.tagName === 'TD';
+        });
+        const ref = cells[afterIdx];
+        const cell = document.createElement(tagName);
+        if (ref && ref.nextSibling) tr.insertBefore(cell, ref.nextSibling);
+        else if (ref) tr.appendChild(cell);
+        else tr.appendChild(cell);
+        return cell;
+    }
+
+    /** 近期战绩/主客场表：在「赛果」后插入可见「亚盘」列（脚本列，保留） */
+    function ensureZhanjiYapanColumn(table) {
+        if (!table) return -1;
+        let ypIdx = getZhanjiYapanColumnIndex(table);
+        if (ypIdx >= 0) {
+            const th = table.querySelector('th.tm500-zj2-yp-col, th.tm500-zj-yp-col');
+            if (th) {
+                th.classList.remove('tm500-zj2-yp-col');
+                th.classList.add('tm500-zj-yp-col');
+                th.removeAttribute('width');
+            }
+            const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+                return tr.querySelector('td') && !tr.querySelector('th');
+            });
+            rows.forEach(function(tr) {
+                const cells = Array.from(tr.children).filter(function(el) {
+                    return el.tagName === 'TD';
+                });
+                if (cells.length > ypIdx &&
+                    (cells[ypIdx].classList.contains('tm500-zj-yp-cell') ||
+                        cells[ypIdx].classList.contains('tm500-zj2-yp-cell'))) {
+                    cells[ypIdx].classList.remove('tm500-zj2-yp-cell');
+                    cells[ypIdx].classList.add('tm500-zj-yp-cell');
+                    return;
+                }
+                const sgIdx = Math.max(0, ypIdx - 1);
+                const td = insertZhanjiYapanCellAfter(tr, Math.min(sgIdx, cells.length - 1), 'td');
+                td.className = 'tm500-zj-yp-cell';
+                td.textContent = '-';
+            });
+            return ypIdx;
+        }
+        const header = findZhanjiYapanTableHeaderRow(table);
+        if (!header) return -1;
+        const sgIdx = getZhanjiTableSaiguoColumnIndex(table);
+        const th = insertZhanjiYapanCellAfter(header, sgIdx, 'th');
+        th.className = 'tm500-zj-yp-col';
+        th.removeAttribute('width');
+        th.textContent = '亚盘';
+        const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+            return tr.querySelector('td') && !tr.querySelector('th');
+        });
+        rows.forEach(function(tr) {
+            const td = insertZhanjiYapanCellAfter(tr, sgIdx, 'td');
+            td.className = 'tm500-zj-yp-cell';
+            td.textContent = '-';
+        });
+        return getZhanjiYapanColumnIndex(table);
+    }
+
+    function collectZhanjiYapanAjaxPairs(table) {
+        const out = [];
+        const includeBmatch = isJiaozhanIncludeBmatchChecked(document.getElementById('team_jiaozhan'));
+        const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+            return tr.querySelector('td') && !tr.querySelector('th');
+        });
+        rows.forEach(function(tr) {
+            const isBmatch = tr.classList.contains('bmatch');
+            if (isBmatch) {
+                if (!includeBmatch && !isJiaozhanDataRowVisible(tr)) return;
+            } else if (!isJiaozhanDataRowVisible(tr)) {
+                return;
+            }
+            const fid = getJiaozhanTrFid(tr);
+            if (!fid) return;
+            out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr) });
+        });
+        return out;
+    }
+
+    function getZhanjiYapanTd(tr, ypIdx) {
+        if (!tr || ypIdx < 0) return null;
+        const cells = Array.from(tr.children).filter(function(el) {
+            return el.tagName === 'TD';
+        });
+        if (cells.length <= ypIdx) return null;
+        const td = cells[ypIdx];
+        if (td.classList.contains('tm500-zj2-yp-cell')) {
+            td.classList.remove('tm500-zj2-yp-cell');
+            td.classList.add('tm500-zj-yp-cell');
+        }
+        return td.classList.contains('tm500-zj-yp-cell') ? td : null;
+    }
+
+    function renderZhanjiYapanCell(td, txt) {
+        renderJiaozhanYapanOddsCell(td, txt, {
+            cellClass: 'tm500-zj-yp-cell',
+            oddsClass: 'tm500-zj-yp-odds',
+            pkClass: 'tm500-zj-yp-pk',
+            align: true
+        });
+    }
+
+    /** 终盘无数据时，用隐藏盘口 td 的 title/文本兜底（无主客赔） */
+    function formatZhanjiYapanDomFallback(tr) {
+        const hid = tr.querySelector('td[data-user-right="odds"][title]');
+        if (!hid) return '';
+        const name = (hid.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        const num = (hid.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!name && !num) return '';
+        if (name && num && name !== num) return num + ' ' + name;
+        return name || num;
+    }
+
+    function applyZhanjiYapanFromAjaxMap(table, ypIdx, pairs, dataMap) {
+        pairs.forEach(function(p) {
+            const td = getZhanjiYapanTd(p.tr, ypIdx);
+            if (!td) return;
+            let txt = formatJiaozhanYapanAjaxShishi(dataMap[p.fid]);
+            if (!txt) txt = formatJiaozhanYapanAjaxRemark(dataMap[p.fid]);
+            if (!txt) txt = formatZhanjiYapanDomFallback(p.tr);
+            if (!txt) {
+                if (!td.getAttribute('data-tm500-jz-cell-val')) td.textContent = '-';
+                return;
+            }
+            renderZhanjiYapanCell(td, txt);
+        });
+    }
+
+    function zhanjiYapanRowsNeedFill(table, ypIdx, pairs) {
+        let i;
+        for (i = 0; i < pairs.length; i++) {
+            const td = getZhanjiYapanTd(pairs[i].tr, ypIdx);
+            if (!td) return true;
+            if (!td.getAttribute('data-tm500-jz-cell-val')) return true;
+        }
+        return false;
+    }
+
+    function fillZhanjiYapanColumnForTeam(teamRoot) {
+        if (!teamRoot) return;
+        const table = findZhanjiPubTable(teamRoot);
+        if (!table) return;
+        injectZhanjiYapanStyle();
+        tagZhanjiHomeAwayScoreColumns(table);
+        const ypIdx = ensureZhanjiYapanColumn(table);
+        hideZhanjiNativePanluDaxiaoColumns(table);
+        if (ypIdx < 0) return;
+        const pairs = collectZhanjiYapanAjaxPairs(table);
+        if (!pairs.length) return;
+        const cid = getDefaultYapanCompanyId();
+        const sig = pairs.map(function(p) { return p.fid; }).join(',') + '|' + cid + '|' + pairs.length;
+        if (table.getAttribute('data-tm500-zj-yp-sig') === sig &&
+            !zhanjiYapanRowsNeedFill(table, ypIdx, pairs)) {
+            return;
+        }
+        if (table.getAttribute('data-tm500-zj-yp-sig') === sig &&
+            table.getAttribute('data-tm500-zj-yp-loading') === '1') {
+            return;
+        }
+        table.setAttribute('data-tm500-zj-yp-sig', sig);
+        table.setAttribute('data-tm500-zj-yp-loading', '1');
+        const myReq = (Number(teamRoot.getAttribute('data-tm500-zj-yp-req')) || 0) + 1;
+        teamRoot.setAttribute('data-tm500-zj-yp-req', String(myReq));
+        const origin = location.origin || (location.protocol + '//' + location.host);
+        const url = origin + '/fenxi1/inc/ajax.php?' + buildJiaozhanYapanChupanAjaxQuery(cid, pairs, '0');
+
+        function stillMine() {
+            return String(myReq) === teamRoot.getAttribute('data-tm500-zj-yp-req') &&
+                table.isConnected;
+        }
+
+        function finishLoading() {
+            if (stillMine()) table.removeAttribute('data-tm500-zj-yp-loading');
+        }
+
+        jiaozhanRemarkAjaxGet(url, -1, function(err, text) {
+            if (!stillMine()) return;
+            let dataMap = {};
+            if (!err && text) {
+                try {
+                    dataMap = sanitizeJiaozhanYapanAjaxMap(JSON.parse((text || '').replace(/^\uFEFF?\s*/, '')));
+                } catch (e0) {}
+            }
+            applyZhanjiYapanFromAjaxMap(table, ypIdx, pairs, dataMap);
+            const missing = pairs.filter(function(p) {
+                const td = getZhanjiYapanTd(p.tr, ypIdx);
+                return !td || !td.getAttribute('data-tm500-jz-cell-val');
+            });
+            if (!missing.length) {
+                finishLoading();
+                return;
+            }
+            const urlChu = origin + '/fenxi1/inc/ajax.php?' + buildJiaozhanYapanChupanAjaxQuery(cid, missing, '1');
+            jiaozhanRemarkAjaxGet(urlChu, -1, function(err2, text2) {
+                if (!stillMine()) return;
+                let chuMap = {};
+                if (!err2 && text2) {
+                    try {
+                        chuMap = sanitizeJiaozhanYapanAjaxMap(JSON.parse((text2 || '').replace(/^\uFEFF?\s*/, '')));
+                    } catch (e1) {}
+                }
+                applyZhanjiYapanFromAjaxMap(table, ypIdx, missing, chuMap);
+                finishLoading();
+            });
+        });
+    }
+
+    function ensureZhanjiYapanColumns() {
+        if (!isShujuFenxiPage()) return;
+        ZHANJI_YP_TEAM_IDS.forEach(function(tid) {
+            fillZhanjiYapanColumnForTeam(document.getElementById(tid));
+        });
+    }
+
+    // 兼容旧函数名（若外部/热更新残留调用）
+    function ensureZhanji2YapanColumns() {
+        ensureZhanjiYapanColumns();
     }
 
     function startZhanjiSameLeaguePolling() {
@@ -2568,6 +4679,7 @@
     }
 
     if (isShujuFenxiPage()) {
+        hookJiaozhanTableRefresh();
         startJiaozhanQuickFiltersPolling();
         startJiaozhanSaiguoStripPolling();
         startJiaozhanChupanRemarkPolling();
