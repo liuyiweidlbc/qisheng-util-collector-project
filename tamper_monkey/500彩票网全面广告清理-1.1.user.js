@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.66
+// @version      1.9.80
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同复制盘口（含联赛）；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -189,11 +189,15 @@
     function updateJiaozhanQuickButtonsActive() {
         const host = document.getElementById(JZ_WRAP_ID);
         if (!host) return;
+        syncJiaozhanHomeSameButtonLabel();
         const homeEm = document.querySelector('#team_jiaozhan #home_jz');
         const raw = homeEm && homeEm.getAttribute('val');
-        const cur = raw != null && raw !== '' ? String(raw) : '0';
+        let cur = raw != null && raw !== '' ? String(raw) : '0';
+        // 主客相同两态都高亮 data-jz=2
+        if (isJiaozhanWantHomeSame()) cur = '2';
         host.querySelectorAll('button[data-jz]').forEach(function(btn) {
             const v = btn.getAttribute('data-jz');
+            if (v === 'copy') return;
             if (v === cur) {
                 btn.classList.add('tm500-jz-on');
                 btn.setAttribute('aria-pressed', 'true');
@@ -209,6 +213,577 @@
         updateJiaozhanQuickButtonsActive();
     }
 
+    /**
+     * 主客相同 = 先按「相同赛事」(home=1) 拉数，再客户端强制：同联赛 + 同主客。
+     * 绝不回退原生 home=2（会跨联赛）；后续场次/勾选在此模式下也强制 home=1 请求。
+     */
+    function normalizeJiaozhanTeamName(s) {
+        return String(s || '')
+            .replace(/\[[^\]]*\]/g, '')
+            .replace(/\s+/g, '')
+            .trim();
+    }
+
+    /** 简单编辑距离（队名别字：土尔库/图尔库） */
+    function jiaozhanLevenshtein(a, b) {
+        const s = String(a || '');
+        const t = String(b || '');
+        const n = s.length;
+        const m = t.length;
+        if (n === 0) return m;
+        if (m === 0) return n;
+        const row = new Array(m + 1);
+        let i;
+        let j;
+        for (j = 0; j <= m; j++) row[j] = j;
+        for (i = 1; i <= n; i++) {
+            let prev = row[0];
+            row[0] = i;
+            for (j = 1; j <= m; j++) {
+                const tmp = row[j];
+                const cost = s.charAt(i - 1) === t.charAt(j - 1) ? 0 : 1;
+                row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+                prev = tmp;
+            }
+        }
+        return row[m];
+    }
+
+    /** 队名宽松相等：全等 / 拉丁前缀相同+中文近形 / 短编辑距离 */
+    function jiaozhanTeamNamesLooselyEqual(a, b) {
+        if (!a || !b) return false;
+        if (a === b) return true;
+        const la = (a.match(/^[A-Za-z0-9.+_-]+/) || [''])[0];
+        const lb = (b.match(/^[A-Za-z0-9.+_-]+/) || [''])[0];
+        if (la && lb && la.toUpperCase() === lb.toUpperCase() && la.length >= 2) {
+            const ca = a.slice(la.length);
+            const cb = b.slice(lb.length);
+            if (!ca || !cb) return true;
+            if (jiaozhanLevenshtein(ca, cb) <= 1) return true;
+        }
+        const maxLen = Math.max(a.length, b.length);
+        if (maxLen <= 0) return false;
+        const dist = jiaozhanLevenshtein(a, b);
+        if (maxLen <= 4) return dist <= 1;
+        return dist <= 2;
+    }
+
+    function getJiaozhanHomeLiVal(li) {
+        if (!li) return '';
+        if (typeof li.getAttribute === 'function') {
+            const v = li.getAttribute('val');
+            if (v != null && v !== '') return String(v);
+        }
+        if (window.jQuery && li.jquery != null) {
+            const v = window.jQuery(li).attr('val');
+            if (v != null && v !== '') return String(v);
+        }
+        return '';
+    }
+
+    function findJiaozhanHomeFilterLi(val) {
+        const homeEm = document.querySelector('#team_jiaozhan #home_jz') || document.getElementById('home_jz');
+        if (!homeEm) return null;
+        const seltBox = homeEm.closest('.selt_box');
+        if (!seltBox) return null;
+        const ul = seltBox.querySelector('ul.selt_list');
+        if (!ul) return null;
+        return ul.querySelector('li[val="' + val + '"]');
+    }
+
+    /**
+     * 主客相同模式：
+     * ''       未开启
+     * 'league' 同联赛 + 同主客（相同赛事请求 + 行过滤）
+     * 'all'    全部联赛 + 同主客（原生 home=2 + 仅主客行过滤）
+     * 按钮两态：同联主客 ↔ 全联主客（不切全部赛事；退出请点全部赛事/相同赛事）
+     */
+    function getJiaozhanHomeSameMode() {
+        return document.documentElement.dataset.tm500JzHomeSameMode || '';
+    }
+
+    function setJiaozhanHomeSameMode(mode) {
+        const m = mode === 'league' || mode === 'all' ? mode : '';
+        document.documentElement.dataset.tm500JzHomeSameMode = m;
+        // 兼容旧标记
+        document.documentElement.dataset.tm500JzWantHomeSame = m === 'league' ? '1' : '';
+    }
+
+    function isJiaozhanWantHomeSame() {
+        const m = getJiaozhanHomeSameMode();
+        return m === 'league' || m === 'all';
+    }
+
+    function isJiaozhanHomeSameLeagueMode() {
+        return getJiaozhanHomeSameMode() === 'league';
+    }
+
+    function isJiaozhanHomeSameAllMode() {
+        return getJiaozhanHomeSameMode() === 'all';
+    }
+
+    function syncJiaozhanHomeSameButtonLabel() {
+        const btn = document.querySelector('#' + JZ_WRAP_ID + ' button[data-jz="2"]');
+        if (!btn) return;
+        const mode = getJiaozhanHomeSameMode();
+        if (mode === 'league') {
+            btn.textContent = '同联主客';
+            btn.setAttribute('title', '同联赛+同主客；再点切换为全部联赛主客');
+        } else if (mode === 'all') {
+            btn.textContent = '全联主客';
+            btn.setAttribute('title', '全部联赛+同主客；再点切换为同联赛主客');
+        } else {
+            btn.textContent = '主客相同';
+            btn.setAttribute('title', '点按在「同联主客 / 全联主客」间切换');
+        }
+    }
+
+    function injectJiaozhanHomeSameFilterStyle() {
+        const id = 'tm500-jz-ha-filter-style';
+        if (document.getElementById(id)) return;
+        const s = document.createElement('style');
+        s.id = id;
+        s.textContent =
+            '#team_jiaozhan tr.tm500-jz-ha-hide{display:none!important;}';
+        document.head.appendChild(s);
+    }
+
+    function clearJiaozhanHomeSameRowFilter() {
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return;
+        root.querySelectorAll('tr.tm500-jz-ha-hide').forEach(function(tr) {
+            tr.classList.remove('tm500-jz-ha-hide');
+        });
+    }
+
+    function restoreJiaozhanAllLeagueCheckboxes() {
+        const boxes = document.querySelectorAll('input.jz');
+        let i;
+        for (i = 0; i < boxes.length; i++) {
+            const cb = boxes[i];
+            cb.checked = true;
+            if (window.jQuery) {
+                const $cb = window.jQuery(cb);
+                $cb.attr('checked', 'checked');
+                if (typeof $cb.prop === 'function') $cb.prop('checked', true);
+            } else {
+                cb.setAttribute('checked', 'checked');
+            }
+        }
+    }
+
+    /** 同联主客：只勾本场 matchid 联赛（配合原生 home=2，避免先相同赛事再滤主客被场次上限吃掉） */
+    function applyJiaozhanSameLeagueCheckboxesOnly() {
+        const midEl = document.getElementById('matchid');
+        const mid = midEl ? String(midEl.value || midEl.getAttribute('value') || '') : '';
+        if (!mid) return false;
+        const boxes = document.querySelectorAll('input.jz');
+        if (!boxes.length) return false;
+        let hit = false;
+        let i;
+        for (i = 0; i < boxes.length; i++) {
+            if (String(boxes[i].value) === mid) {
+                hit = true;
+                break;
+            }
+        }
+        if (!hit) return false;
+        for (i = 0; i < boxes.length; i++) {
+            const cb = boxes[i];
+            const on = String(cb.value) === mid;
+            cb.checked = on;
+            if (window.jQuery) {
+                const $cb = window.jQuery(cb);
+                if (on) $cb.attr('checked', 'checked');
+                else $cb.removeAttr('checked');
+                if (typeof $cb.prop === 'function') $cb.prop('checked', on);
+            } else if (on) {
+                cb.setAttribute('checked', 'checked');
+            } else {
+                cb.removeAttribute('checked');
+            }
+        }
+        return true;
+    }
+
+    /** home=2 请求时强制 match 仅本场联赛（防 jQuery attr(checked) 仍全选） */
+    function forceJiaozhanPostMatchSameLeague(v) {
+        const midEl = document.getElementById('matchid');
+        const mid = midEl ? String(midEl.value || midEl.getAttribute('value') || '') : '';
+        if (!mid || !v || typeof v !== 'object') return;
+        if (!v.match || typeof v.match !== 'object') v.match = {};
+        const match = v.match;
+        let k;
+        for (k in match) {
+            if (!Object.prototype.hasOwnProperty.call(match, k)) continue;
+            match[k] = String(k) === mid ? 1 : -1;
+        }
+        match[mid] = 1;
+    }
+
+    function withJiaozhanLeagueOnlyPostMatchPatch(enable, fn) {
+        if (!enable || !window.jQuery || typeof window.jQuery.post !== 'function') {
+            return fn();
+        }
+        const $ = window.jQuery;
+        const saved = $.post;
+        let restored = false;
+        const restore = function() {
+            if (!restored) {
+                $.post = saved;
+                restored = true;
+            }
+        };
+        $.post = function(url, v, success, dataType) {
+            if (v && typeof v === 'object' && String(v.home) === '2') {
+                forceJiaozhanPostMatchSameLeague(v);
+            }
+            restore();
+            return saved.call(this, url, v, success, dataType);
+        };
+        try {
+            return fn();
+        } finally {
+            restore();
+        }
+    }
+
+    function setJiaozhanHomeJzUiAsHomeSame() {
+        const homeEm = document.getElementById('home_jz');
+        if (!homeEm) return;
+        homeEm.setAttribute('val', '2');
+        const li2 = findJiaozhanHomeFilterLi('2');
+        const label = li2 ? (li2.textContent || '主客相同') : '主客相同';
+        homeEm.textContent = label;
+        if (window.jQuery) {
+            window.jQuery(homeEm).attr('val', '2').text(label);
+        }
+    }
+
+    /** 本场联赛简称：matchid 对应 .jz 勾选旁文字，其次本场行首列 */
+    function getJiaozhanFixtureLeagueName() {
+        const midEl = document.getElementById('matchid');
+        const mid = midEl ? String(midEl.value || midEl.getAttribute('value') || '') : '';
+        if (mid) {
+            const boxes = document.querySelectorAll('input.jz');
+            let i;
+            for (i = 0; i < boxes.length; i++) {
+                if (String(boxes[i].value) !== mid) continue;
+                const wrap = boxes[i].closest('span.mar_right15') || boxes[i].parentElement;
+                if (!wrap) continue;
+                let t = '';
+                let j;
+                for (j = 0; j < wrap.childNodes.length; j++) {
+                    const n = wrap.childNodes[j];
+                    if (n.nodeType === 3) t += n.textContent || '';
+                }
+                t = normalizeJiaozhanTeamName(t);
+                if (t) return t;
+            }
+        }
+        const bmTd = document.querySelector('#team_jiaozhan tr.bmatch td');
+        if (bmTd) {
+            const t = normalizeJiaozhanTeamName(bmTd.textContent);
+            if (t) return t;
+        }
+        return null;
+    }
+
+    /** 交战表里出现过的队名（与历史行同一套写法，优先于页头） */
+    function collectJiaozhanTableTeamNames() {
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return [];
+        const seen = {};
+        const out = [];
+        root.querySelectorAll('table.pub_table tr').forEach(function(tr) {
+            const pair = getJiaozhanRowHomeAwayNames(tr);
+            if (!pair) return;
+            [pair.home, pair.away].forEach(function(name) {
+                if (!name || seen[name]) return;
+                seen[name] = 1;
+                out.push(name);
+            });
+        });
+        return out;
+    }
+
+    function resolveJiaozhanNameAgainstTable(name, tableNames) {
+        if (!name) return name;
+        if (!tableNames || !tableNames.length) return name;
+        let i;
+        for (i = 0; i < tableNames.length; i++) {
+            if (tableNames[i] === name) return tableNames[i];
+        }
+        for (i = 0; i < tableNames.length; i++) {
+            if (jiaozhanTeamNamesLooselyEqual(name, tableNames[i])) return tableNames[i];
+        }
+        return name;
+    }
+
+    /** 本场主客队名：优先交战表 bmatch/表内写法，再页头/标题，并映射到表内队名 */
+    function getJiaozhanFixtureHomeAwayNames() {
+        const tableNames = collectJiaozhanTableTeamNames();
+        let home = '';
+        let away = '';
+
+        const bmatch = document.querySelector('#team_jiaozhan tr.bmatch');
+        if (bmatch) {
+            const bp = getJiaozhanRowHomeAwayNames(bmatch);
+            if (bp && bp.home && bp.away) {
+                home = bp.home;
+                away = bp.away;
+            }
+        }
+
+        if (!home || !away) {
+            const nodes = document.querySelectorAll('.odds_hd_cont .team_name');
+            if (nodes.length >= 2) {
+                function pick(el) {
+                    let t = '';
+                    let i;
+                    for (i = 0; i < el.childNodes.length; i++) {
+                        const n = el.childNodes[i];
+                        if (n.nodeType === 3) t += n.textContent || '';
+                    }
+                    if (!t) t = el.textContent || '';
+                    return normalizeJiaozhanTeamName(t);
+                }
+                home = home || pick(nodes[0]);
+                away = away || pick(nodes[1]);
+            }
+        }
+
+        if (!home || !away) {
+            const h4 = document.querySelector('#team_jiaozhan .M_title h4');
+            const title = (h4 && h4.textContent) || document.title || '';
+            const m = String(title).match(/^\s*(.+?)\s*VS\s*(.+?)(?:\s|（|\(|$)/i);
+            if (m) {
+                home = home || normalizeJiaozhanTeamName(m[1]);
+                away = away || normalizeJiaozhanTeamName(m[2]);
+            }
+        }
+
+        if (!home || !away) return null;
+        return {
+            home: resolveJiaozhanNameAgainstTable(home, tableNames),
+            away: resolveJiaozhanNameAgainstTable(away, tableNames)
+        };
+    }
+
+    function getJiaozhanRowHomeAwayNames(tr) {
+        if (!tr) return null;
+        const dz = tr.querySelector('td.dz') || tr.querySelector('.dz');
+        if (!dz) return null;
+        const left = dz.querySelector('.dz-l');
+        const right = dz.querySelector('.dz-r');
+        if (!left || !right) return null;
+        return {
+            home: normalizeJiaozhanTeamName(left.textContent),
+            away: normalizeJiaozhanTeamName(right.textContent)
+        };
+    }
+
+    function getJiaozhanRowLeagueName(tr) {
+        if (!tr) return '';
+        const td = tr.querySelector('td');
+        return td ? normalizeJiaozhanTeamName(td.textContent) : '';
+    }
+
+    /**
+     * 本场主客球队 ID（页头 odds_hd：liansai.500.com/team/{id}/）。
+     * 交战历史行本身没有球队 ID，只有队名；站点用 .zhu 标记本场主队所在侧。
+     */
+    function getJiaozhanFixtureTeamIds() {
+        const root = document.querySelector('.odds_hd_cont');
+        if (!root) return null;
+        const ids = [];
+        const seen = {};
+        root.querySelectorAll('a[href*="/team/"]').forEach(function(a) {
+            const m = String(a.getAttribute('href') || '').match(/\/team\/(\d+)\/?/);
+            if (!m) return;
+            const id = m[1];
+            if (seen[id]) return;
+            seen[id] = 1;
+            ids.push(id);
+        });
+        if (ids.length < 2) return null;
+        return { homeId: ids[0], awayId: ids[1] };
+    }
+
+    /**
+     * 主客是否与本场相同。
+     * 优先用站点 .zhu（本场主队在历史对阵中的位置：在左边=主客相同）；
+     * 无 .zhu 时回退队名宽松匹配。
+     */
+    function jiaozhanRowMatchesFixtureHomeAway(tr, fix) {
+        if (!tr) return false;
+        const left = tr.querySelector('.dz-l');
+        const right = tr.querySelector('.dz-r');
+        if (left && right) {
+            const zhuL = left.classList.contains('zhu');
+            const zhuR = right.classList.contains('zhu');
+            if (zhuL || zhuR) return zhuL && !zhuR;
+        }
+        if (!fix || !fix.home || !fix.away) {
+            fix = fix || getJiaozhanFixtureHomeAwayNames();
+        }
+        if (!fix || !fix.home || !fix.away) return false;
+        const pair = getJiaozhanRowHomeAwayNames(tr);
+        if (!pair || !pair.home || !pair.away) return false;
+        return jiaozhanTeamNamesLooselyEqual(pair.home, fix.home) &&
+            jiaozhanTeamNamesLooselyEqual(pair.away, fix.away);
+    }
+
+    /**
+     * 在表上强制：同联赛（本场联赛名）+ 同主客位。
+     * 即使请求仍带回杯赛/友谊赛行，也会被藏掉。
+     */
+    function applyJiaozhanHomeSameRowFilters() {
+        injectJiaozhanHomeSameFilterStyle();
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return;
+        const league = getJiaozhanFixtureLeagueName();
+        const fix = getJiaozhanFixtureHomeAwayNames();
+        const table = root.querySelector('table.pub_table');
+        if (!table) return;
+        const rows = table.querySelectorAll('tr');
+        let i;
+        for (i = 0; i < rows.length; i++) {
+            const tr = rows[i];
+            if (!tr.querySelector('td') || tr.querySelector('th')) continue;
+            if (tr.classList.contains('bmatch')) {
+                tr.classList.remove('tm500-jz-ha-hide');
+                continue;
+            }
+            let ok = true;
+            if (league) {
+                const rowLeague = getJiaozhanRowLeagueName(tr);
+                if (rowLeague !== league) ok = false;
+            }
+            if (ok && !jiaozhanRowMatchesFixtureHomeAway(tr, fix)) ok = false;
+            if (ok) tr.classList.remove('tm500-jz-ha-hide');
+            else tr.classList.add('tm500-jz-ha-hide');
+        }
+    }
+
+    /** 相同赛事：只按本场联赛名藏行（含主客对调场次） */
+    function applyJiaozhanSameLeagueRowFilterOnly() {
+        injectJiaozhanHomeSameFilterStyle();
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return;
+        const league = getJiaozhanFixtureLeagueName();
+        const table = root.querySelector('table.pub_table');
+        if (!table) return;
+        if (!league) {
+            clearJiaozhanHomeSameRowFilter();
+            return;
+        }
+        const rows = table.querySelectorAll('tr');
+        let i;
+        for (i = 0; i < rows.length; i++) {
+            const tr = rows[i];
+            if (!tr.querySelector('td') || tr.querySelector('th')) continue;
+            if (tr.classList.contains('bmatch')) {
+                tr.classList.remove('tm500-jz-ha-hide');
+                continue;
+            }
+            if (getJiaozhanRowLeagueName(tr) === league) tr.classList.remove('tm500-jz-ha-hide');
+            else tr.classList.add('tm500-jz-ha-hide');
+        }
+    }
+
+    /** 仅同主客位（不限联赛） */
+    function applyJiaozhanHomeAwayOnlyRowFilter() {
+        injectJiaozhanHomeSameFilterStyle();
+        const root = document.getElementById('team_jiaozhan');
+        if (!root) return;
+        const fix = getJiaozhanFixtureHomeAwayNames();
+        const table = root.querySelector('table.pub_table');
+        if (!table) return;
+        if (!fix || !fix.home || !fix.away) {
+            clearJiaozhanHomeSameRowFilter();
+            return;
+        }
+        const rows = table.querySelectorAll('tr');
+        let i;
+        for (i = 0; i < rows.length; i++) {
+            const tr = rows[i];
+            if (!tr.querySelector('td') || tr.querySelector('th')) continue;
+            if (tr.classList.contains('bmatch')) {
+                tr.classList.remove('tm500-jz-ha-hide');
+                continue;
+            }
+            if (jiaozhanRowMatchesFixtureHomeAway(tr, fix)) {
+                tr.classList.remove('tm500-jz-ha-hide');
+            } else {
+                tr.classList.add('tm500-jz-ha-hide');
+            }
+        }
+    }
+
+    /**
+     * 表刷新后统一套用快捷筛选的行隐藏：
+     * - 同联主客：同联赛 + 同主客
+     * - 全联主客：仅同主客
+     * - 相同赛事(home=1)：同联赛
+     * - 全部赛事(home=0)：清隐藏
+     * - home 仍为 2 的过渡态：不 clear
+     */
+    function finalizeJiaozhanFilterDom() {
+        const mode = getJiaozhanHomeSameMode();
+        if (mode === 'league') {
+            setJiaozhanHomeJzUiAsHomeSame();
+            applyJiaozhanHomeSameRowFilters();
+            syncJiaozhanHomeSameButtonLabel();
+            updateJiaozhanQuickButtonsActive();
+            return;
+        }
+        if (mode === 'all') {
+            setJiaozhanHomeJzUiAsHomeSame();
+            applyJiaozhanHomeAwayOnlyRowFilter();
+            syncJiaozhanHomeSameButtonLabel();
+            updateJiaozhanQuickButtonsActive();
+            return;
+        }
+        syncJiaozhanHomeSameButtonLabel();
+        const homeEm = document.getElementById('home_jz');
+        const homeVal = homeEm ? String(homeEm.getAttribute('val') || '0') : '0';
+        if (homeVal === '1') {
+            applyJiaozhanSameLeagueRowFilterOnly();
+            updateJiaozhanQuickButtonsActive();
+            return;
+        }
+        if (homeVal === '2') {
+            // 过渡态：保持隐藏，勿 clear
+            return;
+        }
+        clearJiaozhanHomeSameRowFilter();
+        updateJiaozhanQuickButtonsActive();
+    }
+
+    /** @deprecated 兼容旧调用名 */
+    function finalizeJiaozhanHomeSameAfterSameCompetition() {
+        finalizeJiaozhanFilterDom();
+    }
+
+    /** 同联主客模式下发请求前，把 home 临时改回 1，让站点走相同赛事 match 逻辑 */
+    function forceJiaozhanHomeAttrForSameCompetitionRequest() {
+        const homeEm = document.getElementById('home_jz');
+        if (!homeEm) return;
+        homeEm.setAttribute('val', '1');
+        if (window.jQuery) window.jQuery(homeEm).attr('val', '1');
+    }
+
+    /** 构造/取得「相同赛事」li，找不到时造一个，避免回退原生主客相同 */
+    function resolveJiaozhanSameCompetitionLi() {
+        const found = findJiaozhanHomeFilterLi('1');
+        if (found) return found;
+        const fake = document.createElement('li');
+        fake.setAttribute('val', '1');
+        fake.textContent = '相同赛事';
+        return fake;
+    }
+
     function triggerJiaozhanFilter(val) {
         const homeEm = document.querySelector('#team_jiaozhan #home_jz');
         if (!homeEm) return;
@@ -216,9 +791,29 @@
         if (!seltBox) return;
         const ul = seltBox.querySelector('ul.selt_list');
         if (!ul) return;
-        const li = ul.querySelector('li[val="' + val + '"]');
+        let target = String(val);
+        const cur = String(homeEm.getAttribute('val') || '0');
+        const mode = getJiaozhanHomeSameMode();
+
+        // 相同赛事再点 → 全部赛事
+        if (target === '1' && cur === '1' && !mode) target = '0';
+
+        // 主客相同两态循环：同联主客 ↔ 全联主客（不切全部赛事）
+        if (target === '2') {
+            if (mode === 'league') {
+                setJiaozhanHomeSameMode('all');
+            } else if (mode === 'all') {
+                setJiaozhanHomeSameMode('league');
+            } else {
+                setJiaozhanHomeSameMode('league');
+            }
+            target = '2';
+        }
+
+        const li = ul.querySelector('li[val="' + target + '"]');
         if (!li || typeof window.getJiaozhan !== 'function') return;
         window.getJiaozhan(li, 'home_jz');
+        syncJiaozhanHomeSameButtonLabel();
         updateJiaozhanQuickButtonsActive();
         scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
     }
@@ -260,12 +855,20 @@
         bindBtn('0', '全部赛事');
         bindBtn('1', '相同赛事');
         bindBtn('2', '主客相同');
+        const sameCompBtn = wrap.querySelector('button[data-jz="1"]');
+        if (sameCompBtn) {
+            sameCompBtn.setAttribute('title', '只看本场联赛；再点一次恢复全部赛事');
+        }
+        const homeSameBtn = wrap.querySelector('button[data-jz="2"]');
+        if (homeSameBtn) {
+            homeSameBtn.setAttribute('title', '点按在「同联主客 / 全联主客」间切换');
+        }
 
         const copyBtn = document.createElement('button');
         copyBtn.type = 'button';
         copyBtn.textContent = '复制盘口';
         copyBtn.setAttribute('data-jz', 'copy');
-        copyBtn.setAttribute('title', '复制主客相同场次：联赛|日期|比分|初盘|终盘（盘口为数值，如 1.04 -2.25 0.82|0.82 -1.75 1.04）');
+        copyBtn.setAttribute('title', '与主客相同同步切换（同联主客↔全联主客）后复制：联赛|日期|比分|初盘|终盘');
         copyBtn.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -502,6 +1105,7 @@
         const raw = [];
         rows.forEach(function(tr) {
             if (tr.classList.contains('bmatch')) return;
+            if (tr.classList.contains('tm500-jz-ha-hide')) return;
             const st = tr.getAttribute('style') || '';
             if (/display\s*:\s*none/i.test(st)) return;
             const tds = tr.querySelectorAll('td');
@@ -527,6 +1131,7 @@
         });
         rows.forEach(function(tr) {
             if (tr.classList.contains('bmatch')) return;
+            if (tr.classList.contains('tm500-jz-ha-hide')) return;
             const st = tr.getAttribute('style') || '';
             if (/display\s*:\s*none/i.test(st)) return;
             const tds = tr.querySelectorAll('td');
@@ -2944,10 +3549,18 @@
     }
 
     function triggerCopyJiaozhanHandicap(btn) {
-        const homeEm = document.querySelector('#team_jiaozhan #home_jz');
-        const cur = homeEm ? String(homeEm.getAttribute('val') || '0') : '0';
-        if (cur !== '2') {
-            triggerJiaozhanFilter('2');
+        // 与主客相同一样：同联主客 ↔ 全联主客，再复制当前可见行
+        const mode = getJiaozhanHomeSameMode();
+        if (mode === 'league') setJiaozhanHomeSameMode('all');
+        else if (mode === 'all') setJiaozhanHomeSameMode('league');
+        else setJiaozhanHomeSameMode('league');
+
+        const li2 = findJiaozhanHomeFilterLi('2');
+        if (li2 && typeof window.getJiaozhan === 'function') {
+            window.getJiaozhan(li2, 'home_jz');
+            syncJiaozhanHomeSameButtonLabel();
+            updateJiaozhanQuickButtonsActive();
+            scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
             window.setTimeout(function() {
                 runCopyJiaozhanHandicap(btn);
             }, 1200);
@@ -3435,6 +4048,7 @@
                 if (yp) $(yp).trigger('change');
             }
         } catch (ePl) {}
+        finalizeJiaozhanHomeSameAfterSameCompetition();
         ensureJiaozhanSaiguoStrip();
         fillJiaozhanRemarkFromChupanYapan();
         const form = document.getElementById('jiaozhan');
@@ -3454,13 +4068,13 @@
         window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 1200);
     }
 
-    /** 挂钩 getJiaozhan：联赛勾选/快捷筛选都会走这里，整表 html 替换后必须重填 */
+    /** 挂钩 getJiaozhan：同联/全联主客都走原生 home=2；同联仅勾本场联赛（避免相同赛事+场次上限滤后只剩极少） */
     function hookJiaozhanTableRefresh() {
-        if (document.documentElement.dataset.tm500JzGetHook === '1') return;
+        if (document.documentElement.dataset.tm500JzGetHook === '7') return;
         function tryHook() {
             if (typeof window.getJiaozhan !== 'function') return false;
-            if (window.getJiaozhan._tm500Hooked) {
-                document.documentElement.dataset.tm500JzGetHook = '1';
+            if (window.getJiaozhan._tm500JzHookVer >= 7) {
+                document.documentElement.dataset.tm500JzGetHook = '7';
                 return true;
             }
             const orig = window.getJiaozhan;
@@ -3469,12 +4083,65 @@
                 jiaozhanRemarkAjaxReqId++;
                 document.documentElement.dataset.tm500JzJzCpBusy = '';
                 document.documentElement.dataset.tm500JzJzZpBusy = '';
+
+                if (o === 'home_jz') {
+                    const v = getJiaozhanHomeLiVal(li);
+                    if (v === '2') {
+                        // 快捷按钮已设好 mode；原生下拉点主客相同默认进同联主客
+                        if (!getJiaozhanHomeSameMode()) setJiaozhanHomeSameMode('league');
+                        if (isJiaozhanHomeSameAllMode()) {
+                            restoreJiaozhanAllLeagueCheckboxes();
+                            const selfAll = this;
+                            const argsAll = arguments;
+                            const retAll = orig.apply(selfAll, argsAll);
+                            scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
+                            return retAll;
+                        }
+                        // 同联主客：仍请求 home=2（同主客），但只传本场联赛
+                        setJiaozhanHomeSameMode('league');
+                        applyJiaozhanSameLeagueCheckboxesOnly();
+                        const selfL = this;
+                        const argsL = arguments;
+                        const retLeague = withJiaozhanLeagueOnlyPostMatchPatch(true, function() {
+                            return orig.apply(selfL, argsL);
+                        });
+                        scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
+                        return retLeague;
+                    }
+                    // 相同赛事/全部赛事：退出主客相同模式
+                    setJiaozhanHomeSameMode('');
+                } else if (isJiaozhanHomeSameLeagueMode()) {
+                    // 同联主客下改场次/勾选：保持 home=2 + 仅本场联赛
+                    const homeEm = document.getElementById('home_jz');
+                    if (homeEm) {
+                        homeEm.setAttribute('val', '2');
+                        if (window.jQuery) window.jQuery(homeEm).attr('val', '2');
+                    }
+                    applyJiaozhanSameLeagueCheckboxesOnly();
+                    const self2 = this;
+                    const args2 = arguments;
+                    const ret2 = withJiaozhanLeagueOnlyPostMatchPatch(true, function() {
+                        return orig.apply(self2, args2);
+                    });
+                    scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
+                    return ret2;
+                } else if (isJiaozhanHomeSameAllMode()) {
+                    // 全联主客下：保持 home=2，并全勾联赛
+                    const homeEm = document.getElementById('home_jz');
+                    if (homeEm) {
+                        homeEm.setAttribute('val', '2');
+                        if (window.jQuery) window.jQuery(homeEm).attr('val', '2');
+                    }
+                    restoreJiaozhanAllLeagueCheckboxes();
+                }
+
                 const ret = orig.apply(this, arguments);
                 scheduleFillJiaozhanChupanRemarkAfterJiaozhanNav();
                 return ret;
             };
+            window.getJiaozhan._tm500JzHookVer = 7;
             window.getJiaozhan._tm500Hooked = true;
-            document.documentElement.dataset.tm500JzGetHook = '1';
+            document.documentElement.dataset.tm500JzGetHook = '7';
             return true;
         }
         if (tryHook()) return;
@@ -3505,6 +4172,7 @@
 
     function ensureJiaozhanSaiguoStrip() {
         if (!isShujuFenxiPage()) return;
+        finalizeJiaozhanHomeSameAfterSameCompetition();
         const root = document.getElementById('team_jiaozhan');
         if (!root) return;
         const table = root.querySelector('table.pub_table');

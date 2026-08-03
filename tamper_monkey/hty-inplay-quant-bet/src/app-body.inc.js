@@ -581,23 +581,23 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
     function syncCurrentMatchPendingWorkCache() {
         if (!matchId) return;
-        rememberMatchPendingWork(matchId, countPendingWorkStrategies(strategyList));
+        // 导航缓存只记「已达标+未执行」；待确认不进场
+        rememberMatchPendingWork(matchId, countPendingRuleMeet(strategyList));
     }
 
     function matchHasNavigablePendingWork(item) {
         if (!item || !item.matchId) return false;
         const id = String(item.matchId);
         if (isMatchLocallyEnded(id) || isMatchEndedPhase(item)) return false;
+        // 仅「已达标且未执行」才有进场价值；待确认不会执行，不跳转
         if (id === String(matchId) && (strategyList.length || lastMatchScanAt || strategyStatus === 'ok')) {
-            return countPendingWorkStrategies(strategyList) > 0;
+            return countPendingRuleMeet(strategyList) > 0;
         }
+        const meetCached = matchRuleMeetCache[id];
+        if (meetCached) return Number(meetCached.meetCount) > 0;
         const cached = matchPendingWorkCache[id];
         if (cached && cached.known) return cached.pendingCount > 0;
-        if (item.pendingRuleCount != null) return Number(item.pendingRuleCount) > 0;
-        if (item.unfinishedRuleCount != null) return Number(item.unfinishedRuleCount) > 0;
-        if (item.ruleCount != null && Number(item.ruleCount) === 0) return false;
-        // 尚未扫描过策略时暂不排除，避免冷启动无处可跳
-        return true;
+        return false;
     }
 
     function getCurrentMatchPendingRuleMeetCount() {
@@ -778,7 +778,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
         if (!hasNavigableInPlayMatches()) {
             setBetStep((isStrandedSportEventsPage() ? '总览页' : '列表页') +
-                '：暂无进行中且待执行策略的比赛');
+                '：暂无进行中且已达标的比赛');
             renderPanel(true);
             return false;
         }
@@ -1617,39 +1617,47 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 renderPanel(true);
                 const navigable = getNavigableInPlayMatches();
                 if (!navigable.length) {
-                    setBetStep('列表页：暂无进行中且待执行策略的比赛');
-                    renderPanel(true);
-                    return;
-                }
-                if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive() &&
-                    hasNavigableInPlayMatches()) {
-                    // 有可进场次时解除「无比赛」静默，但不清硬冷却
-                    if (navSuppressedUntil && Date.now() < navSuppressedUntil) {
-                        const remain = navSuppressedUntil - Date.now();
-                        if (remain <= NAV_SUPPRESS_NO_INPLAY_MS) navSuppressedUntil = 0;
-                    }
-                }
-                const savedId = resolveStrandedTargetMatchId();
-                let targetId = '';
-                if (savedId && !isMatchLocallyEnded(savedId)) {
-                    const savedItem = activeMatches.find(function (m) {
-                        return String(m.matchId) === String(savedId);
-                    });
-                    if (!savedItem || matchHasNavigablePendingWork(savedItem)) {
-                        targetId = savedId;
-                    }
-                }
-                if (!targetId) {
-                    targetId = pickPreferredNavigableMatch('', '', activeMatches);
-                }
-                if (!targetId) return;
-                if (isKeepaliveEnterMatchPhase()) {
-                    if (!listPageEnterMatchActive) bootListPageEnterMatch();
-                    return;
-                }
-                console.log('[hty-inplay] 列表页：进入策略比赛', targetId);
-                if (clickMatchOnInplayList(targetId, '', '')) return;
-                gotoInplayMatchDirect(targetId, null, '列表页进入策略比赛', { force: true });
+                      setBetStep('列表页：暂无进行中且已达标的比赛');
+                      renderPanel(true);
+                      return;
+                  }
+                  if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive() &&
+                      hasNavigableInPlayMatches()) {
+                      // 有可进场次时解除「无比赛」静默，但不清硬冷却
+                      if (navSuppressedUntil && Date.now() < navSuppressedUntil) {
+                          const remain = navSuppressedUntil - Date.now();
+                          if (remain <= NAV_SUPPRESS_NO_INPLAY_MS) navSuppressedUntil = 0;
+                      }
+                  }
+                  const savedId = resolveStrandedTargetMatchId();
+                  let targetId = '';
+                  if (savedId && !isMatchLocallyEnded(savedId)) {
+                      const savedItem = activeMatches.find(function (m) {
+                          return String(m.matchId) === String(savedId);
+                      });
+                      if (savedItem && matchHasNavigablePendingWork(savedItem)) {
+                          targetId = savedId;
+                      }
+                  }
+                  if (!targetId) {
+                      targetId = pickPreferredNavigableMatch('', '', activeMatches);
+                  }
+                  if (!targetId) return;
+                  const targetItem = activeMatches.find(function (m) {
+                      return String(m.matchId) === String(targetId);
+                  });
+                  if (!targetItem || !matchHasNavigablePendingWork(targetItem)) {
+                      setBetStep('列表页：目标场无已达标策略，跳过进场');
+                      renderPanel(true);
+                      return;
+                  }
+                  if (isKeepaliveEnterMatchPhase()) {
+                      if (!listPageEnterMatchActive) bootListPageEnterMatch();
+                      return;
+                  }
+                  console.log('[hty-inplay] 列表页：进入策略比赛', targetId);
+                  if (clickMatchOnInplayList(targetId, '', '')) return;
+                  gotoInplayMatchDirect(targetId, null, '列表页进入策略比赛', { force: true });
             } catch (e) {
                 console.warn('[hty-inplay] 列表页检测开赛失败', e);
             }
@@ -3603,7 +3611,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         }
 
         const mp = String(item.matchPhase || '').toUpperCase();
-        if (mp === 'IN_PLAY') return 'IN_PLAY';
+        // 后台 matches/active 进行中常用 LIVE，与 IN_PLAY 等价
+        if (mp === 'IN_PLAY' || mp === 'LIVE') return 'IN_PLAY';
         if (mp === 'NOT_STARTED') {
             return isKickoffReached(item, KICKOFF_EARLY_MS) ? 'IN_PLAY' : 'NOT_STARTED';
         }
@@ -3741,13 +3750,12 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             console.log('[hty-inplay] 跳过已结束赛事直跳', id);
             return false;
         }
-        if (!force) {
+        if (!isUserManualMatchPickReason(reason)) {
             const item = activeMatches.find(function (m) {
                 return String(m.matchId) === String(id);
             });
-            if (item && !matchHasNavigablePendingWork(item) &&
-                !isUserManualMatchPickReason(reason)) {
-                console.log('[hty-inplay] 跳过无待执行策略赛事直跳', id);
+            if (!matchHasNavigablePendingWork(item || { matchId: id })) {
+                console.log('[hty-inplay] 跳过无已达标策略赛事直跳', id);
                 return false;
             }
         }
@@ -3780,8 +3788,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         const item = activeMatches.find(function (m) {
             return String(m.matchId) === String(targetId);
         });
-        if (!userPick && item && !matchHasNavigablePendingWork(item)) {
-            console.log('[hty-inplay] 跳过打开无待执行策略赛事', targetId);
+        if (!userPick && !matchHasNavigablePendingWork(item || { matchId: targetId })) {
+            console.log('[hty-inplay] 跳过打开无已达标策略赛事', targetId);
             return false;
         }
         if (isAlreadyOnMatchBetUrl(targetId)) return true;
@@ -3921,19 +3929,29 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             renderActiveMatches(document.getElementById(PANEL_ID));
         }
         if (matchesStatus === 'ok') {
-            if (hasNavigableInPlayMatches() && !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
-                if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive()) navSuppressedUntil = 0;
-            }
             if (reconcileLocalEndedMatches()) {
                 renderActiveMatches(document.getElementById(PANEL_ID));
             }
-            if (!hasNavigableInPlayMatches()) {
+            const inPlayMatches = getSortedInPlayMatches();
+            if (!inPlayMatches.length) {
                 // 总览/列表页不要静默 2 分钟，否则有比赛后仍要干等很久
                 if (!isHubSportEventsPage()) {
                     suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, '策略列表无进行中');
                 }
             } else {
+                // 先按进行中场次扫 ruleMeet；不可用 hasNavigable 门禁（达标缓存依赖本扫描）
+                if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive() &&
+                    !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
+                    navSuppressedUntil = 0;
+                }
                 void scanAllMatchesRuleMeet(false).then(async function () {
+                    renderActiveMatches(document.getElementById(PANEL_ID));
+                    if (!hasNavigableInPlayMatches()) {
+                        if (!isHubSportEventsPage()) {
+                            suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, '策略列表无已达标比赛');
+                        }
+                        return;
+                    }
                     if (shouldBlockMatchAutoNav()) return;
                     if (isHubSportEventsPage()) {
                         if (await maybeEnterMatchFromHubPage('策略赛事就绪，进入比赛')) return;
@@ -4182,9 +4200,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         const inPlay = getSortedInPlayMatches();
         if (!inPlay.length) {
             if (matchId) {
-                const curPending = countPendingWorkStrategies(strategyList);
-                rememberMatchPendingWork(matchId, curPending);
                 const curMeet = getCurrentMatchPendingRuleMeetCount();
+                rememberMatchPendingWork(matchId, curMeet);
                 if (curMeet > 0) {
                     matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
                 } else {
@@ -4203,18 +4220,21 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             const tasks = inPlay.map(function (item) {
                 const id = String(item.matchId);
                 if (id === String(matchId) && (strategyList.length || strategyStatus === 'ok')) {
+                    const meetCount = getCurrentMatchPendingRuleMeetCount();
                     return Promise.resolve({
                         id: id,
-                        meetCount: getCurrentMatchPendingRuleMeetCount(),
-                        pendingCount: countPendingWorkStrategies(strategyList),
+                        meetCount: meetCount,
+                        // 导航用：仅已达标+未执行（不含待确认）
+                        pendingCount: meetCount,
                     });
                 }
                 return fetchAlertStrategies(id).then(function (payload) {
                     const list = Array.isArray(payload.data) ? payload.data : [];
+                    const meetCount = countPendingRuleMeet(list);
                     return {
                         id: id,
-                        meetCount: countPendingRuleMeet(list),
-                        pendingCount: countPendingWorkStrategies(list),
+                        meetCount: meetCount,
+                        pendingCount: meetCount,
                     };
                 }).catch(function () {
                     const prevMeet = matchRuleMeetCache[id];
@@ -4238,7 +4258,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             console.log('[hty-inplay] ruleMeet 扫描', Object.keys(nextMeet).map(function (id) {
                 return id + ':' + nextMeet[id].meetCount;
             }).join(', ') || '无达标',
-                '| pending',
+                '| navigable',
                 results.map(function (r) {
                     return r.id + ':' + (r.pendingCount >= 0 ? r.pendingCount : '?');
                 }).join(', ') || '无');
@@ -4358,11 +4378,11 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         const item = activeMatches.find(function (m) {
             return String(m.matchId) === String(targetId);
         });
-        if (item && !matchHasNavigablePendingWork(item)) {
-            console.warn('[hty-inplay] 跳过无待执行策略赛事', targetId);
+        if (!matchHasNavigablePendingWork(item || { matchId: targetId })) {
+            console.warn('[hty-inplay] 跳过无已达标策略赛事', targetId);
             rememberMatchPendingWork(targetId, 0);
             const altId = pickNextNavigableMatchId([targetId, matchId]);
-            if (altId) return navigateToInplayMatch(altId, reason || '跳过无待执行策略');
+            if (altId) return navigateToInplayMatch(altId, reason || '跳过无已达标策略');
             return false;
         }
         return openInplayMatchPage(targetId, reason || '跳转滚球页');
@@ -4540,9 +4560,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     run: async function () {
                         await loadActiveMatches(true);
                         if (!placing && await resolvePendingBetDedup()) return true;
-                        if (hasNavigableInPlayMatches() && getNavigableInPlayMatches().length >= 2) {
+                        // 有进行中场次就扫达标（勿等 hasNavigable，否则缓存永远空、列表不显示「条达标」）
+                        if (getSortedInPlayMatches().length > 0) {
                             await scanAllMatchesRuleMeet(false);
-                            if (!placing && !targetOption && await maybeNavigateToRuleMeetMatch()) return true;
+                            renderActiveMatches(document.getElementById(PANEL_ID));
+                            if (!placing && !targetOption && hasNavigableInPlayMatches() &&
+                                await maybeNavigateToRuleMeetMatch()) {
+                                return true;
+                            }
                         }
                         return false;
                     },
@@ -7427,14 +7452,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             syncOddsObserverState();
         }
 
-        // 本场已无未执行/待确认策略：离开去其它有工作的场，勿继续钉在本场
+        // 本场已无「已达标+未执行」：离开去其它达标场（待确认不留场）
         if (strategyStatus === 'ok' && matchId &&
-            countPendingWorkStrategies(strategyList) === 0 &&
+            countPendingRuleMeet(strategyList) === 0 &&
             !placing && !isUserManualMatchLockActive()) {
             if (hasNavigableInPlayMatches()) {
                 void maybeAutoNavigateToInplay();
             } else if (!isCurrentMatchEnded()) {
-                setBetStep('本场策略已全部结束，暂无其它待执行比赛');
+                setBetStep('本场已无已达标未执行策略，暂无其它达标比赛');
             }
         }
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.1
+// @version      2.16.4
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -100,7 +100,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.1";
+  var SCRIPT_VERSION = "2.16.4";
 
   // src/storage-keys.js
   var KEYS = {
@@ -912,21 +912,20 @@
     }
     function syncCurrentMatchPendingWorkCache() {
       if (!matchId) return;
-      rememberMatchPendingWork(matchId, countPendingWorkStrategies(strategyList));
+      rememberMatchPendingWork(matchId, countPendingRuleMeet(strategyList));
     }
     function matchHasNavigablePendingWork(item) {
       if (!item || !item.matchId) return false;
       const id = String(item.matchId);
       if (isMatchLocallyEnded(id) || isMatchEndedPhase(item)) return false;
       if (id === String(matchId) && (strategyList.length || lastMatchScanAt || strategyStatus === "ok")) {
-        return countPendingWorkStrategies(strategyList) > 0;
+        return countPendingRuleMeet(strategyList) > 0;
       }
+      const meetCached = matchRuleMeetCache[id];
+      if (meetCached) return Number(meetCached.meetCount) > 0;
       const cached = matchPendingWorkCache[id];
       if (cached && cached.known) return cached.pendingCount > 0;
-      if (item.pendingRuleCount != null) return Number(item.pendingRuleCount) > 0;
-      if (item.unfinishedRuleCount != null) return Number(item.unfinishedRuleCount) > 0;
-      if (item.ruleCount != null && Number(item.ruleCount) === 0) return false;
-      return true;
+      return false;
     }
     function getCurrentMatchPendingRuleMeetCount() {
       return countPendingRuleMeet(strategyList);
@@ -1106,7 +1105,7 @@
       if (placing || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
       if (Date.now() - lastInplayNavAt < INPLAY_NAV_COOLDOWN_MS) return false;
       if (!hasNavigableInPlayMatches()) {
-        setBetStep((isStrandedSportEventsPage() ? "\u603B\u89C8\u9875" : "\u5217\u8868\u9875") + "\uFF1A\u6682\u65E0\u8FDB\u884C\u4E2D\u4E14\u5F85\u6267\u884C\u7B56\u7565\u7684\u6BD4\u8D5B");
+        setBetStep((isStrandedSportEventsPage() ? "\u603B\u89C8\u9875" : "\u5217\u8868\u9875") + "\uFF1A\u6682\u65E0\u8FDB\u884C\u4E2D\u4E14\u5DF2\u8FBE\u6807\u7684\u6BD4\u8D5B");
         renderPanel(true);
         return false;
       }
@@ -1857,7 +1856,7 @@
           renderPanel(true);
           const navigable = getNavigableInPlayMatches();
           if (!navigable.length) {
-            setBetStep("\u5217\u8868\u9875\uFF1A\u6682\u65E0\u8FDB\u884C\u4E2D\u4E14\u5F85\u6267\u884C\u7B56\u7565\u7684\u6BD4\u8D5B");
+            setBetStep("\u5217\u8868\u9875\uFF1A\u6682\u65E0\u8FDB\u884C\u4E2D\u4E14\u5DF2\u8FBE\u6807\u7684\u6BD4\u8D5B");
             renderPanel(true);
             return;
           }
@@ -1873,7 +1872,7 @@
             const savedItem = activeMatches.find(function(m) {
               return String(m.matchId) === String(savedId);
             });
-            if (!savedItem || matchHasNavigablePendingWork(savedItem)) {
+            if (savedItem && matchHasNavigablePendingWork(savedItem)) {
               targetId = savedId;
             }
           }
@@ -1881,6 +1880,14 @@
             targetId = pickPreferredNavigableMatch("", "", activeMatches);
           }
           if (!targetId) return;
+          const targetItem = activeMatches.find(function(m) {
+            return String(m.matchId) === String(targetId);
+          });
+          if (!targetItem || !matchHasNavigablePendingWork(targetItem)) {
+            setBetStep("\u5217\u8868\u9875\uFF1A\u76EE\u6807\u573A\u65E0\u5DF2\u8FBE\u6807\u7B56\u7565\uFF0C\u8DF3\u8FC7\u8FDB\u573A");
+            renderPanel(true);
+            return;
+          }
           if (isKeepaliveEnterMatchPhase2()) {
             if (!listPageEnterMatchActive) bootListPageEnterMatch();
             return;
@@ -3651,7 +3658,7 @@
         return isKickoffReached(item, KICKOFF_EARLY_MS) ? "IN_PLAY" : "NOT_STARTED";
       }
       const mp = String(item.matchPhase || "").toUpperCase();
-      if (mp === "IN_PLAY") return "IN_PLAY";
+      if (mp === "IN_PLAY" || mp === "LIVE") return "IN_PLAY";
       if (mp === "NOT_STARTED") {
         return isKickoffReached(item, KICKOFF_EARLY_MS) ? "IN_PLAY" : "NOT_STARTED";
       }
@@ -3764,12 +3771,12 @@
         console.log("[hty-inplay] \u8DF3\u8FC7\u5DF2\u7ED3\u675F\u8D5B\u4E8B\u76F4\u8DF3", id);
         return false;
       }
-      if (!force) {
+      if (!isUserManualMatchPickReason(reason)) {
         const item = activeMatches.find(function(m) {
           return String(m.matchId) === String(id);
         });
-        if (item && !matchHasNavigablePendingWork(item) && !isUserManualMatchPickReason(reason)) {
-          console.log("[hty-inplay] \u8DF3\u8FC7\u65E0\u5F85\u6267\u884C\u7B56\u7565\u8D5B\u4E8B\u76F4\u8DF3", id);
+        if (!matchHasNavigablePendingWork(item || { matchId: id })) {
+          console.log("[hty-inplay] \u8DF3\u8FC7\u65E0\u5DF2\u8FBE\u6807\u7B56\u7565\u8D5B\u4E8B\u76F4\u8DF3", id);
           return false;
         }
       }
@@ -3801,8 +3808,8 @@
       const item = activeMatches.find(function(m) {
         return String(m.matchId) === String(targetId);
       });
-      if (!userPick && item && !matchHasNavigablePendingWork(item)) {
-        console.log("[hty-inplay] \u8DF3\u8FC7\u6253\u5F00\u65E0\u5F85\u6267\u884C\u7B56\u7565\u8D5B\u4E8B", targetId);
+      if (!userPick && !matchHasNavigablePendingWork(item || { matchId: targetId })) {
+        console.log("[hty-inplay] \u8DF3\u8FC7\u6253\u5F00\u65E0\u5DF2\u8FBE\u6807\u7B56\u7565\u8D5B\u4E8B", targetId);
         return false;
       }
       if (isAlreadyOnMatchBetUrl(targetId)) return true;
@@ -3935,18 +3942,26 @@
         renderActiveMatches(document.getElementById(PANEL_ID));
       }
       if (matchesStatus === "ok") {
-        if (hasNavigableInPlayMatches() && !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
-          if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive()) navSuppressedUntil = 0;
-        }
         if (reconcileLocalEndedMatches()) {
           renderActiveMatches(document.getElementById(PANEL_ID));
         }
-        if (!hasNavigableInPlayMatches()) {
+        const inPlayMatches = getSortedInPlayMatches();
+        if (!inPlayMatches.length) {
           if (!isHubSportEventsPage()) {
             suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, "\u7B56\u7565\u5217\u8868\u65E0\u8FDB\u884C\u4E2D");
           }
         } else {
+          if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive() && !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
+            navSuppressedUntil = 0;
+          }
           void scanAllMatchesRuleMeet(false).then(async function() {
+            renderActiveMatches(document.getElementById(PANEL_ID));
+            if (!hasNavigableInPlayMatches()) {
+              if (!isHubSportEventsPage()) {
+                suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, "\u7B56\u7565\u5217\u8868\u65E0\u5DF2\u8FBE\u6807\u6BD4\u8D5B");
+              }
+              return;
+            }
             if (shouldBlockMatchAutoNav()) return;
             if (isHubSportEventsPage()) {
               if (await maybeEnterMatchFromHubPage("\u7B56\u7565\u8D5B\u4E8B\u5C31\u7EEA\uFF0C\u8FDB\u5165\u6BD4\u8D5B")) return;
@@ -4165,9 +4180,8 @@
       const inPlay = getSortedInPlayMatches();
       if (!inPlay.length) {
         if (matchId) {
-          const curPending = countPendingWorkStrategies(strategyList);
-          rememberMatchPendingWork(matchId, curPending);
           const curMeet = getCurrentMatchPendingRuleMeetCount();
+          rememberMatchPendingWork(matchId, curMeet);
           if (curMeet > 0) {
             matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
           } else {
@@ -4185,18 +4199,21 @@
         const tasks = inPlay.map(function(item) {
           const id = String(item.matchId);
           if (id === String(matchId) && (strategyList.length || strategyStatus === "ok")) {
+            const meetCount = getCurrentMatchPendingRuleMeetCount();
             return Promise.resolve({
               id,
-              meetCount: getCurrentMatchPendingRuleMeetCount(),
-              pendingCount: countPendingWorkStrategies(strategyList)
+              meetCount,
+              // 导航用：仅已达标+未执行（不含待确认）
+              pendingCount: meetCount
             });
           }
           return fetchAlertStrategies(id).then(function(payload) {
             const list = Array.isArray(payload.data) ? payload.data : [];
+            const meetCount = countPendingRuleMeet(list);
             return {
               id,
-              meetCount: countPendingRuleMeet(list),
-              pendingCount: countPendingWorkStrategies(list)
+              meetCount,
+              pendingCount: meetCount
             };
           }).catch(function() {
             const prevMeet = matchRuleMeetCache[id];
@@ -4222,7 +4239,7 @@
           Object.keys(nextMeet).map(function(id) {
             return id + ":" + nextMeet[id].meetCount;
           }).join(", ") || "\u65E0\u8FBE\u6807",
-          "| pending",
+          "| navigable",
           results.map(function(r) {
             return r.id + ":" + (r.pendingCount >= 0 ? r.pendingCount : "?");
           }).join(", ") || "\u65E0"
@@ -4339,11 +4356,11 @@
       const item = activeMatches.find(function(m) {
         return String(m.matchId) === String(targetId);
       });
-      if (item && !matchHasNavigablePendingWork(item)) {
-        console.warn("[hty-inplay] \u8DF3\u8FC7\u65E0\u5F85\u6267\u884C\u7B56\u7565\u8D5B\u4E8B", targetId);
+      if (!matchHasNavigablePendingWork(item || { matchId: targetId })) {
+        console.warn("[hty-inplay] \u8DF3\u8FC7\u65E0\u5DF2\u8FBE\u6807\u7B56\u7565\u8D5B\u4E8B", targetId);
         rememberMatchPendingWork(targetId, 0);
         const altId = pickNextNavigableMatchId([targetId, matchId]);
-        if (altId) return navigateToInplayMatch(altId, reason || "\u8DF3\u8FC7\u65E0\u5F85\u6267\u884C\u7B56\u7565");
+        if (altId) return navigateToInplayMatch(altId, reason || "\u8DF3\u8FC7\u65E0\u5DF2\u8FBE\u6807\u7B56\u7565");
         return false;
       }
       return openInplayMatchPage(targetId, reason || "\u8DF3\u8F6C\u6EDA\u7403\u9875");
@@ -4512,9 +4529,12 @@
             run: async function() {
               await loadActiveMatches(true);
               if (!placing && await resolvePendingBetDedup()) return true;
-              if (hasNavigableInPlayMatches() && getNavigableInPlayMatches().length >= 2) {
+              if (getSortedInPlayMatches().length > 0) {
                 await scanAllMatchesRuleMeet(false);
-                if (!placing && !targetOption && await maybeNavigateToRuleMeetMatch()) return true;
+                renderActiveMatches(document.getElementById(PANEL_ID));
+                if (!placing && !targetOption && hasNavigableInPlayMatches() && await maybeNavigateToRuleMeetMatch()) {
+                  return true;
+                }
               }
               return false;
             }
@@ -7139,11 +7159,11 @@
       if (panelReady && strategyList.length) {
         syncOddsObserverState();
       }
-      if (strategyStatus === "ok" && matchId && countPendingWorkStrategies(strategyList) === 0 && !placing && !isUserManualMatchLockActive()) {
+      if (strategyStatus === "ok" && matchId && countPendingRuleMeet(strategyList) === 0 && !placing && !isUserManualMatchLockActive()) {
         if (hasNavigableInPlayMatches()) {
           void maybeAutoNavigateToInplay();
         } else if (!isCurrentMatchEnded()) {
-          setBetStep("\u672C\u573A\u7B56\u7565\u5DF2\u5168\u90E8\u7ED3\u675F\uFF0C\u6682\u65E0\u5176\u5B83\u5F85\u6267\u884C\u6BD4\u8D5B");
+          setBetStep("\u672C\u573A\u5DF2\u65E0\u5DF2\u8FBE\u6807\u672A\u6267\u884C\u7B56\u7565\uFF0C\u6682\u65E0\u5176\u5B83\u8FBE\u6807\u6BD4\u8D5B");
         }
       }
       try {

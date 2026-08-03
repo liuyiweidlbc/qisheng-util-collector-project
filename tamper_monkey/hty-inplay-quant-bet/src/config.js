@@ -6,4 +6,4 @@ export const NAV_BREAKER_PAUSE_MS = 180000;
 export const HEARTBEAT_MS = 15000;
 export const HEARTBEAT_COLLAPSED_MS = 30000;
 export const HEARTBEAT_HIDDEN_MS = 60000;
-export const SCRIPT_VERSION = '2.16.1';
+export const SCRIPT_VERSION = '2.16.4';
