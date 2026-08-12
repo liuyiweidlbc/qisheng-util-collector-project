@@ -1,5 +1,7 @@
 # DoH — dnsproxy + CA 证书安装说明
 
+> 脚本位于 `doh_v1/server/`，在 ECS 上于本目录执行。
+
 使用 **Let's Encrypt** 为 dnsproxy 申请 CA 签发的证书，客户端无需 `-k`，直接使用 `https://域名/dns-query`。
 
 ---

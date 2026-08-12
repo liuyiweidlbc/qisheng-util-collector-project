@@ -1,5 +1,6 @@
 
 const PANEL_ID = 'tm-hty-inplay-quant-panel';
+const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     const STYLE_ID = 'tm-hty-inplay-quant-style';
     const SCRIPT_VERSION = (function () {
         try {
@@ -116,7 +117,9 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     const NAV_SUPPRESS_NO_INPLAY_MS = 120000;
     const WAF_RECOVERY_KEY = 'tm_hty_inplay_waf_recovery_at';
     const INPLAY_MATCH_WATCH_MS = 15000;
-    const TAB_TG_NAV_COOLDOWN_MS = 90000;
+    const TAB_CATEGORY_NAV_COOLDOWN_MS = 90000;
+    const TAB_CATEGORY_NAV_KEY_PREFIX = 'tm_hty_inplay_tab_nav_at_';
+    const TAB_TG_NAV_COOLDOWN_MS = TAB_CATEGORY_NAV_COOLDOWN_MS;
     const TAB_TG_NAV_KEY = 'tm_hty_inplay_tab_tg_nav_at';
     const USER_MANUAL_MATCH_GRACE_MS = 90000;
     const USER_MANUAL_MATCH_ID_KEY = 'tm_hty_inplay_manual_match_id';
@@ -125,6 +128,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     const USER_MANUAL_CATEGORY_TAB_AT_KEY = 'tm_hty_inplay_manual_tab_at';
     const USER_MANUAL_CATEGORY_TAB_GRACE_MS = 1800000;
     const SCRIPT_TAB_SWITCH_GRACE_MS = 3000;
+    const USER_MANUAL_BROWSE_GRACE_MS = 60000;
     const KICKOFF_EARLY_MS = 60000;
     const KICKOFF_NAV_PRIORITY_MS = 900000;
     const REPORT_UPLOAD = {
@@ -194,6 +198,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         btts: '两队进球',
         '1x2': '独赢',
         ad: '独赢',
+    };
+    const MARKET_CATEGORY_TG = 'tg';
+    const MARKET_CATEGORY_1ST = '1st';
+    const TG_CATEGORY_STRATEGY_MARKETS = { hou: 1, aou: 1, btts: 1 };
+    const FIRST_HALF_CATEGORY_STRATEGY_MARKETS = { ou_1st: 1 };
+    const SCRIPT_MANAGED_CATEGORY_TABS = {
+        tg: 1,
+        '1st': 1,
     };
     const PLATE_ON_LABEL = {
         ov: '大',
@@ -278,19 +290,33 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return normalizeMatchBetHref(cur) === normalizeMatchBetHref(target);
     }
 
-    function shouldSkipTabTgUrlNav() {
+    function tabCategoryNavStorageKey(tab) {
+        const t = String(tab || '').toLowerCase();
+        if (t === 'tg') return TAB_TG_NAV_KEY;
+        return TAB_CATEGORY_NAV_KEY_PREFIX + (t || 'unknown');
+    }
+
+    function shouldSkipTabCategoryUrlNav(tab) {
         try {
-            const last = parseInt(sessionStorage.getItem(TAB_TG_NAV_KEY) || '0', 10);
-            return !isNaN(last) && Date.now() - last < TAB_TG_NAV_COOLDOWN_MS;
+            const last = parseInt(sessionStorage.getItem(tabCategoryNavStorageKey(tab)) || '0', 10);
+            return !isNaN(last) && Date.now() - last < TAB_CATEGORY_NAV_COOLDOWN_MS;
         } catch (e) {
             return false;
         }
     }
 
-    function markTabTgUrlNav() {
+    function markTabCategoryUrlNav(tab) {
         try {
-            sessionStorage.setItem(TAB_TG_NAV_KEY, String(Date.now()));
+            sessionStorage.setItem(tabCategoryNavStorageKey(tab), String(Date.now()));
         } catch (e) { /* ignore */ }
+    }
+
+    function shouldSkipTabTgUrlNav() {
+        return shouldSkipTabCategoryUrlNav(MARKET_CATEGORY_TG);
+    }
+
+    function markTabTgUrlNav() {
+        markTabCategoryUrlNav(MARKET_CATEGORY_TG);
     }
 
     function isSiteAccessBlockedPage() {
@@ -439,12 +465,18 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     let userManualMatchId = '';
     let userManualMatchAt = 0;
     let manualCategoryTabWatchReady = false;
+    let manualBrowseWatchReady = false;
+    let userManualBrowseAt = 0;
+    let scriptScrollQuietUntil = 0;
     let activeMatches = [];
     let matchesStatus = 'loading';
     let matchesError = '';
     let lastMatchesListKey = '';
     let lastStrategyListKey = '';
     let lastStrategyHitKey = '';
+    let matchTipEl = null;
+    let matchTipShowTimer = null;
+    let matchTipActiveKey = '';
     let strategyStates = [];
     let lastMatchScanAt = 0;
     let loginWatchTimer = null;
@@ -464,10 +496,15 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     let lastScanError = '';
     let matchRuleMeetCache = {};
     let matchPendingWorkCache = {};
+    /** 本场扫到「盘在但价不够」的策略：导航降权（不改后台 ruleMeet），避免锁盘后赔率回落仍钉死本场 */
+    let oddsBlockedNavStore = {};
     let lastRuleMeetScanAt = 0;
     let ruleMeetScanInFlight = false;
     let lastButtonSnapshot = new Map();
     let endedMatchesCollapsed = true;
+    let upcomingMatchesCollapsed = true;
+    let watchMatchesCollapsed = true;
+    let matchPendingExecCache = {};
     let matchEndedHandling = false;
     let lastEndedSwitchAt = 0;
     let matchEndedWatchTimer = null;
@@ -549,6 +586,58 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return isStrategyRuleMeet(item) && passesStrategyStatusGate(item);
     }
 
+    function isStrategyOddsBlockedForNav(item) {
+        if (!item || !item.recHash) return false;
+        return !!oddsBlockedNavStore[String(item.recHash)];
+    }
+
+    function markStrategyOddsBlockedForNav(recHash, meta) {
+        const rh = String(recHash || '');
+        if (!rh) return;
+        oddsBlockedNavStore[rh] = {
+            matchId: String((meta && meta.matchId) || matchId || ''),
+            at: Date.now(),
+            odds: meta && meta.odds != null ? meta.odds : null,
+            minOdds: meta && meta.minOdds != null ? meta.minOdds : null,
+        };
+    }
+
+    function clearStrategyOddsBlockedForNav(recHash) {
+        const rh = String(recHash || '');
+        if (!rh) return;
+        delete oddsBlockedNavStore[rh];
+    }
+
+    /** 按盘口扫描结果：价够则解除降权；盘在但价不够则标记导航降权 */
+    function syncOddsBlockedNavFromStates() {
+        if (!strategyStates.length) return;
+        for (let i = 0; i < strategyStates.length; i++) {
+            const st = strategyStates[i];
+            const s = st && st.strategy;
+            if (!s || !s.recHash) continue;
+            const rh = String(s.recHash);
+            if (!isStrategyPendingRuleMeet(s) || st.execStatus !== 'pending') {
+                clearStrategyOddsBlockedForNav(rh);
+                continue;
+            }
+            if (st.hit || st.actionable) {
+                clearStrategyOddsBlockedForNav(rh);
+                continue;
+            }
+            if (st.plateMatched && !st.hit) {
+                markStrategyOddsBlockedForNav(rh, {
+                    matchId: matchId,
+                    odds: st.currentOdds,
+                    minOdds: s.plateOddsHit,
+                });
+            }
+        }
+    }
+
+    function isStrategyPendingRuleMeetForNav(item) {
+        return isStrategyPendingRuleMeet(item) && !isStrategyOddsBlockedForNav(item);
+    }
+
     function countPendingRuleMeet(strategies) {
         if (!Array.isArray(strategies)) return 0;
         let n = 0;
@@ -556,6 +645,33 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (isStrategyPendingRuleMeet(strategies[i])) n += 1;
         }
         return n;
+    }
+
+    /** 导航用：排除本场已确认「盘在价不够」的策略，避免反复跳回无法下单的场次 */
+    function countPendingRuleMeetForNav(strategies) {
+        if (!Array.isArray(strategies)) return 0;
+        let n = 0;
+        for (let i = 0; i < strategies.length; i++) {
+            if (isStrategyPendingRuleMeetForNav(strategies[i])) n += 1;
+        }
+        return n;
+    }
+
+    /** 本场已扫到按钮：所有 ruleMeet 未执行策略都是盘在但价不够 */
+    function isCurrentMatchOddsBelowThresholdOnly() {
+        if (!strategyStates.length || !lastMatchScanAt) return false;
+        if (lastScanButtonCount === 0) return false;
+        let pendingMeet = 0;
+        let belowOnly = 0;
+        for (let i = 0; i < strategyStates.length; i++) {
+            const st = strategyStates[i];
+            const s = st && st.strategy;
+            if (!s || !isStrategyPendingRuleMeet(s) || st.execStatus !== 'pending') continue;
+            pendingMeet += 1;
+            if (st.hit || st.actionable) return false;
+            if (st.plateMatched && !st.hit) belowOnly += 1;
+        }
+        return pendingMeet > 0 && belowOnly === pendingMeet;
     }
 
     /** 仍有可跟进工作：未执行 / 待确认（不含已中止、已执行） */
@@ -567,6 +683,53 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (st === 'pending' || st === 'confirming') n += 1;
         }
         return n;
+    }
+
+    /** 未执行策略条数（不含待确认/已执行/已中止） */
+    function countPendingExecStrategies(strategies, useLocalExec) {
+        if (!Array.isArray(strategies)) return 0;
+        let n = 0;
+        for (let i = 0; i < strategies.length; i++) {
+            const st = useLocalExec
+                ? getStrategyExecStatus(strategies[i])
+                : getStrategyExecStatusFromApi(strategies[i]);
+            if (st === 'pending') n += 1;
+        }
+        return n;
+    }
+
+    function rememberMatchPendingExec(id, pendingExecCount) {
+        const mid = String(id || '');
+        if (!mid) return;
+        matchPendingExecCache[mid] = {
+            count: Number(pendingExecCount) || 0,
+            known: true,
+            at: Date.now(),
+        };
+    }
+
+    function syncCurrentMatchPendingExecCache() {
+        if (!matchId) return;
+        if (!(strategyList.length || strategyStatus === 'ok')) return;
+        rememberMatchPendingExec(matchId, countPendingExecStrategies(strategyList, true));
+    }
+
+    /** >=0 已知；-1 未知（先留在主列表，避免误丢） */
+    function getMatchPendingExecCount(item) {
+        if (!item || !item.matchId) return -1;
+        const id = String(item.matchId);
+        if (id === String(matchId) && (strategyList.length || strategyStatus === 'ok')) {
+            return countPendingExecStrategies(strategyList, true);
+        }
+        const cached = matchPendingExecCache[id];
+        if (cached && cached.known) return Number(cached.count) || 0;
+        return -1;
+    }
+
+    function matchHasPendingExecStrategies(item) {
+        const n = getMatchPendingExecCount(item);
+        if (n < 0) return true;
+        return n > 0;
     }
 
     function rememberMatchPendingWork(id, pendingCount) {
@@ -581,8 +744,9 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
     function syncCurrentMatchPendingWorkCache() {
         if (!matchId) return;
-        // 导航缓存只记「已达标+未执行」；待确认不进场
-        rememberMatchPendingWork(matchId, countPendingRuleMeet(strategyList));
+        // 导航缓存只记「已达标+未执行」且未被价不够降权；待确认不进场
+        rememberMatchPendingWork(matchId, countPendingRuleMeetForNav(strategyList));
+        syncCurrentMatchPendingExecCache();
     }
 
     function matchHasNavigablePendingWork(item) {
@@ -591,7 +755,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         if (isMatchLocallyEnded(id) || isMatchEndedPhase(item)) return false;
         // 仅「已达标且未执行」才有进场价值；待确认不会执行，不跳转
         if (id === String(matchId) && (strategyList.length || lastMatchScanAt || strategyStatus === 'ok')) {
-            return countPendingRuleMeet(strategyList) > 0;
+            return countPendingRuleMeetForNav(strategyList) > 0;
         }
         const meetCached = matchRuleMeetCache[id];
         if (meetCached) return Number(meetCached.meetCount) > 0;
@@ -605,9 +769,15 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     }
 
     function getCurrentMatchRuleMeetCountForNav() {
-        const local = getCurrentMatchPendingRuleMeetCount();
+        if (isCurrentMatchOddsBelowThresholdOnly()) return 0;
+        const local = countPendingRuleMeetForNav(strategyList);
         if (local > 0) return local;
         if (!matchId) return 0;
+        // 本场策略全被价不够降权时，勿再回落到原始 ruleMeet 缓存
+        if (strategyList.length && countPendingRuleMeet(strategyList) > 0 &&
+            countPendingRuleMeetForNav(strategyList) === 0) {
+            return 0;
+        }
         const cached = matchRuleMeetCache[String(matchId)];
         return cached && cached.meetCount > 0 ? cached.meetCount : 0;
     }
@@ -830,13 +1000,12 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         if (placing) return true;
         if (targetOption) return true;
         if (strategyStates.some(function (st) { return st.actionable; })) return true;
+        // 盘已开但价不够：不钉场，让路给其它达标场（后台 ruleMeet 仍保留，价回升可再下）
+        if (isCurrentMatchOddsBelowThresholdOnly()) return false;
         // 其它场已达标待下：本场即使还有未下完的 ruleMeet/半命中，也不占住（立即可下已在上方拦截）
         if (hasOtherRuleMeetMatchThanCurrent()) return false;
         if (strategyStates.some(function (st) {
             return st.hit && st.execStatus === 'pending';
-        })) return true;
-        if (strategyStates.some(function (st) {
-            return st.plateMatched && st.execStatus === 'pending';
         })) return true;
         if (hasPendingExecutableStrategies() && lastScanButtonCount === 0) {
             // 未开赛页暂无盘口；若有其它进行中赛事，应自动切过去而非一直钉在地址栏场次
@@ -2074,6 +2243,21 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return !!TG_CATEGORY_STRATEGY_MARKETS[String(market || '').toLowerCase()];
     }
 
+    function strategyMarketNeeds1stTab(market) {
+        return !!FIRST_HALF_CATEGORY_STRATEGY_MARKETS[String(market || '').toLowerCase()];
+    }
+
+    function categoryTabForStrategyMarket(market) {
+        const m = String(market || '').toLowerCase();
+        if (TG_CATEGORY_STRATEGY_MARKETS[m]) return MARKET_CATEGORY_TG;
+        if (FIRST_HALF_CATEGORY_STRATEGY_MARKETS[m]) return MARKET_CATEGORY_1ST;
+        return '';
+    }
+
+    function isScriptManagedCategoryTab(tab) {
+        return !!SCRIPT_MANAGED_CATEGORY_TABS[String(tab || '').toLowerCase()];
+    }
+
     function buildMatchMarketUrl(tab) {
         if (!isOnMatchBetPage() || !matchId) {
             return matchBetUrl(matchId || resolveStrandedTargetMatchId(), tab);
@@ -2096,6 +2280,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     function marketCategoryTabLabel(tab) {
         const t = String(tab || '').toLowerCase();
         if (t === 'tg') return '进球';
+        if (t === '1st') return '上半场';
         if (t === 'all') return '全部';
         if (t === 'ah') return '让球';
         return t || '全部';
@@ -2106,6 +2291,36 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (!strategyNeedsPlateScan(item)) return false;
             return strategyMarketNeedsTgTab(item.market);
         });
+    }
+
+    function hasPending1stCategoryPlateScan() {
+        return strategyList.some(function (item) {
+            if (!strategyNeedsPlateScan(item)) return false;
+            return strategyMarketNeeds1stTab(item.market);
+        });
+    }
+
+    function hasPendingSpecialCategoryPlateScan() {
+        return hasPendingTgCategoryPlateScan() || hasPending1stCategoryPlateScan();
+    }
+
+    function resolveNeededCategoryTab(forAutoBet, requiredTab) {
+        const explicit = String(requiredTab || '').toLowerCase();
+        if (explicit && isScriptManagedCategoryTab(explicit)) return explicit;
+        if (forAutoBet) return '';
+        if (isUserManualCategoryTabActive()) return '';
+        if (targetOption && targetOption.strategy) {
+            const fromTarget = categoryTabForStrategyMarket(targetOption.strategy.market);
+            if (fromTarget) return fromTarget;
+        }
+        const cur = getActiveMarketCategoryTab();
+        if (hasPending1stCategoryPlateScan() && cur !== MARKET_CATEGORY_1ST) {
+            return MARKET_CATEGORY_1ST;
+        }
+        if (hasPendingTgCategoryPlateScan() && cur !== MARKET_CATEGORY_TG) {
+            return MARKET_CATEGORY_TG;
+        }
+        return '';
     }
 
     function isScriptCategoryTabSwitchRecent() {
@@ -2123,12 +2338,13 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
     function markUserManualCategoryTab(tab) {
         const t = String(tab || '').toLowerCase();
-        if (!t || t === MARKET_CATEGORY_TG) {
+        if (!t || isScriptManagedCategoryTab(t)) {
             clearUserManualCategoryTabLock();
             return;
         }
         userManualCategoryTab = t;
         userManualCategoryTabAt = Date.now();
+        markUserManualBrowse();
         try {
             sessionStorage.setItem(USER_MANUAL_CATEGORY_TAB_KEY, userManualCategoryTab);
             sessionStorage.setItem(USER_MANUAL_CATEGORY_TAB_AT_KEY, String(userManualCategoryTabAt));
@@ -2204,12 +2420,63 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         scriptCategoryTabSwitchAt = Date.now();
     }
 
+    function markUserManualBrowse() {
+        userManualBrowseAt = Date.now();
+    }
+
+    function isUserManualBrowseActive() {
+        if (!userManualBrowseAt) return false;
+        return Date.now() - userManualBrowseAt < USER_MANUAL_BROWSE_GRACE_MS;
+    }
+
+    function noteScriptMarketScroll() {
+        scriptScrollQuietUntil = Date.now() + 900;
+    }
+
+    /** 扫描滚盘；用户手动浏览时跳过，避免打断手动点胜平负等 */
+    function scrollMarketIntoView(el, opts) {
+        if (!el || !el.scrollIntoView) return false;
+        const force = !!(opts && opts.force);
+        if (!force && (isUserManualBrowseActive() || isUserManualCategoryTabActive())) {
+            return false;
+        }
+        noteScriptMarketScroll();
+        el.scrollIntoView({ block: 'center', behavior: 'auto' });
+        return true;
+    }
+
+    function setupManualBrowseWatch() {
+        if (manualBrowseWatchReady) return;
+        manualBrowseWatchReady = true;
+        function onUserBrowse(e) {
+            if (!isOnMatchBetPage()) return;
+            if (Date.now() < scriptScrollQuietUntil) return;
+            if (e && e.target && e.target.closest && e.target.closest('#' + PANEL_ID)) return;
+            markUserManualBrowse();
+        }
+        document.addEventListener('wheel', onUserBrowse, { passive: true, capture: true });
+        document.addEventListener('touchmove', onUserBrowse, { passive: true, capture: true });
+        document.addEventListener('scroll', onUserBrowse, { passive: true, capture: true });
+        // 用户在盘口区点击/拖动也视为手动浏览（如翻找独赢）
+        document.addEventListener('pointerdown', function (e) {
+            if (!isOnMatchBetPage()) return;
+            if (!e.target || !e.target.closest) return;
+            if (e.target.closest('#' + PANEL_ID)) return;
+            if (isScriptCategoryTabSwitchRecent()) return;
+            const inMarket = e.target.closest(
+                '[data-testid="SportExhaustivePage"],[data-testid*="MarketTable"],' +
+                '[data-testid*="ExhaustiveMarket"],button[data-testid^="oddsBtn"]'
+            );
+            if (inMarket) markUserManualBrowse();
+        }, true);
+    }
+
     function syncUserManualCategoryTabFromUrl(prevTab, nextTab) {
         const next = String(nextTab || '').toLowerCase();
         const prev = String(prevTab || '').toLowerCase();
         if (!next || next === prev) return;
         if (isScriptCategoryTabSwitchRecent()) return;
-        if (next === MARKET_CATEGORY_TG) {
+        if (isScriptManagedCategoryTab(next)) {
             clearUserManualCategoryTabLock();
             return;
         }
@@ -2223,6 +2490,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             '全部': 'all',
             '进球': MARKET_CATEGORY_TG,
             '让球': 'ah',
+            '上半场': MARKET_CATEGORY_1ST,
+            '上半': MARKET_CATEGORY_1ST,
         };
         document.addEventListener('click', function (e) {
             if (!isOnInplayMatchPage()) return;
@@ -2232,7 +2501,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             const text = (el.textContent || '').replace(/\s+/g, '');
             const tab = labelToTab[text];
             if (!tab) return;
-            if (tab === MARKET_CATEGORY_TG) {
+            if (isScriptManagedCategoryTab(tab)) {
                 clearUserManualCategoryTabLock();
             } else {
                 markUserManualCategoryTab(tab);
@@ -2246,6 +2515,13 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     function clickMarketCategoryTab(tab) {
         const tabId = String(tab || '').toLowerCase();
         const label = marketCategoryTabLabel(tabId);
+        const labels = tabId === MARKET_CATEGORY_1ST
+            ? ['上半场', '上半', '1st', label]
+            : [label];
+        const labelSet = {};
+        for (let li = 0; li < labels.length; li++) {
+            if (labels[li]) labelSet[String(labels[li]).replace(/\s+/g, '')] = true;
+        }
         // 只在盘口分类区域精确匹配，禁止 data-testid 子串误点（曾用 indexOf('tg') 极易误点导航）
         const roots = [
             document.querySelector('[data-testid="SportExhaustivePage"]'),
@@ -2270,7 +2546,12 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     return true;
                 }
                 const text = (el.textContent || '').replace(/\s+/g, '');
-                if (text === label && text.length <= 6) {
+                if (text && text.length <= 8 && labelSet[text]) {
+                    safeClick(el);
+                    return true;
+                }
+                const href = (el.getAttribute('href') || '').toLowerCase();
+                if (href && href.indexOf('tab=' + tabId) >= 0) {
                     safeClick(el);
                     return true;
                 }
@@ -2280,26 +2561,39 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return false;
     }
 
-    async function ensureMarketCategoryTab(force, forAutoBet, requireTgOnly) {
+    /** 同场仅切换盘口分类 tab（即使 AUTO_PAGE_NAV 关闭也允许，避免 ou_1st 等无法打开） */
+    function gotoSameMatchCategoryTab(tab) {
+        if (!isOnInplayMatchPage() || !matchId) return false;
+        const targetTab = String(tab || '').toLowerCase();
+        if (!targetTab) return false;
+        if (getActiveMarketCategoryTab() === targetTab) return true;
+        if (isAlreadyOnMatchBetUrl(matchId, targetTab)) return true;
+        const url = matchBetUrl(matchId, targetTab);
+        console.log('[hty-inplay] 同场切换盘口分类', targetTab, url);
+        withPageNavAllow(function () {
+            window.location.href = url;
+        });
+        return true;
+    }
+
+    async function ensureMarketCategoryTab(force, forAutoBet, requiredTab) {
         if (!forAutoBet && isUserManualCategoryTabActive()) return;
-        const needsTg = forAutoBet ? !!requireTgOnly :
-            (!isUserManualCategoryTabActive() && (
-                force ||
-                hasPendingTgCategoryPlateScan() ||
-                (targetOption && targetOption.strategy &&
-                    strategyMarketNeedsTgTab(targetOption.strategy.market))
-            ));
-        if (!needsTg) return;
+        let targetTab = resolveNeededCategoryTab(forAutoBet, requiredTab);
+        // 兼容旧调用：ensureMarketCategoryTab(true, true, true) => tab=tg
+        if (!targetTab && forAutoBet && requiredTab === true) {
+            targetTab = MARKET_CATEGORY_TG;
+        }
+        if (!targetTab) return;
         if (!isOnInplayMatchPage() || !matchId) return;
         if (!hasNavigableInPlayMatches() || isCurrentMatchEnded()) return;
-        if (getActiveMarketCategoryTab() === MARKET_CATEGORY_TG) return;
+        if (getActiveMarketCategoryTab() === targetTab) return;
         const now = Date.now();
         if (!force && !forAutoBet && now - lastEnsureMarketCategoryTabAt < 3000) return;
         lastEnsureMarketCategoryTabAt = now;
         rememberCurrentMatchReturnUrl();
         try {
             noteScriptCategoryTabSwitch();
-            if (clickMarketCategoryTab(MARKET_CATEGORY_TG)) {
+            if (clickMarketCategoryTab(targetTab)) {
                 await humanDelay(400, 800);
                 if (isStrandedSportEventsPage()) {
                     if (shouldAllowAutoNavigation('tab-stranded')) {
@@ -2308,22 +2602,21 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     return;
                 }
                 await waitForOddsButtons(1, 10000);
-                lastWatchedCategoryTab = MARKET_CATEGORY_TG;
-                console.log('[hty-inplay] 已点击 tab=tg' + (forAutoBet ? '（自动投注）' : ''));
+                lastWatchedCategoryTab = targetTab;
+                console.log('[hty-inplay] 已点击 tab=' + targetTab + (forAutoBet ? '（自动投注）' : ''));
                 return;
             }
-            if (shouldAllowAutoNavigation('tab-tg')) {
-                if (isAlreadyOnMatchBetUrl(matchId, MARKET_CATEGORY_TG)) return;
-                if (shouldSkipTabTgUrlNav()) {
-                    console.log('[hty-inplay] tab=tg URL 跳转冷却中，仅重试点击');
-                    return;
-                }
-                markTabTgUrlNav();
-                gotoInplayMatch(matchId, MARKET_CATEGORY_TG);
-                lastWatchedCategoryTab = MARKET_CATEGORY_TG;
+            if (!shouldAllowAutoNavigation('tab-' + targetTab)) return;
+            if (isAlreadyOnMatchBetUrl(matchId, targetTab)) return;
+            if (shouldSkipTabCategoryUrlNav(targetTab)) {
+                console.log('[hty-inplay] tab=' + targetTab + ' URL 跳转冷却中，仅重试点击');
+                return;
             }
+            markTabCategoryUrlNav(targetTab);
+            gotoSameMatchCategoryTab(targetTab);
+            lastWatchedCategoryTab = targetTab;
         } catch (e) {
-            console.warn('[hty-inplay] 切换 tab=tg 失败', e);
+            console.warn('[hty-inplay] 切换 tab=' + targetTab + ' 失败', e);
         }
     }
 
@@ -2550,6 +2843,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         if (m === 'aou') return ['a-ou', 'aou'];
         if (m === 'hou') return ['h-ou', 'hou'];
         if (m === 'ou') return ['ou'];
+        if (m === 'ou_1st') return ['ou_1st'];
         const pm = pageMarketForStrategy(market);
         return pm ? [pm] : [];
     }
@@ -2560,10 +2854,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         'h-ou': '主进球',
         hou: '主进球',
         btts: '两队进球',
+        ou_1st: '上半进球',
     };
-
-    const MARKET_CATEGORY_TG = 'tg';
-    const TG_CATEGORY_STRATEGY_MARKETS = { hou: 1, aou: 1, btts: 1 };
 
     function findMarketElementByLabel(label) {
         if (!label || !document.body) return null;
@@ -2825,13 +3117,15 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     async function ensureButtonVisible(option) {
         if (!option || !option.strategy) return resolveLiveButton(option.testid);
         const betMarket = getOptionBetMarket(option) || option.strategy.market;
-        if (strategyMarketNeedsTgTab(betMarket) || strategyMarketNeedsTgTab(option.strategy.market)) {
-            await ensureMarketCategoryTab(true, true, true);
+        const needTab = categoryTabForStrategyMarket(betMarket) ||
+            categoryTabForStrategyMarket(option.strategy.market);
+        if (needTab) {
+            await ensureMarketCategoryTab(true, true, needTab);
         }
         const markets = pageMarketsForStrategy(betMarket);
         for (let i = 0; i < markets.length; i++) {
             const el = findStrategyMarketElement(markets[i]);
-            if (el) el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            if (el) scrollMarketIntoView(el, { force: true });
         }
         await humanDelay(400, 700);
         snapshotOddsButtons(lastButtonSnapshot);
@@ -2991,6 +3285,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     }
 
     async function ensureStrategyMarketsVisible() {
+        if (isUserManualBrowseActive() || isUserManualCategoryTabActive()) return;
         const hasPendingUnmatched = strategyList.some(function (item) {
             return strategyNeedsPlateScan(item);
         });
@@ -3009,7 +3304,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             }
         }
         for (let j = 0; j < toScroll.length; j++) {
-            toScroll[j].scrollIntoView({ block: 'center', behavior: 'auto' });
+            if (!scrollMarketIntoView(toScroll[j])) break;
             await humanDelay(200, 400);
         }
         if (toScroll.length) {
@@ -3021,31 +3316,37 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         releaseStaleBetInflight();
         await ensureMarketView();
         await ensureMarketCategoryTab(
-            hasPendingTgCategoryPlateScan() && !isUserManualCategoryTabActive()
+            hasPendingSpecialCategoryPlateScan() && !isUserManualCategoryTabActive()
         );
         const buttonMap = new Map();
         snapshotOddsButtons(buttonMap);
         buttonMarketIndex = buildButtonMarketIndex(buttonMap);
         strategyStates = evaluateStrategyStatesFromMap(buttonMap);
         const firstPlateCount = strategyStates.filter(function (st) { return st.plateMatched; }).length;
+        let allowAutoScroll = !isUserManualBrowseActive() && !isUserManualCategoryTabActive();
 
         for (let round = 0; round < 2; round++) {
             const pendingUnmatched = strategyStates.filter(function (st) {
                 return st.execStatus === 'pending' && !st.plateMatched;
             });
             if (!pendingUnmatched.length) break;
+            if (!allowAutoScroll) break;
 
             for (let i = 0; i < pendingUnmatched.length; i++) {
                 const markets = pageMarketsForStrategy(pendingUnmatched[i].strategy.market);
                 for (let m = 0; m < markets.length; m++) {
                     const el = findStrategyMarketElement(markets[m]);
                     if (el) {
-                        el.scrollIntoView({ block: 'center', behavior: 'auto' });
+                        if (!scrollMarketIntoView(el)) {
+                            allowAutoScroll = false;
+                            break;
+                        }
                         await humanDelay(300, 500);
                         snapshotOddsButtons(buttonMap);
                         buttonMarketIndex = buildButtonMarketIndex(buttonMap);
                     }
                 }
+                if (!allowAutoScroll) break;
             }
             await humanDelay(500, 800);
             snapshotOddsButtons(buttonMap);
@@ -3061,21 +3362,37 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 ? String(st.strategy.market).toLowerCase() : '';
             return strategyMarketNeedsTgTab(m);
         });
-        if (pendingAfter.length && (!firstPlateCount || pendingTeamOu.length)) {
-            if (pendingTeamOu.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_TG &&
-                !isUserManualCategoryTabActive()) {
-                await ensureMarketCategoryTab(true, false);
+        const pending1st = pendingAfter.filter(function (st) {
+            const m = st.strategy && st.strategy.market
+                ? String(st.strategy.market).toLowerCase() : '';
+            return strategyMarketNeeds1stTab(m);
+        });
+        if (pendingAfter.length && (!firstPlateCount || pendingTeamOu.length || pending1st.length)) {
+            let switchedCategory = false;
+            if (!isUserManualCategoryTabActive()) {
+                if (pending1st.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_1ST) {
+                    await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_1ST);
+                    switchedCategory = true;
+                } else if (pendingTeamOu.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_TG) {
+                    await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_TG);
+                    switchedCategory = true;
+                }
+            }
+            if (switchedCategory) {
                 snapshotOddsButtons(buttonMap);
                 buttonMarketIndex = buildButtonMarketIndex(buttonMap);
             }
-            for (let i = 0; i < pendingAfter.length; i++) {
-                const markets = pageMarketsForStrategy(pendingAfter[i].strategy.market);
-                for (let m = 0; m < markets.length; m++) {
-                    const el = findStrategyMarketElement(markets[m]);
-                    if (el) el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            allowAutoScroll = !isUserManualBrowseActive() && !isUserManualCategoryTabActive();
+            if (allowAutoScroll) {
+                for (let i = 0; i < pendingAfter.length; i++) {
+                    const markets = pageMarketsForStrategy(pendingAfter[i].strategy.market);
+                    for (let m = 0; m < markets.length; m++) {
+                        const el = findStrategyMarketElement(markets[m]);
+                        if (el) scrollMarketIntoView(el);
+                    }
                 }
+                await humanDelay(500, 800);
             }
-            await humanDelay(500, 800);
             snapshotOddsButtons(buttonMap);
             buttonMarketIndex = buildButtonMarketIndex(buttonMap);
             strategyStates = evaluateStrategyStatesFromMap(buttonMap);
@@ -3090,10 +3407,10 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (!st.hit || st.bttsSubstitute || st.execStatus !== 'pending') return false;
             return !!getBttsSubstituteKind(st.strategy, getLiveMatchScore());
         });
-        if (needBttsSub) {
+        if (needBttsSub && !isUserManualBrowseActive() && !isUserManualCategoryTabActive()) {
             const bttsEl = findStrategyMarketElement('btts');
             if (bttsEl) {
-                bttsEl.scrollIntoView({ block: 'center', behavior: 'auto' });
+                scrollMarketIntoView(bttsEl);
                 await humanDelay(400, 700);
                 snapshotOddsButtons(buttonMap);
                 buttonMarketIndex = buildButtonMarketIndex(buttonMap);
@@ -3103,6 +3420,16 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             }
         }
 
+        syncOddsBlockedNavFromStates();
+        syncCurrentMatchPendingWorkCache();
+        if (matchId) {
+            const navMeet = countPendingRuleMeetForNav(strategyList);
+            if (navMeet > 0) {
+                matchRuleMeetCache[String(matchId)] = { meetCount: navMeet, at: Date.now() };
+            } else {
+                delete matchRuleMeetCache[String(matchId)];
+            }
+        }
         return strategyStates;
     }
 
@@ -3249,7 +3576,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     }
 
     async function lightweightReevaluateOdds(buttonMap) {
-        if (hasPendingTgCategoryPlateScan()) {
+        if (hasPendingSpecialCategoryPlateScan()) {
             await ensureStrategyMarketsVisible();
         }
         const map = buttonMap || new Map();
@@ -3258,6 +3585,16 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         strategyStates = evaluateStrategyStatesFromMap(map);
         lastButtonSnapshot = map;
         lastScanButtonCount = map.size;
+        syncOddsBlockedNavFromStates();
+        syncCurrentMatchPendingWorkCache();
+        if (matchId) {
+            const navMeet = countPendingRuleMeetForNav(strategyList);
+            if (navMeet > 0) {
+                matchRuleMeetCache[String(matchId)] = { meetCount: navMeet, at: Date.now() };
+            } else {
+                delete matchRuleMeetCache[String(matchId)];
+            }
+        }
         targetOption = findStrategyMatch();
         return targetOption;
     }
@@ -3278,6 +3615,12 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 console.warn('[hty-inplay] autoBet 自动登录', e);
             });
             schedulePoll();
+            return;
+        }
+        // 价不够且其它场有达标：尽快让路（不改后台 ruleMeet）
+        if (isCurrentMatchOddsBelowThresholdOnly() && hasOtherRuleMeetMatchThanCurrent() &&
+            !isUserManualMatchLockActive()) {
+            void maybeNavigateToRuleMeetMatch();
             return;
         }
         if (shouldHoldCurrentMatch() && !pollTimer) {
@@ -3318,9 +3661,9 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
         lastScanError = '';
         try {
-            await ensureMarketView(force || hasPendingTgCategoryPlateScan());
+            await ensureMarketView(force || hasPendingSpecialCategoryPlateScan());
             await ensureMarketCategoryTab(
-                (force || hasPendingTgCategoryPlateScan()) && !isUserManualCategoryTabActive()
+                (force || hasPendingSpecialCategoryPlateScan()) && !isUserManualCategoryTabActive()
             );
             await waitForOddsButtons(1, 15000);
             await ensureStrategyMarketsVisible();
@@ -3632,45 +3975,174 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return false;
     }
 
+    function formatActiveMatchFullTitle(item) {
+        if (!item) return '';
+        const home = item.homeName || '—';
+        const away = item.awayName || '—';
+        const tour = String(item.tournamentName || '').trim();
+        const phase = MATCH_PHASE_LABEL[resolveMatchPhase(item)] || resolveMatchPhase(item) || '';
+        const meetCount = getMatchRuleMeetCount(item);
+        const parts = [];
+        if (item.matchId) parts.push('#' + item.matchId);
+        if (item.kickoffTime) parts.push(String(item.kickoffTime));
+        if (tour) parts.push(tour);
+        parts.push(home + ' vs ' + away);
+        if (phase) parts.push(phase);
+        if (item.ruleCount != null) parts.push(item.ruleCount + '条策略');
+        if (meetCount > 0) parts.push(meetCount + '条达标');
+        if (item.finalScore != null && item.finalScore !== '') parts.push('比分 ' + item.finalScore);
+        return parts.join(' · ');
+    }
+
     function renderMatchListRow(item, idx) {
         const id = item.matchId || '';
         const isPage = String(id) === String(matchId);
         const score = item.finalScore != null && item.finalScore !== ''
-            ? ' · 比分 ' + item.finalScore
+            ? ' · ' + item.finalScore
             : '';
         let rowClass = 'tm-hty-match-item';
         if (isPage) rowClass += ' tm-hty-match-page';
         if (isMatchEndedPhase(item)) rowClass += ' tm-hty-match-ended';
-        const pickText = formatActiveMatchItem(item) + score;
-        const pageBadge = isPage ? '<span class="tm-hty-match-badge" title="当前页">📌</span>' : '';
+        const meetCount = getMatchRuleMeetCount(item);
+        if (meetCount > 0) rowClass += ' tm-hty-match-hit';
+        const mainText = formatActiveMatchMainText(item) + score;
+        const fullTitle = formatActiveMatchFullTitle(item);
+        const tipAttrs = ' data-tip="' + escapeHtmlAttr(fullTitle) + '"' +
+            (id ? ' data-match-id="' + escapeHtmlAttr(id) + '"' : '');
+        const meetBadge = meetCount > 0
+            ? '<span class="tm-hty-match-meet">' + meetCount + '达标</span>'
+            : '';
+        const pageBadge = isPage ? '<span class="tm-hty-match-badge">📌</span>' : '';
         const traceLink = id
             ? '<a class="tm-hty-match-trace" href="' + traceMatchUrl(id) +
-                '" target="_blank" rel="noopener" title="奇胜走势">奇胜</a>'
+                '" target="_blank" rel="noopener" title="打开奇胜走势">' +
+                '奇胜</a>'
             : '';
         if (!id) {
-            return '<div class="' + rowClass + '">' +
+            return '<div class="' + rowClass + '"' + tipAttrs + '>' +
                 '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
-                '<span class="tm-hty-match-pick">' + pickText + '</span>' +
+                '<span class="tm-hty-match-pick">' + escapeHtmlAttr(mainText) + '</span>' +
+                meetBadge +
                 pageBadge +
                 '</div>';
         }
         const inplayReady = resolveMatchPhase(item) === 'IN_PLAY';
         let mainHtml;
         if (isMatchEndedPhase(item)) {
-            mainHtml = '<span class="tm-hty-match-pick" title="比赛已结束">' + pickText + '</span>';
+            mainHtml = '<span class="tm-hty-match-pick">' + escapeHtmlAttr(mainText) + '</span>';
         } else if (inplayReady) {
-            mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '" title="跳转滚球页">' + pickText + '</a>';
+            mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '">' +
+                escapeHtmlAttr(mainText) + '</a>';
         } else {
-            // 未开赛也可点进即将开赛页，总览/列表页方便快捷跳转
-            mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, 'incoming') +
-                '" title="跳转即将开赛页">' + pickText + '</a>';
+            mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, 'incoming') + '">' +
+                escapeHtmlAttr(mainText) + '</a>';
         }
-        return '<div class="' + rowClass + '">' +
+        return '<div class="' + rowClass + '"' + tipAttrs + '>' +
             '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
             mainHtml +
+            meetBadge +
             traceLink +
             pageBadge +
             '</div>';
+    }
+
+    function ensureMatchTipEl() {
+        if (matchTipEl && document.body.contains(matchTipEl)) return matchTipEl;
+        let el = document.getElementById(MATCH_TIP_ID);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = MATCH_TIP_ID;
+            el.setAttribute('role', 'tooltip');
+            document.body.appendChild(el);
+        }
+        matchTipEl = el;
+        return matchTipEl;
+    }
+
+    function hideMatchTip() {
+        if (matchTipShowTimer) {
+            clearTimeout(matchTipShowTimer);
+            matchTipShowTimer = null;
+        }
+        matchTipActiveKey = '';
+        if (matchTipEl) matchTipEl.style.display = 'none';
+    }
+
+    function positionMatchTip(clientX, clientY) {
+        const tip = ensureMatchTipEl();
+        const pad = 10;
+        tip.style.display = 'block';
+        tip.style.visibility = 'hidden';
+        const rect = tip.getBoundingClientRect();
+        let left = clientX + 14;
+        let top = clientY + 18;
+        if (left + rect.width > window.innerWidth - pad) {
+            left = Math.max(pad, clientX - rect.width - 12);
+        }
+        if (top + rect.height > window.innerHeight - pad) {
+            top = Math.max(pad, clientY - rect.height - 12);
+        }
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+        tip.style.visibility = 'visible';
+    }
+
+    function showMatchTip(text, key, clientX, clientY) {
+        const tipText = String(text || '').trim();
+        if (!tipText) return;
+        const tipKey = String(key || tipText);
+        const tip = ensureMatchTipEl();
+        if (matchTipActiveKey === tipKey && tip.style.display === 'block') {
+            if (tip.textContent !== tipText) tip.textContent = tipText;
+            positionMatchTip(clientX, clientY);
+            return;
+        }
+        if (matchTipShowTimer) clearTimeout(matchTipShowTimer);
+        matchTipShowTimer = setTimeout(function () {
+            matchTipShowTimer = null;
+            matchTipActiveKey = tipKey;
+            tip.textContent = tipText;
+            tip.style.display = 'block';
+            positionMatchTip(clientX, clientY);
+        }, 80);
+    }
+
+    function setupMatchTipWatch(panel) {
+        if (!panel || panel.dataset.matchTipBound === '1') return;
+        panel.dataset.matchTipBound = '1';
+        panel.addEventListener('mouseover', function (e) {
+            if (e.target.closest && e.target.closest('.tm-hty-match-trace')) {
+                hideMatchTip();
+                return;
+            }
+            const row = e.target.closest && e.target.closest('.tm-hty-match-item');
+            if (!row || !panel.contains(row)) return;
+            showMatchTip(
+                row.getAttribute('data-tip') || '',
+                row.getAttribute('data-match-id') || row.getAttribute('data-tip') || '',
+                e.clientX,
+                e.clientY
+            );
+        });
+        panel.addEventListener('mousemove', function (e) {
+            if (!matchTipActiveKey) return;
+            if (e.target.closest && e.target.closest('.tm-hty-match-trace')) return;
+            const row = e.target.closest && e.target.closest('.tm-hty-match-item');
+            if (!row) return;
+            if (matchTipEl && matchTipEl.style.display === 'block') {
+                positionMatchTip(e.clientX, e.clientY);
+            }
+        });
+        panel.addEventListener('mouseout', function (e) {
+            const row = e.target.closest && e.target.closest('.tm-hty-match-item');
+            if (!row) return;
+            const related = e.relatedTarget;
+            if (related && row.contains(related)) return;
+            hideMatchTip();
+        });
+        panel.addEventListener('mouseleave', function () {
+            hideMatchTip();
+        });
     }
 
     function inplayMatchUrl(id, tab) {
@@ -3812,40 +4284,122 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
     function formatKickoffShort(kick) {
         if (!kick) return '';
         const m = String(kick).match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-        if (m) return m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
-        return String(kick);
+        if (!m) return String(kick);
+        // 当天只显示时分，省宽度
+        try {
+            const now = new Date();
+            const y = now.getFullYear();
+            const mo = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            if (m[1] === String(y) && m[2] === mo && m[3] === d) {
+                return m[4] + ':' + m[5];
+            }
+        } catch (e) { /* ignore */ }
+        return m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
     }
+
+    /** 联赛全称 → 简称（按优先级匹配） */
+    const TOURNAMENT_SHORT_RULES = [
+        [/^(\d{4})?世界杯\s*\(([^)]+)\)\s*$/, function (m) {
+            const hosts = m[2] || '';
+            if (/加拿大|墨西哥|美国|美加墨/.test(hosts)) {
+                return (m[1] || '2026') + '美加墨';
+            }
+            return (m[1] || '') + '世界杯';
+        }],
+        [/世界杯\s*\([^)]+\)/, '世界杯'],
+        [/俱乐部\s*友谊赛|国际\s*友谊赛|友谊赛/, '友谊赛'],
+        [/英格兰\s*(超级|超)(联赛)?|英超|Premier\s*League/i, '英超'],
+        [/英格兰\s*冠军(联赛)?|英冠|Championship/i, '英冠'],
+        [/英格兰\s*甲级|英甲/i, '英甲'],
+        [/英格兰\s*乙级|英乙/i, '英乙'],
+        [/西班牙\s*(甲级|超)(联赛)?|西甲|La\s*Liga/i, '西甲'],
+        [/意大利\s*(甲级|超)(联赛)?|意甲|Serie\s*A/i, '意甲'],
+        [/德国\s*(甲级|超)(联赛)?|德甲|Bundesliga(?!\s*2)/i, '德甲'],
+        [/德国\s*乙级|德乙|Bundesliga\s*2/i, '德乙'],
+        [/法国\s*(甲级|超)(联赛)?|法甲|Ligue\s*1/i, '法甲'],
+        [/法国\s*乙级|法乙|Ligue\s*2/i, '法乙'],
+        [/荷兰\s*(甲级|超)|荷甲|Eredivisie/i, '荷甲'],
+        [/葡萄牙\s*(超级|超)|葡超|Primeira/i, '葡超'],
+        [/欧洲\s*冠军(联赛)?|欧冠|Champions\s*League/i, '欧冠'],
+        [/欧洲\s*联赛(?!协会)|欧联(?!合)|Europa\s*League/i, '欧联'],
+        [/欧洲\s*(协会|协会联赛|协会联)|欧协|Conference/i, '欧协'],
+        [/欧洲\s*杯|欧洲足球锦标赛/i, '欧洲杯'],
+        [/中超|中国\s*超级/i, '中超'],
+        [/日本\s*(J1|J联赛|职业)|日职(?!乙)|J1\s*League/i, '日职'],
+        [/韩国\s*K|韩K|K\s*League/i, '韩K'],
+        [/澳大利亚\s*(超级|超)|澳超|A-?League/i, '澳超'],
+        [/美职联|美国\s*职业|MLS/i, '美职'],
+        [/巴西\s*(甲级|超)|巴甲|Serie\s*A\s*Brazil/i, '巴甲'],
+        [/阿根廷\s*(甲级|超)|阿甲/i, '阿甲'],
+        [/土耳其\s*(超级|超)|土超/i, '土超'],
+        [/俄罗斯\s*(超级|超)|俄超/i, '俄超'],
+        [/比利时\s*(甲级|超)|比甲/i, '比甲'],
+        [/苏格兰\s*(超级|超)|苏超/i, '苏超'],
+        [/瑞典\s*(超级|超)|瑞典超/i, '瑞典超'],
+        [/挪威\s*(超级|超)|挪超|挪威超/i, '挪超'],
+        [/丹麦\s*(超级|超)|丹超/i, '丹超'],
+        [/瑞士\s*(超级|超)|瑞士超/i, '瑞士超'],
+        [/奥地利\s*(超级|超)|奥超/i, '奥超'],
+        [/沙特\s*(职业|超|联)|沙特联/i, '沙特联'],
+        [/墨西哥\s*(超|联)|墨超/i, '墨超'],
+        [/亚洲\s*冠军|亚冠/i, '亚冠'],
+        [/非洲\s*冠军|非冠/i, '非冠'],
+        [/解放者杯/i, '解放者杯'],
+        [/南美\s*杯/i, '南美杯'],
+    ];
 
     function shortTournamentName(name) {
         const raw = String(name || '').trim();
         if (!raw) return '';
-        const normalized = raw.replace(/（/g, '(').replace(/）/g, ')');
-        const wcHosts = normalized.match(/^(\d{4})?世界杯\s*\(([^)]+)\)\s*$/);
-        if (wcHosts) {
-            const hosts = wcHosts[2] || '';
-            if (/加拿大|墨西哥|美国|美加墨/.test(hosts)) {
-                return (wcHosts[1] || '2026') + '美加墨';
+        const normalized = raw.replace(/（/g, '(').replace(/）/g, ')').replace(/\s+/g, ' ');
+        for (let i = 0; i < TOURNAMENT_SHORT_RULES.length; i++) {
+            const rule = TOURNAMENT_SHORT_RULES[i];
+            const re = rule[0];
+            const repl = rule[1];
+            if (typeof repl === 'function') {
+                const m = normalized.match(re);
+                if (m) return repl(m);
+            } else if (re.test(normalized)) {
+                return repl;
             }
-            return (wcHosts[1] || '') + '世界杯';
         }
-        return normalized.replace(/世界杯\s*\([^)]+\)/, '世界杯');
+        // 过长时截断，避免撑爆一行
+        if (normalized.length > 8) return normalized.slice(0, 7) + '…';
+        return normalized;
     }
 
-    function formatActiveMatchItem(item) {
-        const home = item.homeName || '—';
-        const away = item.awayName || '—';
+    function shortTeamName(name) {
+        const raw = String(name || '').trim();
+        if (!raw) return '—';
+        // 常见冗长后缀
+        let s = raw
+            .replace(/足球俱乐部$/u, '')
+            .replace(/足球队$/u, '')
+            .replace(/\s+FC$/i, '')
+            .replace(/\s+CF$/i, '')
+            .trim();
+        if (!s) s = raw;
+        if (s.length > 8) return s.slice(0, 7) + '…';
+        return s;
+    }
+
+    function formatActiveMatchItem(item, opts) {
+        const o = opts || {};
+        const home = shortTeamName(item.homeName);
+        const away = shortTeamName(item.awayName);
         const kick = formatKickoffShort(item.kickoffTime);
         const phase = MATCH_PHASE_LABEL[resolveMatchPhase(item)] || resolveMatchPhase(item) || '—';
         const apiPhase = String(item.matchPhase || '').toUpperCase();
         const resolved = resolveMatchPhase(item);
         let phaseHint = '';
         if (isMatchLocallyEnded(item.matchId)) {
-            phaseHint = '(本地已结束)';
+            phaseHint = '(本地)';
         } else if (isCurrentMatchItem(item) && (apiPhase === 'ENDED' || apiPhase === 'FINISHED') &&
             resolved === 'IN_PLAY') {
             phaseHint = '(页)';
         }
-        const rules = item.ruleCount != null ? item.ruleCount + '条策略' : '';
+        const rules = item.ruleCount != null ? item.ruleCount + '策' : '';
         const meetCount = getMatchRuleMeetCount(item);
         const meetHint = meetCount > 0 ? meetCount + '条达标' : '';
         const tour = shortTournamentName(item.tournamentName);
@@ -3855,8 +4409,13 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         parts.push(home + 'vs' + away);
         parts.push(phase + phaseHint);
         if (rules) parts.push(rules);
-        if (meetHint) parts.push(meetHint);
-        return parts.join('  ');
+        // 达标默认拆成独立徽章，避免长文本截断后看不见
+        if (meetHint && o.includeMeet !== false) parts.push(meetHint);
+        return parts.join(' ');
+    }
+
+    function formatActiveMatchMainText(item) {
+        return formatActiveMatchItem(item, { includeMeet: false });
     }
 
     function fetchActiveMatches() {
@@ -3900,8 +4459,13 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         const meetSig = Object.keys(matchRuleMeetCache).sort().map(function (id) {
             return id + ':' + matchRuleMeetCache[id].meetCount;
         }).join(',');
+        const pendingExecSig = Object.keys(matchPendingExecCache).sort().map(function (id) {
+            const c = matchPendingExecCache[id];
+            return id + ':' + (c && c.known ? c.count : '?');
+        }).join(',');
         return matchesStatus + '|' + matchId + '|' + activeMatches.length + '|' + rows +
-            '|' + (isCurrentPageLive() ? 'live' : 'idle') + '|' + lastScanButtonCount + '|' + meetSig;
+            '|' + (isCurrentPageLive() ? 'live' : 'idle') + '|' + lastScanButtonCount + '|' + meetSig +
+            '|' + pendingExecSig;
     }
 
     async function loadActiveMatches(silent) {
@@ -3932,6 +4496,9 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (reconcileLocalEndedMatches()) {
                 renderActiveMatches(document.getElementById(PANEL_ID));
             }
+            const openMatches = activeMatches.filter(function (item) {
+                return !isMatchEndedPhase(item) && item.matchId;
+            });
             const inPlayMatches = getSortedInPlayMatches();
             if (!inPlayMatches.length) {
                 // 总览/列表页不要静默 2 分钟，否则有比赛后仍要干等很久
@@ -3944,8 +4511,11 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
                     navSuppressedUntil = 0;
                 }
+            }
+            if (openMatches.length) {
                 void scanAllMatchesRuleMeet(false).then(async function () {
                     renderActiveMatches(document.getElementById(PANEL_ID));
+                    if (!inPlayMatches.length) return;
                     if (!hasNavigableInPlayMatches()) {
                         if (!isHubSportEventsPage()) {
                             suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, '策略列表无已达标比赛');
@@ -3967,6 +4537,12 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         if (!panel) return;
         const statusEl = panel.querySelector('.tm-hty-matches-status');
         const listEl = panel.querySelector('.tm-hty-matches-list');
+        const upcomingSection = panel.querySelector('.tm-hty-matches-upcoming');
+        const upcomingToggle = panel.querySelector('.tm-hty-upcoming-toggle');
+        const upcomingListEl = panel.querySelector('.tm-hty-matches-upcoming-list');
+        const watchSection = panel.querySelector('.tm-hty-matches-watch');
+        const watchToggle = panel.querySelector('.tm-hty-watch-toggle');
+        const watchListEl = panel.querySelector('.tm-hty-matches-watch-list');
         const endedSection = panel.querySelector('.tm-hty-matches-ended');
         const endedToggle = panel.querySelector('.tm-hty-ended-toggle');
         const endedListEl = panel.querySelector('.tm-hty-matches-ended-list');
@@ -3980,6 +4556,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             statusEl.textContent = '加载中…';
             statusEl.dataset.kind = 'info';
             listEl.innerHTML = '';
+            if (upcomingSection) upcomingSection.style.display = 'none';
+            if (watchSection) watchSection.style.display = 'none';
             if (endedSection) endedSection.style.display = 'none';
             return;
         }
@@ -3988,39 +4566,88 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             statusEl.dataset.kind = 'err';
             if (!activeMatches.length) {
                 listEl.innerHTML = '';
+                if (upcomingSection) upcomingSection.style.display = 'none';
+                if (watchSection) watchSection.style.display = 'none';
                 if (endedSection) endedSection.style.display = 'none';
             }
             return;
         }
 
-        const liveMatches = activeMatches.filter(function (item) {
-            return !isMatchEndedPhase(item);
-        });
         const endedMatches = activeMatches.filter(function (item) {
             return isMatchEndedPhase(item);
+        });
+        const activeOpen = activeMatches.filter(function (item) {
+            return !isMatchEndedPhase(item);
+        });
+        // 无「未执行」策略 → 关注区；未知先留主列表
+        const watchMatches = activeOpen.filter(function (item) {
+            return !matchHasPendingExecStrategies(item);
+        });
+        const focusMatches = activeOpen.filter(function (item) {
+            return matchHasPendingExecStrategies(item);
+        });
+        const upcomingMatches = focusMatches.filter(function (item) {
+            return resolveMatchPhase(item) === 'NOT_STARTED';
+        });
+        const liveMatches = focusMatches.filter(function (item) {
+            return resolveMatchPhase(item) !== 'NOT_STARTED';
         });
 
         const currentHit = activeMatches.some(function (item) {
             return String(item.matchId) === String(matchId);
         });
-        let statusText = liveMatches.length + ' 场';
+        let statusText = liveMatches.length + ' 进行中';
+        if (upcomingMatches.length) statusText += ' · ' + upcomingMatches.length + ' 未开始';
+        if (watchMatches.length) statusText += ' · ' + watchMatches.length + ' 关注';
         if (endedMatches.length) statusText += ' · ' + endedMatches.length + ' 已结束';
         if (currentHit) statusText += ' · 含当前页';
         statusEl.textContent = statusText;
         statusEl.dataset.kind = currentHit ? 'ready' : 'info';
 
-        if (!liveMatches.length && !endedMatches.length) {
+        if (!liveMatches.length && !upcomingMatches.length && !watchMatches.length && !endedMatches.length) {
             listEl.innerHTML = '<div class="tm-hty-strategy-empty">暂无策略赛事</div>';
+            if (upcomingSection) upcomingSection.style.display = 'none';
+            if (watchSection) watchSection.style.display = 'none';
             if (endedSection) endedSection.style.display = 'none';
             return;
         }
 
         if (!liveMatches.length) {
-            listEl.innerHTML = '<div class="tm-hty-strategy-empty">暂无进行中/未开赛赛事</div>';
+            listEl.innerHTML = '<div class="tm-hty-strategy-empty">暂无进行中赛事</div>';
         } else {
             listEl.innerHTML = liveMatches.map(function (item, idx) {
                 return renderMatchListRow(item, idx);
             }).join('');
+        }
+
+        if (upcomingSection && upcomingToggle && upcomingListEl) {
+            if (!upcomingMatches.length) {
+                upcomingSection.style.display = 'none';
+            } else {
+                upcomingSection.style.display = '';
+                upcomingSection.dataset.collapsed = upcomingMatchesCollapsed ? '1' : '0';
+                upcomingToggle.textContent = '未开始 (' + upcomingMatches.length + ') ' +
+                    (upcomingMatchesCollapsed ? '▸' : '▾');
+                upcomingListEl.style.display = upcomingMatchesCollapsed ? 'none' : '';
+                upcomingListEl.innerHTML = upcomingMatches.map(function (item, idx) {
+                    return renderMatchListRow(item, idx);
+                }).join('');
+            }
+        }
+
+        if (watchSection && watchToggle && watchListEl) {
+            if (!watchMatches.length) {
+                watchSection.style.display = 'none';
+            } else {
+                watchSection.style.display = '';
+                watchSection.dataset.collapsed = watchMatchesCollapsed ? '1' : '0';
+                watchToggle.textContent = '关注区 (' + watchMatches.length + ') ' +
+                    (watchMatchesCollapsed ? '▸' : '▾');
+                watchListEl.style.display = watchMatchesCollapsed ? 'none' : '';
+                watchListEl.innerHTML = watchMatches.map(function (item, idx) {
+                    return renderMatchListRow(item, idx);
+                }).join('');
+            }
         }
 
         if (endedSection && endedToggle && endedListEl) {
@@ -4039,17 +4666,51 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         }
     }
 
-    function toggleEndedMatchesCollapsed(panel) {
-        endedMatchesCollapsed = !endedMatchesCollapsed;
+    function toggleCollapsedMatchSection(kind, panel) {
+        let collapsed;
+        let sectionSel;
+        let toggleSel;
+        let listSel;
+        if (kind === 'upcoming') {
+            upcomingMatchesCollapsed = !upcomingMatchesCollapsed;
+            collapsed = upcomingMatchesCollapsed;
+            sectionSel = '.tm-hty-matches-upcoming';
+            toggleSel = '.tm-hty-upcoming-toggle';
+            listSel = '.tm-hty-matches-upcoming-list';
+        } else if (kind === 'watch') {
+            watchMatchesCollapsed = !watchMatchesCollapsed;
+            collapsed = watchMatchesCollapsed;
+            sectionSel = '.tm-hty-matches-watch';
+            toggleSel = '.tm-hty-watch-toggle';
+            listSel = '.tm-hty-matches-watch-list';
+        } else {
+            endedMatchesCollapsed = !endedMatchesCollapsed;
+            collapsed = endedMatchesCollapsed;
+            sectionSel = '.tm-hty-matches-ended';
+            toggleSel = '.tm-hty-ended-toggle';
+            listSel = '.tm-hty-matches-ended-list';
+        }
         const root = panel || document.getElementById(PANEL_ID);
         if (!root) return;
-        const endedSection = root.querySelector('.tm-hty-matches-ended');
-        const endedToggle = root.querySelector('.tm-hty-ended-toggle');
-        const endedListEl = root.querySelector('.tm-hty-matches-ended-list');
-        if (!endedSection || !endedToggle || !endedListEl) return;
-        endedSection.dataset.collapsed = endedMatchesCollapsed ? '1' : '0';
-        endedToggle.textContent = endedToggle.textContent.replace(/[▸▾]$/, endedMatchesCollapsed ? '▸' : '▾');
-        endedListEl.style.display = endedMatchesCollapsed ? 'none' : '';
+        const section = root.querySelector(sectionSel);
+        const toggle = root.querySelector(toggleSel);
+        const listEl = root.querySelector(listSel);
+        if (!section || !toggle || !listEl) return;
+        section.dataset.collapsed = collapsed ? '1' : '0';
+        toggle.textContent = toggle.textContent.replace(/[▸▾]$/, collapsed ? '▸' : '▾');
+        listEl.style.display = collapsed ? 'none' : '';
+    }
+
+    function toggleUpcomingMatchesCollapsed(panel) {
+        toggleCollapsedMatchSection('upcoming', panel);
+    }
+
+    function toggleWatchMatchesCollapsed(panel) {
+        toggleCollapsedMatchSection('watch', panel);
+    }
+
+    function toggleEndedMatchesCollapsed(panel) {
+        toggleCollapsedMatchSection('ended', panel);
     }
 
     function getCurrentMatchItem() {
@@ -4197,11 +4858,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
     async function scanAllMatchesRuleMeet(force) {
         if (ruleMeetScanInFlight) return matchRuleMeetCache;
-        const inPlay = getSortedInPlayMatches();
-        if (!inPlay.length) {
+        const scanTargets = activeMatches.filter(function (item) {
+            return !isMatchEndedPhase(item) && item.matchId;
+        });
+        if (!scanTargets.length) {
             if (matchId) {
-                const curMeet = getCurrentMatchPendingRuleMeetCount();
+                const curMeet = countPendingRuleMeetForNav(strategyList);
                 rememberMatchPendingWork(matchId, curMeet);
+                syncCurrentMatchPendingExecCache();
                 if (curMeet > 0) {
                     matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
                 } else {
@@ -4217,32 +4881,41 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
 
         ruleMeetScanInFlight = true;
         try {
-            const tasks = inPlay.map(function (item) {
+            const tasks = scanTargets.map(function (item) {
                 const id = String(item.matchId);
+                const phase = resolveMatchPhase(item);
                 if (id === String(matchId) && (strategyList.length || strategyStatus === 'ok')) {
-                    const meetCount = getCurrentMatchPendingRuleMeetCount();
+                    const meetCount = countPendingRuleMeetForNav(strategyList);
+                    const pendingExec = countPendingExecStrategies(strategyList, true);
                     return Promise.resolve({
                         id: id,
+                        phase: phase,
                         meetCount: meetCount,
-                        // 导航用：仅已达标+未执行（不含待确认）
+                        // 导航用：仅已达标+未执行（不含待确认）；价不够已降权
                         pendingCount: meetCount,
+                        pendingExec: pendingExec,
                     });
                 }
                 return fetchAlertStrategies(id).then(function (payload) {
                     const list = Array.isArray(payload.data) ? payload.data : [];
-                    const meetCount = countPendingRuleMeet(list);
+                    const meetCount = countPendingRuleMeetForNav(list);
                     return {
                         id: id,
+                        phase: phase,
                         meetCount: meetCount,
                         pendingCount: meetCount,
+                        pendingExec: countPendingExecStrategies(list, false),
                     };
                 }).catch(function () {
                     const prevMeet = matchRuleMeetCache[id];
                     const prevWork = matchPendingWorkCache[id];
+                    const prevExec = matchPendingExecCache[id];
                     return {
                         id: id,
+                        phase: phase,
                         meetCount: prevMeet ? prevMeet.meetCount : 0,
                         pendingCount: prevWork && prevWork.known ? prevWork.pendingCount : -1,
+                        pendingExec: prevExec && prevExec.known ? prevExec.count : -1,
                     };
                 });
             });
@@ -4250,7 +4923,11 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             const nextMeet = {};
             results.forEach(function (r) {
                 if (r.pendingCount >= 0) rememberMatchPendingWork(r.id, r.pendingCount);
-                if (r.meetCount > 0) nextMeet[r.id] = { meetCount: r.meetCount, at: Date.now() };
+                if (r.pendingExec >= 0) rememberMatchPendingExec(r.id, r.pendingExec);
+                // 仅进行中写入 ruleMeet 导航缓存
+                if (r.meetCount > 0 && r.phase === 'IN_PLAY') {
+                    nextMeet[r.id] = { meetCount: r.meetCount, at: Date.now() };
+                }
             });
             matchRuleMeetCache = nextMeet;
             lastRuleMeetScanAt = Date.now();
@@ -4261,6 +4938,10 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 '| navigable',
                 results.map(function (r) {
                     return r.id + ':' + (r.pendingCount >= 0 ? r.pendingCount : '?');
+                }).join(', ') || '无',
+                '| pendingExec',
+                results.map(function (r) {
+                    return r.id + ':' + (r.pendingExec >= 0 ? r.pendingExec : '?');
                 }).join(', ') || '无');
             return matchRuleMeetCache;
         } finally {
@@ -4685,6 +5366,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         if (routeWatchTimer) return;
         ensureWrongSportSectionGuard();
         setupManualCategoryTabWatch();
+        setupManualBrowseWatch();
         const origPush = history.pushState;
         const origReplace = history.replaceState;
         history.pushState = function () {
@@ -6274,6 +6956,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         return desc;
     }
 
+    function escapeHtmlAttr(val) {
+        return String(val == null ? '' : val)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
     function formatStrategyItemHtml(item, state) {
         const odds = formatOddsDisplay(item.plateOddsHit);
         const amount = item.plateAmount != null ? formatOddsDisplay(item.plateAmount) : '—';
@@ -7124,7 +7814,6 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     orderNo: betRecord.orderno,
                     betOdds: betRecord.betOdds,
                     betStake: betRecord.betStake,
-                    matchId: betRecord.matchId,
                 });
                 markExecutedStrategySynced(recHash, isRealBetOrderNo(betRecord.orderno) ? betRecord.orderno : '');
                 console.log('[hty-inplay] 策略状态已更新为已执行', recHash);
@@ -7209,11 +7898,11 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         };
         if (extra) {
             // 假单号 ui-* 不传给后台，避免接口拒收导致状态更新失败、反复下单
+            // 策略状态接口禁止改写 matchId：后台策略记录已绑定比赛，本地当前页/投注单 matchId 可能不一致
             if (isRealBetOrderNo(extra.orderno)) payload.orderno = String(extra.orderno);
             if (isRealBetOrderNo(extra.orderNo)) payload.orderNo = String(extra.orderNo);
             if (extra.betOdds != null) payload.betOdds = extra.betOdds;
             if (extra.betStake != null) payload.betStake = extra.betStake;
-            if (extra.matchId) payload.matchId = extra.matchId;
         }
         return new Promise(function (resolve, reject) {
             GM_xmlhttpRequest({
@@ -7303,7 +7992,6 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                     orderNo: entry.orderno,
                     betOdds: entry.betOdds,
                     betStake: entry.betStake,
-                    matchId: entry.matchId || item.matchId || matchId,
                 });
                 item.ruleMeetIgnore = '2';
                 entry.pendingSync = false;
@@ -7326,9 +8014,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         for (let i = 0; i < toSync.length; i++) {
             const item = toSync[i];
             try {
-                await updateStrategyRuleWithRetry(item.recHash, '1', {
-                    matchId: item.matchId || matchId,
-                });
+                await updateStrategyRuleWithRetry(item.recHash, '1');
                 item.ruleMeetIgnore = '1';
                 markAbortedSyncDone(item.recHash);
                 console.log('[hty-inplay] 策略状态已更新为已中止', item.recHash);
@@ -7421,7 +8107,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             await syncAbortedStrategyStatuses();
             strategyStatus = 'ok';
             strategyError = '';
-            const curMeet = countPendingRuleMeet(strategyList);
+            const curMeet = countPendingRuleMeetForNav(strategyList);
             if (curMeet > 0) {
                 matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
             } else {
@@ -7452,17 +8138,6 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             syncOddsObserverState();
         }
 
-        // 本场已无「已达标+未执行」：离开去其它达标场（待确认不留场）
-        if (strategyStatus === 'ok' && matchId &&
-            countPendingRuleMeet(strategyList) === 0 &&
-            !placing && !isUserManualMatchLockActive()) {
-            if (hasNavigableInPlayMatches()) {
-                void maybeAutoNavigateToInplay();
-            } else if (!isCurrentMatchEnded()) {
-                setBetStep('本场已无已达标未执行策略，暂无其它达标比赛');
-            }
-        }
-
         try {
             await refreshTargetOption(true);
             renderPanel(true, false);
@@ -7471,6 +8146,19 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             lastScanError = err && err.message ? err.message : '扫描失败';
             betStep = '扫描异常';
             renderPanel(true);
+        }
+
+        // 扫盘后再判断：无导航价值（无达标 / 价不够已降权）则让路
+        if (strategyStatus === 'ok' && matchId &&
+            countPendingRuleMeetForNav(strategyList) === 0 &&
+            !placing && !isUserManualMatchLockActive()) {
+            if (hasNavigableInPlayMatches()) {
+                void maybeAutoNavigateToInplay();
+            } else if (!isCurrentMatchEnded() && countPendingRuleMeet(strategyList) === 0) {
+                setBetStep('本场已无已达标未执行策略，暂无其它达标比赛');
+            } else if (!isCurrentMatchEnded() && isCurrentMatchOddsBelowThresholdOnly()) {
+                setBetStep('本场盘口价不足阈值，等待其它达标比赛或赔率回升');
+            }
         }
     }
 
@@ -7697,7 +8385,13 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 (state.execStatus === 'executed' ? ' tm-hty-strategy-item-done' :
                     (state.execStatus === 'aborted' ? ' tm-hty-strategy-item-aborted' :
                         (state.execStatus === 'confirming' ? ' tm-hty-strategy-item-confirming' : '')));
-            return '<div class="tm-hty-strategy-item' + rowClass + '">' +
+            const canManualRun = state.execStatus === 'pending' && !!(item && item.recHash);
+            const runClass = canManualRun ? ' tm-hty-strategy-item-runnable' : '';
+            const runAttrs = canManualRun
+                ? ' data-action="run-strategy" data-rec-hash="' + escapeHtmlAttr(item.recHash) +
+                  '" title="点击立即验证并投注"'
+                : '';
+            return '<div class="tm-hty-strategy-item' + rowClass + runClass + '"' + runAttrs + '>' +
                 '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
                 '<span class="' + markClass + '" title="' + markTitle + '">' + markText + '</span>' +
                 '<span class="tm-hty-strategy-text">' + formatStrategyItemHtml(item, state) + '</span>' +
@@ -8939,7 +9633,7 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         const record = {
             orderno: betApi.orderno,
             delay: betApi.delay,
-            matchId: String(matchId || strategy.matchId || (ticket && ticket.iid) || ''),
+            matchId: String(strategy.matchId || matchId || (ticket && ticket.iid) || ''),
             recHash: strategy.recHash || '',
             market: betMarket || (ticket && ticket.market) || option.market || '',
             plateOn: betPlateOn || (ticket && ticket.beton) || option.side || '',
@@ -9562,6 +10256,138 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
         await placeTestBet(targetOption);
     }
 
+    async function verifyAndBuildOptionForStrategy(strategy) {
+        if (!strategy) return { ok: false, reason: '策略无效' };
+        const needTab = categoryTabForStrategyMarket(strategy.market);
+        if (needTab) {
+            clearUserManualCategoryTabLock();
+            await ensureMarketCategoryTab(true, true, needTab);
+        }
+        await ensureMarketView(true);
+        await waitForOddsButtons(1, 15000);
+        const markets = pageMarketsForStrategy(strategy.market);
+        for (let i = 0; i < markets.length; i++) {
+            const el = findStrategyMarketElement(markets[i]);
+            if (el) scrollMarketIntoView(el, { force: true });
+        }
+        await humanDelay(400, 700);
+
+        const buttonMap = new Map();
+        snapshotOddsButtons(buttonMap);
+        buttonMarketIndex = buildButtonMarketIndex(buttonMap);
+        strategyStates = evaluateStrategyStatesFromMap(buttonMap);
+        lastButtonSnapshot = buttonMap;
+        lastScanButtonCount = buttonMap.size;
+
+        const recHash = String(strategy.recHash || '');
+        let st = null;
+        for (let i = 0; i < strategyStates.length; i++) {
+            if (strategyStates[i].strategy &&
+                String(strategyStates[i].strategy.recHash || '') === recHash) {
+                st = strategyStates[i];
+                break;
+            }
+        }
+        if (!st || !st.plateMatched) {
+            return { ok: false, reason: '未找到对应盘口（请确认分类 tab / 盘口线）' };
+        }
+        const minOdds = Number(strategy.plateOddsHit);
+        if (isNaN(st.currentOdds) || (!isNaN(minOdds) && st.currentOdds < minOdds)) {
+            return {
+                ok: false,
+                reason: '赔率未达阈值：当前' + formatOddsDisplay(st.currentOdds) +
+                    ' < ' + formatOddsDisplay(minOdds),
+                state: st,
+            };
+        }
+        if (st.dedupBlocked) {
+            return { ok: false, reason: '脚本防重拦截（同策略/同按钮已下或进行中）', state: st };
+        }
+        if (st.execStatus !== 'pending') {
+            return { ok: false, reason: '策略状态为' + strategyExecLabel(strategy) + '，不可下单', state: st };
+        }
+        return { ok: true, option: buildTargetOption(st), state: st };
+    }
+
+    async function runManualStrategyBet(recHash) {
+        const rh = String(recHash || '');
+        if (!rh) return;
+        if (placing || autoBetInFlight) {
+            setBetStep('正在投注中，请稍候…');
+            renderPanel(true);
+            return;
+        }
+        if (!isOnMatchBetPage() || !matchId) {
+            setBetResult('failed', '请先进入比赛页再执行策略');
+            renderPanel(true);
+            return;
+        }
+        let strategy = null;
+        for (let i = 0; i < strategyList.length; i++) {
+            if (String(strategyList[i].recHash || '') === rh) {
+                strategy = strategyList[i];
+                break;
+            }
+        }
+        if (!strategy) {
+            setBetResult('failed', '策略不存在或已刷新');
+            renderPanel(true);
+            return;
+        }
+        if (!passesStrategyStatusGate(strategy)) {
+            setBetResult('failed', '策略状态为' + strategyExecLabel(strategy) + '，不可下单');
+            renderPanel(true);
+            return;
+        }
+
+        if (!isLoggedIn()) {
+            setBetStep('未登录，尝试自动登录…');
+            renderPanel(true);
+            try {
+                await tryAutoRelogin({ urgent: true, force: true });
+            } catch (e) {
+                console.warn('[hty-inplay] 手动执行策略登录失败', e);
+            }
+            if (!isLoggedIn()) {
+                setBetResult('failed', '未登录，无法下单');
+                renderPanel(true);
+                return;
+            }
+        }
+
+        autoBetInFlight = true;
+        try {
+            setBetStep('手动执行：验证 ' + formatStrategyPlateDesc(strategy) + '…');
+            setBetResult('pending', '正在验证策略盘口');
+            renderPanel(true);
+
+            const verified = await verifyAndBuildOptionForStrategy(strategy);
+            lastStrategyHitKey = '';
+            renderPanel(true);
+            if (!verified.ok) {
+                setBetResult('failed', verified.reason || '验证未通过');
+                setBetStep('手动执行失败：' + (verified.reason || '验证未通过'));
+                renderPanel(true);
+                return;
+            }
+
+            targetOption = verified.option;
+            setBetStep('手动执行：' + verified.option.label + ' @' +
+                formatOddsDisplay(verified.option.odds) + ' · ' + formatBetStakeSummary(verified.option));
+            renderPanel(true);
+            console.log('[hty-inplay] 手动点击未执行策略，开始投注', rh, verified.option.label);
+            await placeTestBet(verified.option, true);
+        } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            console.warn('[hty-inplay] 手动执行策略失败', msg, err);
+            setBetResult('failed', msg);
+            setBetStep('手动执行失败：' + msg);
+            renderPanel(true);
+        } finally {
+            autoBetInFlight = false;
+        }
+    }
+
     function schedulePoll() {
         if (pollTimer) return;
         if (pollCount >= MAX_POLLS) {
@@ -9761,12 +10587,20 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 '#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}' +
                 '#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}' +
-                '#' + PANEL_ID + ' .tm-hty-matches-list{display:flex;flex-direction:column;align-items:flex-start;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}' +
+                '#' + PANEL_ID + ' .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}' +
+                '#' + PANEL_ID + ' .tm-hty-matches-upcoming,' +
+                '#' + PANEL_ID + ' .tm-hty-matches-watch,' +
                 '#' + PANEL_ID + ' .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}' +
+                '#' + PANEL_ID + ' .tm-hty-upcoming-toggle,' +
+                '#' + PANEL_ID + ' .tm-hty-watch-toggle,' +
                 '#' + PANEL_ID + ' .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;' +
                 'color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}' +
+                '#' + PANEL_ID + ' .tm-hty-upcoming-toggle:hover,' +
+                '#' + PANEL_ID + ' .tm-hty-watch-toggle:hover,' +
                 '#' + PANEL_ID + ' .tm-hty-ended-toggle:hover{color:#cbd5e1;}' +
-                '#' + PANEL_ID + ' .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:flex-start;gap:2px;' +
+                '#' + PANEL_ID + ' .tm-hty-matches-upcoming-list,' +
+                '#' + PANEL_ID + ' .tm-hty-matches-watch-list,' +
+                '#' + PANEL_ID + ' .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;' +
                 'max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-ended{opacity:.72;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}' +
@@ -9774,12 +10608,22 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 '#' + PANEL_ID + ' .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}' +
-                '#' + PANEL_ID + ' .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:fit-content;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;white-space:nowrap;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-item:hover{background:#1e293b;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}' +
-                '#' + PANEL_ID + ' .tm-hty-match-main{flex:0 0 auto;color:#e2e8f0;text-decoration:none;}' +
-                '#' + PANEL_ID + ' .tm-hty-match-pick{flex:0 0 auto;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-main,' +
+                '#' + PANEL_ID + ' .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;' +
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;' +
+                'background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);' +
+                'border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}' +
+                '#' + PANEL_ID + ' .tm-hty-match-hit .tm-hty-match-main,' +
+                '#' + PANEL_ID + ' .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}' +
+                '#' + PANEL_ID + ' .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);' +
+                'border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;' +
                 'border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}' +
@@ -9790,6 +10634,8 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 '#' + PANEL_ID + ' .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;' +
                 'background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}' +
+                '#' + PANEL_ID + ' .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}' +
+                '#' + PANEL_ID + ' .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}' +
                 '#' + PANEL_ID + ' .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}' +
@@ -9826,6 +10672,16 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
                 '#' + PANEL_ID + ' .tm-hty-dedup-toggle{margin:0;cursor:pointer;}';
             document.head.appendChild(style);
         }
+        if (!document.getElementById(MATCH_TIP_ID + '-style')) {
+            const tipStyle = document.createElement('style');
+            tipStyle.id = MATCH_TIP_ID + '-style';
+            tipStyle.textContent =
+                '#' + MATCH_TIP_ID + '{position:fixed;z-index:100000;display:none;max-width:min(420px,calc(100vw - 24px));' +
+                'padding:8px 10px;border-radius:8px;background:#0b1220;color:#e2e8f0;border:1px solid #64748b;' +
+                'box-shadow:0 12px 28px rgba(0,0,0,.5);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+                'white-space:normal;word-break:break-word;pointer-events:none;}';
+            document.head.appendChild(tipStyle);
+        }
         const panel = document.createElement('div');
         panel.id = PANEL_ID;
         panel.innerHTML =
@@ -9849,6 +10705,14 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             '<button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="刷新">刷新</button></span>' +
             '</div>' +
             '<div class="tm-hty-matches-list"></div>' +
+            '<div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none">' +
+            '<button type="button" class="tm-hty-upcoming-toggle">未开始 (0) ▸</button>' +
+            '<div class="tm-hty-matches-upcoming-list" style="display:none"></div>' +
+            '</div>' +
+            '<div class="tm-hty-matches-watch" data-collapsed="1" style="display:none">' +
+            '<button type="button" class="tm-hty-watch-toggle">关注区 (0) ▸</button>' +
+            '<div class="tm-hty-matches-watch-list" style="display:none"></div>' +
+            '</div>' +
             '<div class="tm-hty-matches-ended" data-collapsed="1" style="display:none">' +
             '<button type="button" class="tm-hty-ended-toggle">已结束 (0) ▸</button>' +
             '<div class="tm-hty-matches-ended-list" style="display:none"></div>' +
@@ -9941,6 +10805,16 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             });
         }
         panel.addEventListener('click', function (e) {
+            if (e.target.closest('.tm-hty-upcoming-toggle')) {
+                e.stopPropagation();
+                toggleUpcomingMatchesCollapsed(panel);
+                return;
+            }
+            if (e.target.closest('.tm-hty-watch-toggle')) {
+                e.stopPropagation();
+                toggleWatchMatchesCollapsed(panel);
+                return;
+            }
             if (e.target.closest('.tm-hty-ended-toggle')) {
                 e.stopPropagation();
                 toggleEndedMatchesCollapsed(panel);
@@ -9964,11 +10838,15 @@ const PANEL_ID = 'tm-hty-inplay-quant-panel';
             if (actionBtn.dataset.action === 'open-cart') manualOpenCart();
             if (actionBtn.dataset.action === 'test-bet') testBet03();
             if (actionBtn.dataset.action === 'upload-match-bets') manualUploadMatchBetHistory();
+            if (actionBtn.dataset.action === 'run-strategy') {
+                runManualStrategyBet(actionBtn.getAttribute('data-rec-hash') || '');
+            }
             if (actionBtn.dataset.action === 'refresh-strategy') {
                 loadActiveMatches(true);
                 loadStrategies(true);
             }
         });
+        setupMatchTipWatch(panel);
 
         document.body.appendChild(panel);
         setupRouteWatcher();

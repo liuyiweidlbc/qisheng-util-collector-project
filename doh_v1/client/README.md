@@ -1,4 +1,6 @@
-# 运营商DNS劫持解决方案
+# 运营商DNS劫持解决方案（Windows 客户端）
+
+> 本目录脚本在 `doh_v1/client/` 下运行。自建服务端见 [`../server/`](../server/)，hosts/诊断见 [`../tools/`](../tools/)。
 
 ## 问题确认
 
@@ -47,8 +49,8 @@
 如果知道正确的IP地址，可以直接在hosts文件中指定。
 
 ```powershell
-# 以管理员身份运行
-.\fix_hosts.ps1 8868d68.app [IP地址]
+# 以管理员身份运行（脚本在 tools/）
+..\tools\fix_hosts.ps1 8868d68.app [IP地址]
 ```
 
 **如何获取正确IP**：
@@ -93,8 +95,8 @@ Tor浏览器可以绕过DNS劫持，但速度较慢。
 如果你知道正确的IP地址（比如从第一次访问时获取的 `20.255.104.21`）：
 
 ```powershell
-# 以管理员身份运行
-.\fix_hosts.ps1 8868d68.app 20.255.104.21
+# 以管理员身份运行（脚本在 tools/）
+..\tools\fix_hosts.ps1 8868d68.app 20.255.104.21
 ```
 
 ## 详细步骤

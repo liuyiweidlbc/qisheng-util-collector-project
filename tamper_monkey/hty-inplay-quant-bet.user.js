@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.4
+// @version      2.16.15
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -100,7 +100,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.4";
+  var SCRIPT_VERSION = "2.16.15";
 
   // src/storage-keys.js
   var KEYS = {
@@ -360,6 +360,7 @@
     void KEYS;
     void SCRIPT_VERSION;
     const PANEL_ID = "tm-hty-inplay-quant-panel";
+    const MATCH_TIP_ID = "tm-hty-inplay-match-tip";
     const STYLE_ID = "tm-hty-inplay-quant-style";
     const SCRIPT_VERSION2 = (function() {
       try {
@@ -474,7 +475,9 @@
     const NAV_SUPPRESS_NO_INPLAY_MS = 12e4;
     const WAF_RECOVERY_KEY = "tm_hty_inplay_waf_recovery_at";
     const INPLAY_MATCH_WATCH_MS = 15e3;
-    const TAB_TG_NAV_COOLDOWN_MS = 9e4;
+    const TAB_CATEGORY_NAV_COOLDOWN_MS = 9e4;
+    const TAB_CATEGORY_NAV_KEY_PREFIX = "tm_hty_inplay_tab_nav_at_";
+    const TAB_TG_NAV_COOLDOWN_MS = TAB_CATEGORY_NAV_COOLDOWN_MS;
     const TAB_TG_NAV_KEY = "tm_hty_inplay_tab_tg_nav_at";
     const USER_MANUAL_MATCH_GRACE_MS = 9e4;
     const USER_MANUAL_MATCH_ID_KEY = "tm_hty_inplay_manual_match_id";
@@ -483,6 +486,7 @@
     const USER_MANUAL_CATEGORY_TAB_AT_KEY = "tm_hty_inplay_manual_tab_at";
     const USER_MANUAL_CATEGORY_TAB_GRACE_MS = 18e5;
     const SCRIPT_TAB_SWITCH_GRACE_MS = 3e3;
+    const USER_MANUAL_BROWSE_GRACE_MS = 6e4;
     const KICKOFF_EARLY_MS = 6e4;
     const KICKOFF_NAV_PRIORITY_MS = 9e5;
     const REPORT_UPLOAD = {
@@ -550,6 +554,14 @@
       btts: "\u4E24\u961F\u8FDB\u7403",
       "1x2": "\u72EC\u8D62",
       ad: "\u72EC\u8D62"
+    };
+    const MARKET_CATEGORY_TG = "tg";
+    const MARKET_CATEGORY_1ST = "1st";
+    const TG_CATEGORY_STRATEGY_MARKETS = { hou: 1, aou: 1, btts: 1 };
+    const FIRST_HALF_CATEGORY_STRATEGY_MARKETS = { ou_1st: 1 };
+    const SCRIPT_MANAGED_CATEGORY_TABS = {
+      tg: 1,
+      "1st": 1
     };
     const PLATE_ON_LABEL = {
       ov: "\u5927",
@@ -625,19 +637,30 @@
       const cur = window.location.href.split("#")[0];
       return normalizeMatchBetHref(cur) === normalizeMatchBetHref(target);
     }
-    function shouldSkipTabTgUrlNav() {
+    function tabCategoryNavStorageKey(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (t === "tg") return TAB_TG_NAV_KEY;
+      return TAB_CATEGORY_NAV_KEY_PREFIX + (t || "unknown");
+    }
+    function shouldSkipTabCategoryUrlNav(tab) {
       try {
-        const last = parseInt(sessionStorage.getItem(TAB_TG_NAV_KEY) || "0", 10);
-        return !isNaN(last) && Date.now() - last < TAB_TG_NAV_COOLDOWN_MS;
+        const last = parseInt(sessionStorage.getItem(tabCategoryNavStorageKey(tab)) || "0", 10);
+        return !isNaN(last) && Date.now() - last < TAB_CATEGORY_NAV_COOLDOWN_MS;
       } catch (e) {
         return false;
       }
     }
-    function markTabTgUrlNav() {
+    function markTabCategoryUrlNav(tab) {
       try {
-        sessionStorage.setItem(TAB_TG_NAV_KEY, String(Date.now()));
+        sessionStorage.setItem(tabCategoryNavStorageKey(tab), String(Date.now()));
       } catch (e) {
       }
+    }
+    function shouldSkipTabTgUrlNav() {
+      return shouldSkipTabCategoryUrlNav(MARKET_CATEGORY_TG);
+    }
+    function markTabTgUrlNav() {
+      markTabCategoryUrlNav(MARKET_CATEGORY_TG);
     }
     function isSiteAccessBlockedPage() {
       if (!document.body) return false;
@@ -787,12 +810,18 @@
     let userManualMatchId = "";
     let userManualMatchAt = 0;
     let manualCategoryTabWatchReady = false;
+    let manualBrowseWatchReady = false;
+    let userManualBrowseAt = 0;
+    let scriptScrollQuietUntil = 0;
     let activeMatches = [];
     let matchesStatus = "loading";
     let matchesError = "";
     let lastMatchesListKey = "";
     let lastStrategyListKey = "";
     let lastStrategyHitKey = "";
+    let matchTipEl = null;
+    let matchTipShowTimer = null;
+    let matchTipActiveKey = "";
     let strategyStates = [];
     let lastMatchScanAt = 0;
     let loginWatchTimer = null;
@@ -812,10 +841,14 @@
     let lastScanError = "";
     let matchRuleMeetCache = {};
     let matchPendingWorkCache = {};
+    let oddsBlockedNavStore = {};
     let lastRuleMeetScanAt = 0;
     let ruleMeetScanInFlight = false;
     let lastButtonSnapshot = /* @__PURE__ */ new Map();
     let endedMatchesCollapsed = true;
+    let upcomingMatchesCollapsed = true;
+    let watchMatchesCollapsed = true;
+    let matchPendingExecCache = {};
     let matchEndedHandling = false;
     let lastEndedSwitchAt = 0;
     let matchEndedWatchTimer = null;
@@ -884,6 +917,52 @@
     function isStrategyPendingRuleMeet(item) {
       return isStrategyRuleMeet(item) && passesStrategyStatusGate(item);
     }
+    function isStrategyOddsBlockedForNav(item) {
+      if (!item || !item.recHash) return false;
+      return !!oddsBlockedNavStore[String(item.recHash)];
+    }
+    function markStrategyOddsBlockedForNav(recHash, meta) {
+      const rh = String(recHash || "");
+      if (!rh) return;
+      oddsBlockedNavStore[rh] = {
+        matchId: String(meta && meta.matchId || matchId || ""),
+        at: Date.now(),
+        odds: meta && meta.odds != null ? meta.odds : null,
+        minOdds: meta && meta.minOdds != null ? meta.minOdds : null
+      };
+    }
+    function clearStrategyOddsBlockedForNav(recHash) {
+      const rh = String(recHash || "");
+      if (!rh) return;
+      delete oddsBlockedNavStore[rh];
+    }
+    function syncOddsBlockedNavFromStates() {
+      if (!strategyStates.length) return;
+      for (let i = 0; i < strategyStates.length; i++) {
+        const st = strategyStates[i];
+        const s = st && st.strategy;
+        if (!s || !s.recHash) continue;
+        const rh = String(s.recHash);
+        if (!isStrategyPendingRuleMeet(s) || st.execStatus !== "pending") {
+          clearStrategyOddsBlockedForNav(rh);
+          continue;
+        }
+        if (st.hit || st.actionable) {
+          clearStrategyOddsBlockedForNav(rh);
+          continue;
+        }
+        if (st.plateMatched && !st.hit) {
+          markStrategyOddsBlockedForNav(rh, {
+            matchId,
+            odds: st.currentOdds,
+            minOdds: s.plateOddsHit
+          });
+        }
+      }
+    }
+    function isStrategyPendingRuleMeetForNav(item) {
+      return isStrategyPendingRuleMeet(item) && !isStrategyOddsBlockedForNav(item);
+    }
     function countPendingRuleMeet(strategies) {
       if (!Array.isArray(strategies)) return 0;
       let n = 0;
@@ -891,6 +970,29 @@
         if (isStrategyPendingRuleMeet(strategies[i])) n += 1;
       }
       return n;
+    }
+    function countPendingRuleMeetForNav(strategies) {
+      if (!Array.isArray(strategies)) return 0;
+      let n = 0;
+      for (let i = 0; i < strategies.length; i++) {
+        if (isStrategyPendingRuleMeetForNav(strategies[i])) n += 1;
+      }
+      return n;
+    }
+    function isCurrentMatchOddsBelowThresholdOnly() {
+      if (!strategyStates.length || !lastMatchScanAt) return false;
+      if (lastScanButtonCount === 0) return false;
+      let pendingMeet = 0;
+      let belowOnly = 0;
+      for (let i = 0; i < strategyStates.length; i++) {
+        const st = strategyStates[i];
+        const s = st && st.strategy;
+        if (!s || !isStrategyPendingRuleMeet(s) || st.execStatus !== "pending") continue;
+        pendingMeet += 1;
+        if (st.hit || st.actionable) return false;
+        if (st.plateMatched && !st.hit) belowOnly += 1;
+      }
+      return pendingMeet > 0 && belowOnly === pendingMeet;
     }
     function countPendingWorkStrategies(strategies) {
       if (!Array.isArray(strategies)) return 0;
@@ -900,6 +1002,44 @@
         if (st === "pending" || st === "confirming") n += 1;
       }
       return n;
+    }
+    function countPendingExecStrategies(strategies, useLocalExec) {
+      if (!Array.isArray(strategies)) return 0;
+      let n = 0;
+      for (let i = 0; i < strategies.length; i++) {
+        const st = useLocalExec ? getStrategyExecStatus(strategies[i]) : getStrategyExecStatusFromApi(strategies[i]);
+        if (st === "pending") n += 1;
+      }
+      return n;
+    }
+    function rememberMatchPendingExec(id, pendingExecCount) {
+      const mid = String(id || "");
+      if (!mid) return;
+      matchPendingExecCache[mid] = {
+        count: Number(pendingExecCount) || 0,
+        known: true,
+        at: Date.now()
+      };
+    }
+    function syncCurrentMatchPendingExecCache() {
+      if (!matchId) return;
+      if (!(strategyList.length || strategyStatus === "ok")) return;
+      rememberMatchPendingExec(matchId, countPendingExecStrategies(strategyList, true));
+    }
+    function getMatchPendingExecCount(item) {
+      if (!item || !item.matchId) return -1;
+      const id = String(item.matchId);
+      if (id === String(matchId) && (strategyList.length || strategyStatus === "ok")) {
+        return countPendingExecStrategies(strategyList, true);
+      }
+      const cached = matchPendingExecCache[id];
+      if (cached && cached.known) return Number(cached.count) || 0;
+      return -1;
+    }
+    function matchHasPendingExecStrategies(item) {
+      const n = getMatchPendingExecCount(item);
+      if (n < 0) return true;
+      return n > 0;
     }
     function rememberMatchPendingWork(id, pendingCount) {
       const mid = String(id || "");
@@ -912,14 +1052,15 @@
     }
     function syncCurrentMatchPendingWorkCache() {
       if (!matchId) return;
-      rememberMatchPendingWork(matchId, countPendingRuleMeet(strategyList));
+      rememberMatchPendingWork(matchId, countPendingRuleMeetForNav(strategyList));
+      syncCurrentMatchPendingExecCache();
     }
     function matchHasNavigablePendingWork(item) {
       if (!item || !item.matchId) return false;
       const id = String(item.matchId);
       if (isMatchLocallyEnded(id) || isMatchEndedPhase(item)) return false;
       if (id === String(matchId) && (strategyList.length || lastMatchScanAt || strategyStatus === "ok")) {
-        return countPendingRuleMeet(strategyList) > 0;
+        return countPendingRuleMeetForNav(strategyList) > 0;
       }
       const meetCached = matchRuleMeetCache[id];
       if (meetCached) return Number(meetCached.meetCount) > 0;
@@ -931,9 +1072,13 @@
       return countPendingRuleMeet(strategyList);
     }
     function getCurrentMatchRuleMeetCountForNav() {
-      const local = getCurrentMatchPendingRuleMeetCount();
+      if (isCurrentMatchOddsBelowThresholdOnly()) return 0;
+      const local = countPendingRuleMeetForNav(strategyList);
       if (local > 0) return local;
       if (!matchId) return 0;
+      if (strategyList.length && countPendingRuleMeet(strategyList) > 0 && countPendingRuleMeetForNav(strategyList) === 0) {
+        return 0;
+      }
       const cached = matchRuleMeetCache[String(matchId)];
       return cached && cached.meetCount > 0 ? cached.meetCount : 0;
     }
@@ -1152,12 +1297,10 @@
       if (strategyStates.some(function(st) {
         return st.actionable;
       })) return true;
+      if (isCurrentMatchOddsBelowThresholdOnly()) return false;
       if (hasOtherRuleMeetMatchThanCurrent()) return false;
       if (strategyStates.some(function(st) {
         return st.hit && st.execStatus === "pending";
-      })) return true;
-      if (strategyStates.some(function(st) {
-        return st.plateMatched && st.execStatus === "pending";
       })) return true;
       if (hasPendingExecutableStrategies() && lastScanButtonCount === 0) {
         if (isCurrentMatchNotStarted() && hasOtherInPlayMatchesThanCurrent()) {
@@ -2260,6 +2403,18 @@
     function strategyMarketNeedsTgTab(market) {
       return !!TG_CATEGORY_STRATEGY_MARKETS[String(market || "").toLowerCase()];
     }
+    function strategyMarketNeeds1stTab(market) {
+      return !!FIRST_HALF_CATEGORY_STRATEGY_MARKETS[String(market || "").toLowerCase()];
+    }
+    function categoryTabForStrategyMarket(market) {
+      const m = String(market || "").toLowerCase();
+      if (TG_CATEGORY_STRATEGY_MARKETS[m]) return MARKET_CATEGORY_TG;
+      if (FIRST_HALF_CATEGORY_STRATEGY_MARKETS[m]) return MARKET_CATEGORY_1ST;
+      return "";
+    }
+    function isScriptManagedCategoryTab(tab) {
+      return !!SCRIPT_MANAGED_CATEGORY_TABS[String(tab || "").toLowerCase()];
+    }
     function buildMatchMarketUrl(tab) {
       if (!isOnMatchBetPage() || !matchId) {
         return matchBetUrl(matchId || resolveStrandedTargetMatchId(), tab);
@@ -2281,6 +2436,7 @@
     function marketCategoryTabLabel(tab) {
       const t = String(tab || "").toLowerCase();
       if (t === "tg") return "\u8FDB\u7403";
+      if (t === "1st") return "\u4E0A\u534A\u573A";
       if (t === "all") return "\u5168\u90E8";
       if (t === "ah") return "\u8BA9\u7403";
       return t || "\u5168\u90E8";
@@ -2290,6 +2446,33 @@
         if (!strategyNeedsPlateScan(item)) return false;
         return strategyMarketNeedsTgTab(item.market);
       });
+    }
+    function hasPending1stCategoryPlateScan() {
+      return strategyList.some(function(item) {
+        if (!strategyNeedsPlateScan(item)) return false;
+        return strategyMarketNeeds1stTab(item.market);
+      });
+    }
+    function hasPendingSpecialCategoryPlateScan() {
+      return hasPendingTgCategoryPlateScan() || hasPending1stCategoryPlateScan();
+    }
+    function resolveNeededCategoryTab(forAutoBet, requiredTab) {
+      const explicit = String(requiredTab || "").toLowerCase();
+      if (explicit && isScriptManagedCategoryTab(explicit)) return explicit;
+      if (forAutoBet) return "";
+      if (isUserManualCategoryTabActive()) return "";
+      if (targetOption && targetOption.strategy) {
+        const fromTarget = categoryTabForStrategyMarket(targetOption.strategy.market);
+        if (fromTarget) return fromTarget;
+      }
+      const cur = getActiveMarketCategoryTab();
+      if (hasPending1stCategoryPlateScan() && cur !== MARKET_CATEGORY_1ST) {
+        return MARKET_CATEGORY_1ST;
+      }
+      if (hasPendingTgCategoryPlateScan() && cur !== MARKET_CATEGORY_TG) {
+        return MARKET_CATEGORY_TG;
+      }
+      return "";
     }
     function isScriptCategoryTabSwitchRecent() {
       return Date.now() - scriptCategoryTabSwitchAt < SCRIPT_TAB_SWITCH_GRACE_MS;
@@ -2304,12 +2487,13 @@
     }
     function markUserManualCategoryTab(tab) {
       const t = String(tab || "").toLowerCase();
-      if (!t || t === MARKET_CATEGORY_TG) {
+      if (!t || isScriptManagedCategoryTab(t)) {
         clearUserManualCategoryTabLock();
         return;
       }
       userManualCategoryTab = t;
       userManualCategoryTabAt = Date.now();
+      markUserManualBrowse();
       try {
         sessionStorage.setItem(USER_MANUAL_CATEGORY_TAB_KEY, userManualCategoryTab);
         sessionStorage.setItem(USER_MANUAL_CATEGORY_TAB_AT_KEY, String(userManualCategoryTabAt));
@@ -2379,12 +2563,55 @@
     function noteScriptCategoryTabSwitch() {
       scriptCategoryTabSwitchAt = Date.now();
     }
+    function markUserManualBrowse() {
+      userManualBrowseAt = Date.now();
+    }
+    function isUserManualBrowseActive() {
+      if (!userManualBrowseAt) return false;
+      return Date.now() - userManualBrowseAt < USER_MANUAL_BROWSE_GRACE_MS;
+    }
+    function noteScriptMarketScroll() {
+      scriptScrollQuietUntil = Date.now() + 900;
+    }
+    function scrollMarketIntoView(el, opts) {
+      if (!el || !el.scrollIntoView) return false;
+      const force = !!(opts && opts.force);
+      if (!force && (isUserManualBrowseActive() || isUserManualCategoryTabActive())) {
+        return false;
+      }
+      noteScriptMarketScroll();
+      el.scrollIntoView({ block: "center", behavior: "auto" });
+      return true;
+    }
+    function setupManualBrowseWatch() {
+      if (manualBrowseWatchReady) return;
+      manualBrowseWatchReady = true;
+      function onUserBrowse(e) {
+        if (!isOnMatchBetPage()) return;
+        if (Date.now() < scriptScrollQuietUntil) return;
+        if (e && e.target && e.target.closest && e.target.closest("#" + PANEL_ID)) return;
+        markUserManualBrowse();
+      }
+      document.addEventListener("wheel", onUserBrowse, { passive: true, capture: true });
+      document.addEventListener("touchmove", onUserBrowse, { passive: true, capture: true });
+      document.addEventListener("scroll", onUserBrowse, { passive: true, capture: true });
+      document.addEventListener("pointerdown", function(e) {
+        if (!isOnMatchBetPage()) return;
+        if (!e.target || !e.target.closest) return;
+        if (e.target.closest("#" + PANEL_ID)) return;
+        if (isScriptCategoryTabSwitchRecent()) return;
+        const inMarket = e.target.closest(
+          '[data-testid="SportExhaustivePage"],[data-testid*="MarketTable"],[data-testid*="ExhaustiveMarket"],button[data-testid^="oddsBtn"]'
+        );
+        if (inMarket) markUserManualBrowse();
+      }, true);
+    }
     function syncUserManualCategoryTabFromUrl(prevTab, nextTab) {
       const next = String(nextTab || "").toLowerCase();
       const prev = String(prevTab || "").toLowerCase();
       if (!next || next === prev) return;
       if (isScriptCategoryTabSwitchRecent()) return;
-      if (next === MARKET_CATEGORY_TG) {
+      if (isScriptManagedCategoryTab(next)) {
         clearUserManualCategoryTabLock();
         return;
       }
@@ -2396,7 +2623,9 @@
       const labelToTab = {
         "\u5168\u90E8": "all",
         "\u8FDB\u7403": MARKET_CATEGORY_TG,
-        "\u8BA9\u7403": "ah"
+        "\u8BA9\u7403": "ah",
+        "\u4E0A\u534A\u573A": MARKET_CATEGORY_1ST,
+        "\u4E0A\u534A": MARKET_CATEGORY_1ST
       };
       document.addEventListener("click", function(e) {
         if (!isOnInplayMatchPage()) return;
@@ -2406,7 +2635,7 @@
         const text = (el.textContent || "").replace(/\s+/g, "");
         const tab = labelToTab[text];
         if (!tab) return;
-        if (tab === MARKET_CATEGORY_TG) {
+        if (isScriptManagedCategoryTab(tab)) {
           clearUserManualCategoryTabLock();
         } else {
           markUserManualCategoryTab(tab);
@@ -2419,6 +2648,11 @@
     function clickMarketCategoryTab(tab) {
       const tabId = String(tab || "").toLowerCase();
       const label = marketCategoryTabLabel(tabId);
+      const labels = tabId === MARKET_CATEGORY_1ST ? ["\u4E0A\u534A\u573A", "\u4E0A\u534A", "1st", label] : [label];
+      const labelSet = {};
+      for (let li = 0; li < labels.length; li++) {
+        if (labels[li]) labelSet[String(labels[li]).replace(/\s+/g, "")] = true;
+      }
       const roots = [
         document.querySelector('[data-testid="SportExhaustivePage"]'),
         document.querySelector('[data-testid="SportCart"]'),
@@ -2442,7 +2676,12 @@
             return true;
           }
           const text = (el.textContent || "").replace(/\s+/g, "");
-          if (text === label && text.length <= 6) {
+          if (text && text.length <= 8 && labelSet[text]) {
+            safeClick(el);
+            return true;
+          }
+          const href = (el.getAttribute("href") || "").toLowerCase();
+          if (href && href.indexOf("tab=" + tabId) >= 0) {
             safeClick(el);
             return true;
           }
@@ -2451,20 +2690,36 @@
       }
       return false;
     }
-    async function ensureMarketCategoryTab(force, forAutoBet, requireTgOnly) {
+    function gotoSameMatchCategoryTab(tab) {
+      if (!isOnInplayMatchPage() || !matchId) return false;
+      const targetTab = String(tab || "").toLowerCase();
+      if (!targetTab) return false;
+      if (getActiveMarketCategoryTab() === targetTab) return true;
+      if (isAlreadyOnMatchBetUrl(matchId, targetTab)) return true;
+      const url = matchBetUrl(matchId, targetTab);
+      console.log("[hty-inplay] \u540C\u573A\u5207\u6362\u76D8\u53E3\u5206\u7C7B", targetTab, url);
+      withPageNavAllow(function() {
+        window.location.href = url;
+      });
+      return true;
+    }
+    async function ensureMarketCategoryTab(force, forAutoBet, requiredTab) {
       if (!forAutoBet && isUserManualCategoryTabActive()) return;
-      const needsTg = forAutoBet ? !!requireTgOnly : !isUserManualCategoryTabActive() && (force || hasPendingTgCategoryPlateScan() || targetOption && targetOption.strategy && strategyMarketNeedsTgTab(targetOption.strategy.market));
-      if (!needsTg) return;
+      let targetTab = resolveNeededCategoryTab(forAutoBet, requiredTab);
+      if (!targetTab && forAutoBet && requiredTab === true) {
+        targetTab = MARKET_CATEGORY_TG;
+      }
+      if (!targetTab) return;
       if (!isOnInplayMatchPage() || !matchId) return;
       if (!hasNavigableInPlayMatches() || isCurrentMatchEnded()) return;
-      if (getActiveMarketCategoryTab() === MARKET_CATEGORY_TG) return;
+      if (getActiveMarketCategoryTab() === targetTab) return;
       const now = Date.now();
       if (!force && !forAutoBet && now - lastEnsureMarketCategoryTabAt < 3e3) return;
       lastEnsureMarketCategoryTabAt = now;
       rememberCurrentMatchReturnUrl();
       try {
         noteScriptCategoryTabSwitch();
-        if (clickMarketCategoryTab(MARKET_CATEGORY_TG)) {
+        if (clickMarketCategoryTab(targetTab)) {
           await humanDelay(400, 800);
           if (isStrandedSportEventsPage()) {
             if (shouldAllowAutoNavigation("tab-stranded")) {
@@ -2473,22 +2728,21 @@
             return;
           }
           await waitForOddsButtons(1, 1e4);
-          lastWatchedCategoryTab = MARKET_CATEGORY_TG;
-          console.log("[hty-inplay] \u5DF2\u70B9\u51FB tab=tg" + (forAutoBet ? "\uFF08\u81EA\u52A8\u6295\u6CE8\uFF09" : ""));
+          lastWatchedCategoryTab = targetTab;
+          console.log("[hty-inplay] \u5DF2\u70B9\u51FB tab=" + targetTab + (forAutoBet ? "\uFF08\u81EA\u52A8\u6295\u6CE8\uFF09" : ""));
           return;
         }
-        if (shouldAllowAutoNavigation("tab-tg")) {
-          if (isAlreadyOnMatchBetUrl(matchId, MARKET_CATEGORY_TG)) return;
-          if (shouldSkipTabTgUrlNav()) {
-            console.log("[hty-inplay] tab=tg URL \u8DF3\u8F6C\u51B7\u5374\u4E2D\uFF0C\u4EC5\u91CD\u8BD5\u70B9\u51FB");
-            return;
-          }
-          markTabTgUrlNav();
-          gotoInplayMatch(matchId, MARKET_CATEGORY_TG);
-          lastWatchedCategoryTab = MARKET_CATEGORY_TG;
+        if (!shouldAllowAutoNavigation("tab-" + targetTab)) return;
+        if (isAlreadyOnMatchBetUrl(matchId, targetTab)) return;
+        if (shouldSkipTabCategoryUrlNav(targetTab)) {
+          console.log("[hty-inplay] tab=" + targetTab + " URL \u8DF3\u8F6C\u51B7\u5374\u4E2D\uFF0C\u4EC5\u91CD\u8BD5\u70B9\u51FB");
+          return;
         }
+        markTabCategoryUrlNav(targetTab);
+        gotoSameMatchCategoryTab(targetTab);
+        lastWatchedCategoryTab = targetTab;
       } catch (e) {
-        console.warn("[hty-inplay] \u5207\u6362 tab=tg \u5931\u8D25", e);
+        console.warn("[hty-inplay] \u5207\u6362 tab=" + targetTab + " \u5931\u8D25", e);
       }
     }
     function getActiveMarketViewLabel() {
@@ -2698,6 +2952,7 @@
       if (m === "aou") return ["a-ou", "aou"];
       if (m === "hou") return ["h-ou", "hou"];
       if (m === "ou") return ["ou"];
+      if (m === "ou_1st") return ["ou_1st"];
       const pm = pageMarketForStrategy(market);
       return pm ? [pm] : [];
     }
@@ -2706,10 +2961,9 @@
       aou: "\u5BA2\u8FDB\u7403",
       "h-ou": "\u4E3B\u8FDB\u7403",
       hou: "\u4E3B\u8FDB\u7403",
-      btts: "\u4E24\u961F\u8FDB\u7403"
+      btts: "\u4E24\u961F\u8FDB\u7403",
+      ou_1st: "\u4E0A\u534A\u8FDB\u7403"
     };
-    const MARKET_CATEGORY_TG = "tg";
-    const TG_CATEGORY_STRATEGY_MARKETS = { hou: 1, aou: 1, btts: 1 };
     function findMarketElementByLabel(label) {
       if (!label || !document.body) return null;
       const nodes = document.querySelectorAll(
@@ -2942,13 +3196,14 @@
     async function ensureButtonVisible(option) {
       if (!option || !option.strategy) return resolveLiveButton(option.testid);
       const betMarket = getOptionBetMarket(option) || option.strategy.market;
-      if (strategyMarketNeedsTgTab(betMarket) || strategyMarketNeedsTgTab(option.strategy.market)) {
-        await ensureMarketCategoryTab(true, true, true);
+      const needTab = categoryTabForStrategyMarket(betMarket) || categoryTabForStrategyMarket(option.strategy.market);
+      if (needTab) {
+        await ensureMarketCategoryTab(true, true, needTab);
       }
       const markets = pageMarketsForStrategy(betMarket);
       for (let i = 0; i < markets.length; i++) {
         const el = findStrategyMarketElement(markets[i]);
-        if (el) el.scrollIntoView({ block: "center", behavior: "auto" });
+        if (el) scrollMarketIntoView(el, { force: true });
       }
       await humanDelay(400, 700);
       snapshotOddsButtons(lastButtonSnapshot);
@@ -3087,6 +3342,7 @@
       return hasPendingTgCategoryPlateScan();
     }
     async function ensureStrategyMarketsVisible() {
+      if (isUserManualBrowseActive() || isUserManualCategoryTabActive()) return;
       const hasPendingUnmatched = strategyList.some(function(item) {
         return strategyNeedsPlateScan(item);
       });
@@ -3105,7 +3361,7 @@
         }
       }
       for (let j = 0; j < toScroll.length; j++) {
-        toScroll[j].scrollIntoView({ block: "center", behavior: "auto" });
+        if (!scrollMarketIntoView(toScroll[j])) break;
         await humanDelay(200, 400);
       }
       if (toScroll.length) {
@@ -3116,7 +3372,7 @@
       releaseStaleBetInflight();
       await ensureMarketView();
       await ensureMarketCategoryTab(
-        hasPendingTgCategoryPlateScan() && !isUserManualCategoryTabActive()
+        hasPendingSpecialCategoryPlateScan() && !isUserManualCategoryTabActive()
       );
       const buttonMap = /* @__PURE__ */ new Map();
       snapshotOddsButtons(buttonMap);
@@ -3125,22 +3381,28 @@
       const firstPlateCount = strategyStates.filter(function(st) {
         return st.plateMatched;
       }).length;
+      let allowAutoScroll = !isUserManualBrowseActive() && !isUserManualCategoryTabActive();
       for (let round = 0; round < 2; round++) {
         const pendingUnmatched = strategyStates.filter(function(st) {
           return st.execStatus === "pending" && !st.plateMatched;
         });
         if (!pendingUnmatched.length) break;
+        if (!allowAutoScroll) break;
         for (let i = 0; i < pendingUnmatched.length; i++) {
           const markets = pageMarketsForStrategy(pendingUnmatched[i].strategy.market);
           for (let m = 0; m < markets.length; m++) {
             const el = findStrategyMarketElement(markets[m]);
             if (el) {
-              el.scrollIntoView({ block: "center", behavior: "auto" });
+              if (!scrollMarketIntoView(el)) {
+                allowAutoScroll = false;
+                break;
+              }
               await humanDelay(300, 500);
               snapshotOddsButtons(buttonMap);
               buttonMarketIndex = buildButtonMarketIndex(buttonMap);
             }
           }
+          if (!allowAutoScroll) break;
         }
         await humanDelay(500, 800);
         snapshotOddsButtons(buttonMap);
@@ -3154,20 +3416,36 @@
         const m = st.strategy && st.strategy.market ? String(st.strategy.market).toLowerCase() : "";
         return strategyMarketNeedsTgTab(m);
       });
-      if (pendingAfter.length && (!firstPlateCount || pendingTeamOu.length)) {
-        if (pendingTeamOu.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_TG && !isUserManualCategoryTabActive()) {
-          await ensureMarketCategoryTab(true, false);
+      const pending1st = pendingAfter.filter(function(st) {
+        const m = st.strategy && st.strategy.market ? String(st.strategy.market).toLowerCase() : "";
+        return strategyMarketNeeds1stTab(m);
+      });
+      if (pendingAfter.length && (!firstPlateCount || pendingTeamOu.length || pending1st.length)) {
+        let switchedCategory = false;
+        if (!isUserManualCategoryTabActive()) {
+          if (pending1st.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_1ST) {
+            await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_1ST);
+            switchedCategory = true;
+          } else if (pendingTeamOu.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_TG) {
+            await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_TG);
+            switchedCategory = true;
+          }
+        }
+        if (switchedCategory) {
           snapshotOddsButtons(buttonMap);
           buttonMarketIndex = buildButtonMarketIndex(buttonMap);
         }
-        for (let i = 0; i < pendingAfter.length; i++) {
-          const markets = pageMarketsForStrategy(pendingAfter[i].strategy.market);
-          for (let m = 0; m < markets.length; m++) {
-            const el = findStrategyMarketElement(markets[m]);
-            if (el) el.scrollIntoView({ block: "center", behavior: "auto" });
+        allowAutoScroll = !isUserManualBrowseActive() && !isUserManualCategoryTabActive();
+        if (allowAutoScroll) {
+          for (let i = 0; i < pendingAfter.length; i++) {
+            const markets = pageMarketsForStrategy(pendingAfter[i].strategy.market);
+            for (let m = 0; m < markets.length; m++) {
+              const el = findStrategyMarketElement(markets[m]);
+              if (el) scrollMarketIntoView(el);
+            }
           }
+          await humanDelay(500, 800);
         }
-        await humanDelay(500, 800);
         snapshotOddsButtons(buttonMap);
         buttonMarketIndex = buildButtonMarketIndex(buttonMap);
         strategyStates = evaluateStrategyStatesFromMap(buttonMap);
@@ -3179,16 +3457,26 @@
         if (!st.hit || st.bttsSubstitute || st.execStatus !== "pending") return false;
         return !!getBttsSubstituteKind(st.strategy, getLiveMatchScore());
       });
-      if (needBttsSub) {
+      if (needBttsSub && !isUserManualBrowseActive() && !isUserManualCategoryTabActive()) {
         const bttsEl = findStrategyMarketElement("btts");
         if (bttsEl) {
-          bttsEl.scrollIntoView({ block: "center", behavior: "auto" });
+          scrollMarketIntoView(bttsEl);
           await humanDelay(400, 700);
           snapshotOddsButtons(buttonMap);
           buttonMarketIndex = buildButtonMarketIndex(buttonMap);
           strategyStates = evaluateStrategyStatesFromMap(buttonMap);
           lastButtonSnapshot = buttonMap;
           lastScanButtonCount = buttonMap.size;
+        }
+      }
+      syncOddsBlockedNavFromStates();
+      syncCurrentMatchPendingWorkCache();
+      if (matchId) {
+        const navMeet = countPendingRuleMeetForNav(strategyList);
+        if (navMeet > 0) {
+          matchRuleMeetCache[String(matchId)] = { meetCount: navMeet, at: Date.now() };
+        } else {
+          delete matchRuleMeetCache[String(matchId)];
         }
       }
       return strategyStates;
@@ -3324,7 +3612,7 @@
       return targetOption;
     }
     async function lightweightReevaluateOdds(buttonMap) {
-      if (hasPendingTgCategoryPlateScan()) {
+      if (hasPendingSpecialCategoryPlateScan()) {
         await ensureStrategyMarketsVisible();
       }
       const map = buttonMap || /* @__PURE__ */ new Map();
@@ -3333,6 +3621,16 @@
       strategyStates = evaluateStrategyStatesFromMap(map);
       lastButtonSnapshot = map;
       lastScanButtonCount = map.size;
+      syncOddsBlockedNavFromStates();
+      syncCurrentMatchPendingWorkCache();
+      if (matchId) {
+        const navMeet = countPendingRuleMeetForNav(strategyList);
+        if (navMeet > 0) {
+          matchRuleMeetCache[String(matchId)] = { meetCount: navMeet, at: Date.now() };
+        } else {
+          delete matchRuleMeetCache[String(matchId)];
+        }
+      }
       targetOption = findStrategyMatch();
       return targetOption;
     }
@@ -3352,6 +3650,10 @@
           console.warn("[hty-inplay] autoBet \u81EA\u52A8\u767B\u5F55", e);
         });
         schedulePoll();
+        return;
+      }
+      if (isCurrentMatchOddsBelowThresholdOnly() && hasOtherRuleMeetMatchThanCurrent() && !isUserManualMatchLockActive()) {
+        void maybeNavigateToRuleMeetMatch();
         return;
       }
       if (shouldHoldCurrentMatch() && !pollTimer) {
@@ -3391,9 +3693,9 @@
       }
       lastScanError = "";
       try {
-        await ensureMarketView(force || hasPendingTgCategoryPlateScan());
+        await ensureMarketView(force || hasPendingSpecialCategoryPlateScan());
         await ensureMarketCategoryTab(
-          (force || hasPendingTgCategoryPlateScan()) && !isUserManualCategoryTabActive()
+          (force || hasPendingSpecialCategoryPlateScan()) && !isUserManualCategoryTabActive()
         );
         await waitForOddsButtons(1, 15e3);
         await ensureStrategyMarketsVisible();
@@ -3675,29 +3977,146 @@
       if (isCurrentMatchItem(item) && isMatchEndedUiVisible()) return true;
       return false;
     }
+    function formatActiveMatchFullTitle(item) {
+      if (!item) return "";
+      const home = item.homeName || "\u2014";
+      const away = item.awayName || "\u2014";
+      const tour = String(item.tournamentName || "").trim();
+      const phase = MATCH_PHASE_LABEL[resolveMatchPhase(item)] || resolveMatchPhase(item) || "";
+      const meetCount = getMatchRuleMeetCount(item);
+      const parts = [];
+      if (item.matchId) parts.push("#" + item.matchId);
+      if (item.kickoffTime) parts.push(String(item.kickoffTime));
+      if (tour) parts.push(tour);
+      parts.push(home + " vs " + away);
+      if (phase) parts.push(phase);
+      if (item.ruleCount != null) parts.push(item.ruleCount + "\u6761\u7B56\u7565");
+      if (meetCount > 0) parts.push(meetCount + "\u6761\u8FBE\u6807");
+      if (item.finalScore != null && item.finalScore !== "") parts.push("\u6BD4\u5206 " + item.finalScore);
+      return parts.join(" \xB7 ");
+    }
     function renderMatchListRow(item, idx) {
       const id = item.matchId || "";
       const isPage = String(id) === String(matchId);
-      const score = item.finalScore != null && item.finalScore !== "" ? " \xB7 \u6BD4\u5206 " + item.finalScore : "";
+      const score = item.finalScore != null && item.finalScore !== "" ? " \xB7 " + item.finalScore : "";
       let rowClass = "tm-hty-match-item";
       if (isPage) rowClass += " tm-hty-match-page";
       if (isMatchEndedPhase(item)) rowClass += " tm-hty-match-ended";
-      const pickText = formatActiveMatchItem(item) + score;
-      const pageBadge = isPage ? '<span class="tm-hty-match-badge" title="\u5F53\u524D\u9875">\u{1F4CC}</span>' : "";
-      const traceLink = id ? '<a class="tm-hty-match-trace" href="' + traceMatchUrl(id) + '" target="_blank" rel="noopener" title="\u5947\u80DC\u8D70\u52BF">\u5947\u80DC</a>' : "";
+      const meetCount = getMatchRuleMeetCount(item);
+      if (meetCount > 0) rowClass += " tm-hty-match-hit";
+      const mainText = formatActiveMatchMainText(item) + score;
+      const fullTitle = formatActiveMatchFullTitle(item);
+      const tipAttrs = ' data-tip="' + escapeHtmlAttr(fullTitle) + '"' + (id ? ' data-match-id="' + escapeHtmlAttr(id) + '"' : "");
+      const meetBadge = meetCount > 0 ? '<span class="tm-hty-match-meet">' + meetCount + "\u8FBE\u6807</span>" : "";
+      const pageBadge = isPage ? '<span class="tm-hty-match-badge">\u{1F4CC}</span>' : "";
+      const traceLink = id ? '<a class="tm-hty-match-trace" href="' + traceMatchUrl(id) + '" target="_blank" rel="noopener" title="\u6253\u5F00\u5947\u80DC\u8D70\u52BF">\u5947\u80DC</a>' : "";
       if (!id) {
-        return '<div class="' + rowClass + '"><span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span><span class="tm-hty-match-pick">' + pickText + "</span>" + pageBadge + "</div>";
+        return '<div class="' + rowClass + '"' + tipAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span><span class="tm-hty-match-pick">' + escapeHtmlAttr(mainText) + "</span>" + meetBadge + pageBadge + "</div>";
       }
       const inplayReady = resolveMatchPhase(item) === "IN_PLAY";
       let mainHtml;
       if (isMatchEndedPhase(item)) {
-        mainHtml = '<span class="tm-hty-match-pick" title="\u6BD4\u8D5B\u5DF2\u7ED3\u675F">' + pickText + "</span>";
+        mainHtml = '<span class="tm-hty-match-pick">' + escapeHtmlAttr(mainText) + "</span>";
       } else if (inplayReady) {
-        mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '" title="\u8DF3\u8F6C\u6EDA\u7403\u9875">' + pickText + "</a>";
+        mainHtml = '<a class="tm-hty-match-main" href="' + inplayMatchUrl(id) + '">' + escapeHtmlAttr(mainText) + "</a>";
       } else {
-        mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, "incoming") + '" title="\u8DF3\u8F6C\u5373\u5C06\u5F00\u8D5B\u9875">' + pickText + "</a>";
+        mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, "incoming") + '">' + escapeHtmlAttr(mainText) + "</a>";
       }
-      return '<div class="' + rowClass + '"><span class="tm-hty-strategy-idx">' + (idx + 1) + ".</span>" + mainHtml + traceLink + pageBadge + "</div>";
+      return '<div class="' + rowClass + '"' + tipAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + ".</span>" + mainHtml + meetBadge + traceLink + pageBadge + "</div>";
+    }
+    function ensureMatchTipEl() {
+      if (matchTipEl && document.body.contains(matchTipEl)) return matchTipEl;
+      let el = document.getElementById(MATCH_TIP_ID);
+      if (!el) {
+        el = document.createElement("div");
+        el.id = MATCH_TIP_ID;
+        el.setAttribute("role", "tooltip");
+        document.body.appendChild(el);
+      }
+      matchTipEl = el;
+      return matchTipEl;
+    }
+    function hideMatchTip() {
+      if (matchTipShowTimer) {
+        clearTimeout(matchTipShowTimer);
+        matchTipShowTimer = null;
+      }
+      matchTipActiveKey = "";
+      if (matchTipEl) matchTipEl.style.display = "none";
+    }
+    function positionMatchTip(clientX, clientY) {
+      const tip = ensureMatchTipEl();
+      const pad = 10;
+      tip.style.display = "block";
+      tip.style.visibility = "hidden";
+      const rect = tip.getBoundingClientRect();
+      let left = clientX + 14;
+      let top = clientY + 18;
+      if (left + rect.width > window.innerWidth - pad) {
+        left = Math.max(pad, clientX - rect.width - 12);
+      }
+      if (top + rect.height > window.innerHeight - pad) {
+        top = Math.max(pad, clientY - rect.height - 12);
+      }
+      tip.style.left = left + "px";
+      tip.style.top = top + "px";
+      tip.style.visibility = "visible";
+    }
+    function showMatchTip(text, key, clientX, clientY) {
+      const tipText = String(text || "").trim();
+      if (!tipText) return;
+      const tipKey = String(key || tipText);
+      const tip = ensureMatchTipEl();
+      if (matchTipActiveKey === tipKey && tip.style.display === "block") {
+        if (tip.textContent !== tipText) tip.textContent = tipText;
+        positionMatchTip(clientX, clientY);
+        return;
+      }
+      if (matchTipShowTimer) clearTimeout(matchTipShowTimer);
+      matchTipShowTimer = setTimeout(function() {
+        matchTipShowTimer = null;
+        matchTipActiveKey = tipKey;
+        tip.textContent = tipText;
+        tip.style.display = "block";
+        positionMatchTip(clientX, clientY);
+      }, 80);
+    }
+    function setupMatchTipWatch(panel) {
+      if (!panel || panel.dataset.matchTipBound === "1") return;
+      panel.dataset.matchTipBound = "1";
+      panel.addEventListener("mouseover", function(e) {
+        if (e.target.closest && e.target.closest(".tm-hty-match-trace")) {
+          hideMatchTip();
+          return;
+        }
+        const row = e.target.closest && e.target.closest(".tm-hty-match-item");
+        if (!row || !panel.contains(row)) return;
+        showMatchTip(
+          row.getAttribute("data-tip") || "",
+          row.getAttribute("data-match-id") || row.getAttribute("data-tip") || "",
+          e.clientX,
+          e.clientY
+        );
+      });
+      panel.addEventListener("mousemove", function(e) {
+        if (!matchTipActiveKey) return;
+        if (e.target.closest && e.target.closest(".tm-hty-match-trace")) return;
+        const row = e.target.closest && e.target.closest(".tm-hty-match-item");
+        if (!row) return;
+        if (matchTipEl && matchTipEl.style.display === "block") {
+          positionMatchTip(e.clientX, e.clientY);
+        }
+      });
+      panel.addEventListener("mouseout", function(e) {
+        const row = e.target.closest && e.target.closest(".tm-hty-match-item");
+        if (!row) return;
+        const related = e.relatedTarget;
+        if (related && row.contains(related)) return;
+        hideMatchTip();
+      });
+      panel.addEventListener("mouseleave", function() {
+        hideMatchTip();
+      });
     }
     function inplayMatchUrl(id, tab) {
       return matchBetUrl(id, tab);
@@ -3830,37 +4249,109 @@
     function formatKickoffShort(kick) {
       if (!kick) return "";
       const m = String(kick).match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
-      if (m) return m[2] + "-" + m[3] + " " + m[4] + ":" + m[5];
-      return String(kick);
+      if (!m) return String(kick);
+      try {
+        const now = /* @__PURE__ */ new Date();
+        const y = now.getFullYear();
+        const mo = String(now.getMonth() + 1).padStart(2, "0");
+        const d = String(now.getDate()).padStart(2, "0");
+        if (m[1] === String(y) && m[2] === mo && m[3] === d) {
+          return m[4] + ":" + m[5];
+        }
+      } catch (e) {
+      }
+      return m[2] + "-" + m[3] + " " + m[4] + ":" + m[5];
     }
+    const TOURNAMENT_SHORT_RULES = [
+      [/^(\d{4})?世界杯\s*\(([^)]+)\)\s*$/, function(m) {
+        const hosts = m[2] || "";
+        if (/加拿大|墨西哥|美国|美加墨/.test(hosts)) {
+          return (m[1] || "2026") + "\u7F8E\u52A0\u58A8";
+        }
+        return (m[1] || "") + "\u4E16\u754C\u676F";
+      }],
+      [/世界杯\s*\([^)]+\)/, "\u4E16\u754C\u676F"],
+      [/俱乐部\s*友谊赛|国际\s*友谊赛|友谊赛/, "\u53CB\u8C0A\u8D5B"],
+      [/英格兰\s*(超级|超)(联赛)?|英超|Premier\s*League/i, "\u82F1\u8D85"],
+      [/英格兰\s*冠军(联赛)?|英冠|Championship/i, "\u82F1\u51A0"],
+      [/英格兰\s*甲级|英甲/i, "\u82F1\u7532"],
+      [/英格兰\s*乙级|英乙/i, "\u82F1\u4E59"],
+      [/西班牙\s*(甲级|超)(联赛)?|西甲|La\s*Liga/i, "\u897F\u7532"],
+      [/意大利\s*(甲级|超)(联赛)?|意甲|Serie\s*A/i, "\u610F\u7532"],
+      [/德国\s*(甲级|超)(联赛)?|德甲|Bundesliga(?!\s*2)/i, "\u5FB7\u7532"],
+      [/德国\s*乙级|德乙|Bundesliga\s*2/i, "\u5FB7\u4E59"],
+      [/法国\s*(甲级|超)(联赛)?|法甲|Ligue\s*1/i, "\u6CD5\u7532"],
+      [/法国\s*乙级|法乙|Ligue\s*2/i, "\u6CD5\u4E59"],
+      [/荷兰\s*(甲级|超)|荷甲|Eredivisie/i, "\u8377\u7532"],
+      [/葡萄牙\s*(超级|超)|葡超|Primeira/i, "\u8461\u8D85"],
+      [/欧洲\s*冠军(联赛)?|欧冠|Champions\s*League/i, "\u6B27\u51A0"],
+      [/欧洲\s*联赛(?!协会)|欧联(?!合)|Europa\s*League/i, "\u6B27\u8054"],
+      [/欧洲\s*(协会|协会联赛|协会联)|欧协|Conference/i, "\u6B27\u534F"],
+      [/欧洲\s*杯|欧洲足球锦标赛/i, "\u6B27\u6D32\u676F"],
+      [/中超|中国\s*超级/i, "\u4E2D\u8D85"],
+      [/日本\s*(J1|J联赛|职业)|日职(?!乙)|J1\s*League/i, "\u65E5\u804C"],
+      [/韩国\s*K|韩K|K\s*League/i, "\u97E9K"],
+      [/澳大利亚\s*(超级|超)|澳超|A-?League/i, "\u6FB3\u8D85"],
+      [/美职联|美国\s*职业|MLS/i, "\u7F8E\u804C"],
+      [/巴西\s*(甲级|超)|巴甲|Serie\s*A\s*Brazil/i, "\u5DF4\u7532"],
+      [/阿根廷\s*(甲级|超)|阿甲/i, "\u963F\u7532"],
+      [/土耳其\s*(超级|超)|土超/i, "\u571F\u8D85"],
+      [/俄罗斯\s*(超级|超)|俄超/i, "\u4FC4\u8D85"],
+      [/比利时\s*(甲级|超)|比甲/i, "\u6BD4\u7532"],
+      [/苏格兰\s*(超级|超)|苏超/i, "\u82CF\u8D85"],
+      [/瑞典\s*(超级|超)|瑞典超/i, "\u745E\u5178\u8D85"],
+      [/挪威\s*(超级|超)|挪超|挪威超/i, "\u632A\u8D85"],
+      [/丹麦\s*(超级|超)|丹超/i, "\u4E39\u8D85"],
+      [/瑞士\s*(超级|超)|瑞士超/i, "\u745E\u58EB\u8D85"],
+      [/奥地利\s*(超级|超)|奥超/i, "\u5965\u8D85"],
+      [/沙特\s*(职业|超|联)|沙特联/i, "\u6C99\u7279\u8054"],
+      [/墨西哥\s*(超|联)|墨超/i, "\u58A8\u8D85"],
+      [/亚洲\s*冠军|亚冠/i, "\u4E9A\u51A0"],
+      [/非洲\s*冠军|非冠/i, "\u975E\u51A0"],
+      [/解放者杯/i, "\u89E3\u653E\u8005\u676F"],
+      [/南美\s*杯/i, "\u5357\u7F8E\u676F"]
+    ];
     function shortTournamentName(name) {
       const raw = String(name || "").trim();
       if (!raw) return "";
-      const normalized = raw.replace(/（/g, "(").replace(/）/g, ")");
-      const wcHosts = normalized.match(/^(\d{4})?世界杯\s*\(([^)]+)\)\s*$/);
-      if (wcHosts) {
-        const hosts = wcHosts[2] || "";
-        if (/加拿大|墨西哥|美国|美加墨/.test(hosts)) {
-          return (wcHosts[1] || "2026") + "\u7F8E\u52A0\u58A8";
+      const normalized = raw.replace(/（/g, "(").replace(/）/g, ")").replace(/\s+/g, " ");
+      for (let i = 0; i < TOURNAMENT_SHORT_RULES.length; i++) {
+        const rule = TOURNAMENT_SHORT_RULES[i];
+        const re = rule[0];
+        const repl = rule[1];
+        if (typeof repl === "function") {
+          const m = normalized.match(re);
+          if (m) return repl(m);
+        } else if (re.test(normalized)) {
+          return repl;
         }
-        return (wcHosts[1] || "") + "\u4E16\u754C\u676F";
       }
-      return normalized.replace(/世界杯\s*\([^)]+\)/, "\u4E16\u754C\u676F");
+      if (normalized.length > 8) return normalized.slice(0, 7) + "\u2026";
+      return normalized;
     }
-    function formatActiveMatchItem(item) {
-      const home = item.homeName || "\u2014";
-      const away = item.awayName || "\u2014";
+    function shortTeamName(name) {
+      const raw = String(name || "").trim();
+      if (!raw) return "\u2014";
+      let s = raw.replace(/足球俱乐部$/u, "").replace(/足球队$/u, "").replace(/\s+FC$/i, "").replace(/\s+CF$/i, "").trim();
+      if (!s) s = raw;
+      if (s.length > 8) return s.slice(0, 7) + "\u2026";
+      return s;
+    }
+    function formatActiveMatchItem(item, opts) {
+      const o = opts || {};
+      const home = shortTeamName(item.homeName);
+      const away = shortTeamName(item.awayName);
       const kick = formatKickoffShort(item.kickoffTime);
       const phase = MATCH_PHASE_LABEL[resolveMatchPhase(item)] || resolveMatchPhase(item) || "\u2014";
       const apiPhase = String(item.matchPhase || "").toUpperCase();
       const resolved = resolveMatchPhase(item);
       let phaseHint = "";
       if (isMatchLocallyEnded(item.matchId)) {
-        phaseHint = "(\u672C\u5730\u5DF2\u7ED3\u675F)";
+        phaseHint = "(\u672C\u5730)";
       } else if (isCurrentMatchItem(item) && (apiPhase === "ENDED" || apiPhase === "FINISHED") && resolved === "IN_PLAY") {
         phaseHint = "(\u9875)";
       }
-      const rules = item.ruleCount != null ? item.ruleCount + "\u6761\u7B56\u7565" : "";
+      const rules = item.ruleCount != null ? item.ruleCount + "\u7B56" : "";
       const meetCount = getMatchRuleMeetCount(item);
       const meetHint = meetCount > 0 ? meetCount + "\u6761\u8FBE\u6807" : "";
       const tour = shortTournamentName(item.tournamentName);
@@ -3870,8 +4361,11 @@
       parts.push(home + "vs" + away);
       parts.push(phase + phaseHint);
       if (rules) parts.push(rules);
-      if (meetHint) parts.push(meetHint);
-      return parts.join("  ");
+      if (meetHint && o.includeMeet !== false) parts.push(meetHint);
+      return parts.join(" ");
+    }
+    function formatActiveMatchMainText(item) {
+      return formatActiveMatchItem(item, { includeMeet: false });
     }
     function fetchActiveMatches() {
       return new Promise(function(resolve, reject) {
@@ -3917,7 +4411,11 @@
       const meetSig = Object.keys(matchRuleMeetCache).sort().map(function(id) {
         return id + ":" + matchRuleMeetCache[id].meetCount;
       }).join(",");
-      return matchesStatus + "|" + matchId + "|" + activeMatches.length + "|" + rows + "|" + (isCurrentPageLive() ? "live" : "idle") + "|" + lastScanButtonCount + "|" + meetSig;
+      const pendingExecSig = Object.keys(matchPendingExecCache).sort().map(function(id) {
+        const c = matchPendingExecCache[id];
+        return id + ":" + (c && c.known ? c.count : "?");
+      }).join(",");
+      return matchesStatus + "|" + matchId + "|" + activeMatches.length + "|" + rows + "|" + (isCurrentPageLive() ? "live" : "idle") + "|" + lastScanButtonCount + "|" + meetSig + "|" + pendingExecSig;
     }
     async function loadActiveMatches(silent) {
       const isSilent = !!silent;
@@ -3945,6 +4443,9 @@
         if (reconcileLocalEndedMatches()) {
           renderActiveMatches(document.getElementById(PANEL_ID));
         }
+        const openMatches = activeMatches.filter(function(item) {
+          return !isMatchEndedPhase(item) && item.matchId;
+        });
         const inPlayMatches = getSortedInPlayMatches();
         if (!inPlayMatches.length) {
           if (!isHubSportEventsPage()) {
@@ -3954,8 +4455,11 @@
           if (!shouldBlockMatchAutoNav() && !isUserManualMatchLockActive() && !isSiteAccessBlockedPage() && !isCurrentMatchEnded()) {
             navSuppressedUntil = 0;
           }
+        }
+        if (openMatches.length) {
           void scanAllMatchesRuleMeet(false).then(async function() {
             renderActiveMatches(document.getElementById(PANEL_ID));
+            if (!inPlayMatches.length) return;
             if (!hasNavigableInPlayMatches()) {
               if (!isHubSportEventsPage()) {
                 suppressNavigation(NAV_SUPPRESS_NO_INPLAY_MS, "\u7B56\u7565\u5217\u8868\u65E0\u5DF2\u8FBE\u6807\u6BD4\u8D5B");
@@ -3976,6 +4480,12 @@
       if (!panel) return;
       const statusEl = panel.querySelector(".tm-hty-matches-status");
       const listEl = panel.querySelector(".tm-hty-matches-list");
+      const upcomingSection = panel.querySelector(".tm-hty-matches-upcoming");
+      const upcomingToggle = panel.querySelector(".tm-hty-upcoming-toggle");
+      const upcomingListEl = panel.querySelector(".tm-hty-matches-upcoming-list");
+      const watchSection = panel.querySelector(".tm-hty-matches-watch");
+      const watchToggle = panel.querySelector(".tm-hty-watch-toggle");
+      const watchListEl = panel.querySelector(".tm-hty-matches-watch-list");
       const endedSection = panel.querySelector(".tm-hty-matches-ended");
       const endedToggle = panel.querySelector(".tm-hty-ended-toggle");
       const endedListEl = panel.querySelector(".tm-hty-matches-ended-list");
@@ -3987,6 +4497,8 @@
         statusEl.textContent = "\u52A0\u8F7D\u4E2D\u2026";
         statusEl.dataset.kind = "info";
         listEl.innerHTML = "";
+        if (upcomingSection) upcomingSection.style.display = "none";
+        if (watchSection) watchSection.style.display = "none";
         if (endedSection) endedSection.style.display = "none";
         return;
       }
@@ -3995,35 +4507,79 @@
         statusEl.dataset.kind = "err";
         if (!activeMatches.length) {
           listEl.innerHTML = "";
+          if (upcomingSection) upcomingSection.style.display = "none";
+          if (watchSection) watchSection.style.display = "none";
           if (endedSection) endedSection.style.display = "none";
         }
         return;
       }
-      const liveMatches = activeMatches.filter(function(item) {
-        return !isMatchEndedPhase(item);
-      });
       const endedMatches = activeMatches.filter(function(item) {
         return isMatchEndedPhase(item);
+      });
+      const activeOpen = activeMatches.filter(function(item) {
+        return !isMatchEndedPhase(item);
+      });
+      const watchMatches = activeOpen.filter(function(item) {
+        return !matchHasPendingExecStrategies(item);
+      });
+      const focusMatches = activeOpen.filter(function(item) {
+        return matchHasPendingExecStrategies(item);
+      });
+      const upcomingMatches = focusMatches.filter(function(item) {
+        return resolveMatchPhase(item) === "NOT_STARTED";
+      });
+      const liveMatches = focusMatches.filter(function(item) {
+        return resolveMatchPhase(item) !== "NOT_STARTED";
       });
       const currentHit = activeMatches.some(function(item) {
         return String(item.matchId) === String(matchId);
       });
-      let statusText = liveMatches.length + " \u573A";
+      let statusText = liveMatches.length + " \u8FDB\u884C\u4E2D";
+      if (upcomingMatches.length) statusText += " \xB7 " + upcomingMatches.length + " \u672A\u5F00\u59CB";
+      if (watchMatches.length) statusText += " \xB7 " + watchMatches.length + " \u5173\u6CE8";
       if (endedMatches.length) statusText += " \xB7 " + endedMatches.length + " \u5DF2\u7ED3\u675F";
       if (currentHit) statusText += " \xB7 \u542B\u5F53\u524D\u9875";
       statusEl.textContent = statusText;
       statusEl.dataset.kind = currentHit ? "ready" : "info";
-      if (!liveMatches.length && !endedMatches.length) {
+      if (!liveMatches.length && !upcomingMatches.length && !watchMatches.length && !endedMatches.length) {
         listEl.innerHTML = '<div class="tm-hty-strategy-empty">\u6682\u65E0\u7B56\u7565\u8D5B\u4E8B</div>';
+        if (upcomingSection) upcomingSection.style.display = "none";
+        if (watchSection) watchSection.style.display = "none";
         if (endedSection) endedSection.style.display = "none";
         return;
       }
       if (!liveMatches.length) {
-        listEl.innerHTML = '<div class="tm-hty-strategy-empty">\u6682\u65E0\u8FDB\u884C\u4E2D/\u672A\u5F00\u8D5B\u8D5B\u4E8B</div>';
+        listEl.innerHTML = '<div class="tm-hty-strategy-empty">\u6682\u65E0\u8FDB\u884C\u4E2D\u8D5B\u4E8B</div>';
       } else {
         listEl.innerHTML = liveMatches.map(function(item, idx) {
           return renderMatchListRow(item, idx);
         }).join("");
+      }
+      if (upcomingSection && upcomingToggle && upcomingListEl) {
+        if (!upcomingMatches.length) {
+          upcomingSection.style.display = "none";
+        } else {
+          upcomingSection.style.display = "";
+          upcomingSection.dataset.collapsed = upcomingMatchesCollapsed ? "1" : "0";
+          upcomingToggle.textContent = "\u672A\u5F00\u59CB (" + upcomingMatches.length + ") " + (upcomingMatchesCollapsed ? "\u25B8" : "\u25BE");
+          upcomingListEl.style.display = upcomingMatchesCollapsed ? "none" : "";
+          upcomingListEl.innerHTML = upcomingMatches.map(function(item, idx) {
+            return renderMatchListRow(item, idx);
+          }).join("");
+        }
+      }
+      if (watchSection && watchToggle && watchListEl) {
+        if (!watchMatches.length) {
+          watchSection.style.display = "none";
+        } else {
+          watchSection.style.display = "";
+          watchSection.dataset.collapsed = watchMatchesCollapsed ? "1" : "0";
+          watchToggle.textContent = "\u5173\u6CE8\u533A (" + watchMatches.length + ") " + (watchMatchesCollapsed ? "\u25B8" : "\u25BE");
+          watchListEl.style.display = watchMatchesCollapsed ? "none" : "";
+          watchListEl.innerHTML = watchMatches.map(function(item, idx) {
+            return renderMatchListRow(item, idx);
+          }).join("");
+        }
       }
       if (endedSection && endedToggle && endedListEl) {
         if (!endedMatches.length) {
@@ -4039,17 +4595,48 @@
         }
       }
     }
-    function toggleEndedMatchesCollapsed(panel) {
-      endedMatchesCollapsed = !endedMatchesCollapsed;
+    function toggleCollapsedMatchSection(kind, panel) {
+      let collapsed;
+      let sectionSel;
+      let toggleSel;
+      let listSel;
+      if (kind === "upcoming") {
+        upcomingMatchesCollapsed = !upcomingMatchesCollapsed;
+        collapsed = upcomingMatchesCollapsed;
+        sectionSel = ".tm-hty-matches-upcoming";
+        toggleSel = ".tm-hty-upcoming-toggle";
+        listSel = ".tm-hty-matches-upcoming-list";
+      } else if (kind === "watch") {
+        watchMatchesCollapsed = !watchMatchesCollapsed;
+        collapsed = watchMatchesCollapsed;
+        sectionSel = ".tm-hty-matches-watch";
+        toggleSel = ".tm-hty-watch-toggle";
+        listSel = ".tm-hty-matches-watch-list";
+      } else {
+        endedMatchesCollapsed = !endedMatchesCollapsed;
+        collapsed = endedMatchesCollapsed;
+        sectionSel = ".tm-hty-matches-ended";
+        toggleSel = ".tm-hty-ended-toggle";
+        listSel = ".tm-hty-matches-ended-list";
+      }
       const root = panel || document.getElementById(PANEL_ID);
       if (!root) return;
-      const endedSection = root.querySelector(".tm-hty-matches-ended");
-      const endedToggle = root.querySelector(".tm-hty-ended-toggle");
-      const endedListEl = root.querySelector(".tm-hty-matches-ended-list");
-      if (!endedSection || !endedToggle || !endedListEl) return;
-      endedSection.dataset.collapsed = endedMatchesCollapsed ? "1" : "0";
-      endedToggle.textContent = endedToggle.textContent.replace(/[▸▾]$/, endedMatchesCollapsed ? "\u25B8" : "\u25BE");
-      endedListEl.style.display = endedMatchesCollapsed ? "none" : "";
+      const section = root.querySelector(sectionSel);
+      const toggle = root.querySelector(toggleSel);
+      const listEl = root.querySelector(listSel);
+      if (!section || !toggle || !listEl) return;
+      section.dataset.collapsed = collapsed ? "1" : "0";
+      toggle.textContent = toggle.textContent.replace(/[▸▾]$/, collapsed ? "\u25B8" : "\u25BE");
+      listEl.style.display = collapsed ? "none" : "";
+    }
+    function toggleUpcomingMatchesCollapsed(panel) {
+      toggleCollapsedMatchSection("upcoming", panel);
+    }
+    function toggleWatchMatchesCollapsed(panel) {
+      toggleCollapsedMatchSection("watch", panel);
+    }
+    function toggleEndedMatchesCollapsed(panel) {
+      toggleCollapsedMatchSection("ended", panel);
     }
     function getCurrentMatchItem() {
       return activeMatches.find(function(item) {
@@ -4177,11 +4764,14 @@
     }
     async function scanAllMatchesRuleMeet(force) {
       if (ruleMeetScanInFlight) return matchRuleMeetCache;
-      const inPlay = getSortedInPlayMatches();
-      if (!inPlay.length) {
+      const scanTargets = activeMatches.filter(function(item) {
+        return !isMatchEndedPhase(item) && item.matchId;
+      });
+      if (!scanTargets.length) {
         if (matchId) {
-          const curMeet = getCurrentMatchPendingRuleMeetCount();
+          const curMeet = countPendingRuleMeetForNav(strategyList);
           rememberMatchPendingWork(matchId, curMeet);
+          syncCurrentMatchPendingExecCache();
           if (curMeet > 0) {
             matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
           } else {
@@ -4196,32 +4786,41 @@
       }
       ruleMeetScanInFlight = true;
       try {
-        const tasks = inPlay.map(function(item) {
+        const tasks = scanTargets.map(function(item) {
           const id = String(item.matchId);
+          const phase = resolveMatchPhase(item);
           if (id === String(matchId) && (strategyList.length || strategyStatus === "ok")) {
-            const meetCount = getCurrentMatchPendingRuleMeetCount();
+            const meetCount = countPendingRuleMeetForNav(strategyList);
+            const pendingExec = countPendingExecStrategies(strategyList, true);
             return Promise.resolve({
               id,
+              phase,
               meetCount,
-              // 导航用：仅已达标+未执行（不含待确认）
-              pendingCount: meetCount
+              // 导航用：仅已达标+未执行（不含待确认）；价不够已降权
+              pendingCount: meetCount,
+              pendingExec
             });
           }
           return fetchAlertStrategies(id).then(function(payload) {
             const list = Array.isArray(payload.data) ? payload.data : [];
-            const meetCount = countPendingRuleMeet(list);
+            const meetCount = countPendingRuleMeetForNav(list);
             return {
               id,
+              phase,
               meetCount,
-              pendingCount: meetCount
+              pendingCount: meetCount,
+              pendingExec: countPendingExecStrategies(list, false)
             };
           }).catch(function() {
             const prevMeet = matchRuleMeetCache[id];
             const prevWork = matchPendingWorkCache[id];
+            const prevExec = matchPendingExecCache[id];
             return {
               id,
+              phase,
               meetCount: prevMeet ? prevMeet.meetCount : 0,
-              pendingCount: prevWork && prevWork.known ? prevWork.pendingCount : -1
+              pendingCount: prevWork && prevWork.known ? prevWork.pendingCount : -1,
+              pendingExec: prevExec && prevExec.known ? prevExec.count : -1
             };
           });
         });
@@ -4229,7 +4828,10 @@
         const nextMeet = {};
         results.forEach(function(r) {
           if (r.pendingCount >= 0) rememberMatchPendingWork(r.id, r.pendingCount);
-          if (r.meetCount > 0) nextMeet[r.id] = { meetCount: r.meetCount, at: Date.now() };
+          if (r.pendingExec >= 0) rememberMatchPendingExec(r.id, r.pendingExec);
+          if (r.meetCount > 0 && r.phase === "IN_PLAY") {
+            nextMeet[r.id] = { meetCount: r.meetCount, at: Date.now() };
+          }
         });
         matchRuleMeetCache = nextMeet;
         lastRuleMeetScanAt = Date.now();
@@ -4242,6 +4844,10 @@
           "| navigable",
           results.map(function(r) {
             return r.id + ":" + (r.pendingCount >= 0 ? r.pendingCount : "?");
+          }).join(", ") || "\u65E0",
+          "| pendingExec",
+          results.map(function(r) {
+            return r.id + ":" + (r.pendingExec >= 0 ? r.pendingExec : "?");
           }).join(", ") || "\u65E0"
         );
         return matchRuleMeetCache;
@@ -4647,6 +5253,7 @@
       if (routeWatchTimer) return;
       ensureWrongSportSectionGuard();
       setupManualCategoryTabWatch();
+      setupManualBrowseWatch();
       const origPush = history.pushState;
       const origReplace = history.replaceState;
       history.pushState = function() {
@@ -6082,6 +6689,9 @@
       if (side || line) desc += " " + side + line;
       return desc;
     }
+    function escapeHtmlAttr(val) {
+      return String(val == null ? "" : val).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
     function formatStrategyItemHtml(item, state) {
       const odds = formatOddsDisplay(item.plateOddsHit);
       const amount = item.plateAmount != null ? formatOddsDisplay(item.plateAmount) : "\u2014";
@@ -6846,8 +7456,7 @@
             orderno: betRecord.orderno,
             orderNo: betRecord.orderno,
             betOdds: betRecord.betOdds,
-            betStake: betRecord.betStake,
-            matchId: betRecord.matchId
+            betStake: betRecord.betStake
           });
           markExecutedStrategySynced(recHash, isRealBetOrderNo(betRecord.orderno) ? betRecord.orderno : "");
           console.log("[hty-inplay] \u7B56\u7565\u72B6\u6001\u5DF2\u66F4\u65B0\u4E3A\u5DF2\u6267\u884C", recHash);
@@ -6921,7 +7530,6 @@
         if (isRealBetOrderNo(extra.orderNo)) payload.orderNo = String(extra.orderNo);
         if (extra.betOdds != null) payload.betOdds = extra.betOdds;
         if (extra.betStake != null) payload.betStake = extra.betStake;
-        if (extra.matchId) payload.matchId = extra.matchId;
       }
       return new Promise(function(resolve, reject) {
         GM_xmlhttpRequest({
@@ -7007,8 +7615,7 @@
             orderno: entry.orderno,
             orderNo: entry.orderno,
             betOdds: entry.betOdds,
-            betStake: entry.betStake,
-            matchId: entry.matchId || item.matchId || matchId
+            betStake: entry.betStake
           });
           item.ruleMeetIgnore = "2";
           entry.pendingSync = false;
@@ -7033,9 +7640,7 @@
       for (let i = 0; i < toSync.length; i++) {
         const item = toSync[i];
         try {
-          await updateStrategyRuleWithRetry(item.recHash, "1", {
-            matchId: item.matchId || matchId
-          });
+          await updateStrategyRuleWithRetry(item.recHash, "1");
           item.ruleMeetIgnore = "1";
           markAbortedSyncDone(item.recHash);
           console.log("[hty-inplay] \u7B56\u7565\u72B6\u6001\u5DF2\u66F4\u65B0\u4E3A\u5DF2\u4E2D\u6B62", item.recHash);
@@ -7130,7 +7735,7 @@
         await syncAbortedStrategyStatuses();
         strategyStatus = "ok";
         strategyError = "";
-        const curMeet = countPendingRuleMeet(strategyList);
+        const curMeet = countPendingRuleMeetForNav(strategyList);
         if (curMeet > 0) {
           matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
         } else {
@@ -7159,13 +7764,6 @@
       if (panelReady && strategyList.length) {
         syncOddsObserverState();
       }
-      if (strategyStatus === "ok" && matchId && countPendingRuleMeet(strategyList) === 0 && !placing && !isUserManualMatchLockActive()) {
-        if (hasNavigableInPlayMatches()) {
-          void maybeAutoNavigateToInplay();
-        } else if (!isCurrentMatchEnded()) {
-          setBetStep("\u672C\u573A\u5DF2\u65E0\u5DF2\u8FBE\u6807\u672A\u6267\u884C\u7B56\u7565\uFF0C\u6682\u65E0\u5176\u5B83\u8FBE\u6807\u6BD4\u8D5B");
-        }
-      }
       try {
         await refreshTargetOption(true);
         renderPanel(true, false);
@@ -7174,6 +7772,15 @@
         lastScanError = err && err.message ? err.message : "\u626B\u63CF\u5931\u8D25";
         betStep = "\u626B\u63CF\u5F02\u5E38";
         renderPanel(true);
+      }
+      if (strategyStatus === "ok" && matchId && countPendingRuleMeetForNav(strategyList) === 0 && !placing && !isUserManualMatchLockActive()) {
+        if (hasNavigableInPlayMatches()) {
+          void maybeAutoNavigateToInplay();
+        } else if (!isCurrentMatchEnded() && countPendingRuleMeet(strategyList) === 0) {
+          setBetStep("\u672C\u573A\u5DF2\u65E0\u5DF2\u8FBE\u6807\u672A\u6267\u884C\u7B56\u7565\uFF0C\u6682\u65E0\u5176\u5B83\u8FBE\u6807\u6BD4\u8D5B");
+        } else if (!isCurrentMatchEnded() && isCurrentMatchOddsBelowThresholdOnly()) {
+          setBetStep("\u672C\u573A\u76D8\u53E3\u4EF7\u4E0D\u8DB3\u9608\u503C\uFF0C\u7B49\u5F85\u5176\u5B83\u8FBE\u6807\u6BD4\u8D5B\u6216\u8D54\u7387\u56DE\u5347");
+        }
       }
     }
     function scheduleStrategyPoll() {
@@ -7384,7 +7991,10 @@
           markTitle = "\u76D8\u53E3\u5DF2\u5339\u914D\uFF0C\u8D54\u7387\u672A\u8FBE\u9608\u503C";
         }
         const rowClass = state.actionable ? " tm-hty-strategy-item-hit" : state.execStatus === "executed" ? " tm-hty-strategy-item-done" : state.execStatus === "aborted" ? " tm-hty-strategy-item-aborted" : state.execStatus === "confirming" ? " tm-hty-strategy-item-confirming" : "";
-        return '<div class="tm-hty-strategy-item' + rowClass + '"><span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span><span class="' + markClass + '" title="' + markTitle + '">' + markText + '</span><span class="tm-hty-strategy-text">' + formatStrategyItemHtml(item, state) + "</span></div>";
+        const canManualRun = state.execStatus === "pending" && !!(item && item.recHash);
+        const runClass = canManualRun ? " tm-hty-strategy-item-runnable" : "";
+        const runAttrs = canManualRun ? ' data-action="run-strategy" data-rec-hash="' + escapeHtmlAttr(item.recHash) + '" title="\u70B9\u51FB\u7ACB\u5373\u9A8C\u8BC1\u5E76\u6295\u6CE8"' : "";
+        return '<div class="tm-hty-strategy-item' + rowClass + runClass + '"' + runAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span><span class="' + markClass + '" title="' + markTitle + '">' + markText + '</span><span class="tm-hty-strategy-text">' + formatStrategyItemHtml(item, state) + "</span></div>";
       }).join("");
     }
     function renderStrategies(panel) {
@@ -8450,7 +9060,7 @@
       const record = {
         orderno: betApi.orderno,
         delay: betApi.delay,
-        matchId: String(matchId || strategy.matchId || ticket && ticket.iid || ""),
+        matchId: String(strategy.matchId || matchId || ticket && ticket.iid || ""),
         recHash: strategy.recHash || "",
         market: betMarket || ticket && ticket.market || option.market || "",
         plateOn: betPlateOn || ticket && ticket.beton || option.side || "",
@@ -8984,6 +9594,127 @@
       }
       await placeTestBet(targetOption);
     }
+    async function verifyAndBuildOptionForStrategy(strategy) {
+      if (!strategy) return { ok: false, reason: "\u7B56\u7565\u65E0\u6548" };
+      const needTab = categoryTabForStrategyMarket(strategy.market);
+      if (needTab) {
+        clearUserManualCategoryTabLock();
+        await ensureMarketCategoryTab(true, true, needTab);
+      }
+      await ensureMarketView(true);
+      await waitForOddsButtons(1, 15e3);
+      const markets = pageMarketsForStrategy(strategy.market);
+      for (let i = 0; i < markets.length; i++) {
+        const el = findStrategyMarketElement(markets[i]);
+        if (el) scrollMarketIntoView(el, { force: true });
+      }
+      await humanDelay(400, 700);
+      const buttonMap = /* @__PURE__ */ new Map();
+      snapshotOddsButtons(buttonMap);
+      buttonMarketIndex = buildButtonMarketIndex(buttonMap);
+      strategyStates = evaluateStrategyStatesFromMap(buttonMap);
+      lastButtonSnapshot = buttonMap;
+      lastScanButtonCount = buttonMap.size;
+      const recHash = String(strategy.recHash || "");
+      let st = null;
+      for (let i = 0; i < strategyStates.length; i++) {
+        if (strategyStates[i].strategy && String(strategyStates[i].strategy.recHash || "") === recHash) {
+          st = strategyStates[i];
+          break;
+        }
+      }
+      if (!st || !st.plateMatched) {
+        return { ok: false, reason: "\u672A\u627E\u5230\u5BF9\u5E94\u76D8\u53E3\uFF08\u8BF7\u786E\u8BA4\u5206\u7C7B tab / \u76D8\u53E3\u7EBF\uFF09" };
+      }
+      const minOdds = Number(strategy.plateOddsHit);
+      if (isNaN(st.currentOdds) || !isNaN(minOdds) && st.currentOdds < minOdds) {
+        return {
+          ok: false,
+          reason: "\u8D54\u7387\u672A\u8FBE\u9608\u503C\uFF1A\u5F53\u524D" + formatOddsDisplay(st.currentOdds) + " < " + formatOddsDisplay(minOdds),
+          state: st
+        };
+      }
+      if (st.dedupBlocked) {
+        return { ok: false, reason: "\u811A\u672C\u9632\u91CD\u62E6\u622A\uFF08\u540C\u7B56\u7565/\u540C\u6309\u94AE\u5DF2\u4E0B\u6216\u8FDB\u884C\u4E2D\uFF09", state: st };
+      }
+      if (st.execStatus !== "pending") {
+        return { ok: false, reason: "\u7B56\u7565\u72B6\u6001\u4E3A" + strategyExecLabel(strategy) + "\uFF0C\u4E0D\u53EF\u4E0B\u5355", state: st };
+      }
+      return { ok: true, option: buildTargetOption(st), state: st };
+    }
+    async function runManualStrategyBet(recHash) {
+      const rh = String(recHash || "");
+      if (!rh) return;
+      if (placing || autoBetInFlight) {
+        setBetStep("\u6B63\u5728\u6295\u6CE8\u4E2D\uFF0C\u8BF7\u7A0D\u5019\u2026");
+        renderPanel(true);
+        return;
+      }
+      if (!isOnMatchBetPage() || !matchId) {
+        setBetResult("failed", "\u8BF7\u5148\u8FDB\u5165\u6BD4\u8D5B\u9875\u518D\u6267\u884C\u7B56\u7565");
+        renderPanel(true);
+        return;
+      }
+      let strategy = null;
+      for (let i = 0; i < strategyList.length; i++) {
+        if (String(strategyList[i].recHash || "") === rh) {
+          strategy = strategyList[i];
+          break;
+        }
+      }
+      if (!strategy) {
+        setBetResult("failed", "\u7B56\u7565\u4E0D\u5B58\u5728\u6216\u5DF2\u5237\u65B0");
+        renderPanel(true);
+        return;
+      }
+      if (!passesStrategyStatusGate(strategy)) {
+        setBetResult("failed", "\u7B56\u7565\u72B6\u6001\u4E3A" + strategyExecLabel(strategy) + "\uFF0C\u4E0D\u53EF\u4E0B\u5355");
+        renderPanel(true);
+        return;
+      }
+      if (!isLoggedIn()) {
+        setBetStep("\u672A\u767B\u5F55\uFF0C\u5C1D\u8BD5\u81EA\u52A8\u767B\u5F55\u2026");
+        renderPanel(true);
+        try {
+          await tryAutoRelogin({ urgent: true, force: true });
+        } catch (e) {
+          console.warn("[hty-inplay] \u624B\u52A8\u6267\u884C\u7B56\u7565\u767B\u5F55\u5931\u8D25", e);
+        }
+        if (!isLoggedIn()) {
+          setBetResult("failed", "\u672A\u767B\u5F55\uFF0C\u65E0\u6CD5\u4E0B\u5355");
+          renderPanel(true);
+          return;
+        }
+      }
+      autoBetInFlight = true;
+      try {
+        setBetStep("\u624B\u52A8\u6267\u884C\uFF1A\u9A8C\u8BC1 " + formatStrategyPlateDesc(strategy) + "\u2026");
+        setBetResult("pending", "\u6B63\u5728\u9A8C\u8BC1\u7B56\u7565\u76D8\u53E3");
+        renderPanel(true);
+        const verified = await verifyAndBuildOptionForStrategy(strategy);
+        lastStrategyHitKey = "";
+        renderPanel(true);
+        if (!verified.ok) {
+          setBetResult("failed", verified.reason || "\u9A8C\u8BC1\u672A\u901A\u8FC7");
+          setBetStep("\u624B\u52A8\u6267\u884C\u5931\u8D25\uFF1A" + (verified.reason || "\u9A8C\u8BC1\u672A\u901A\u8FC7"));
+          renderPanel(true);
+          return;
+        }
+        targetOption = verified.option;
+        setBetStep("\u624B\u52A8\u6267\u884C\uFF1A" + verified.option.label + " @" + formatOddsDisplay(verified.option.odds) + " \xB7 " + formatBetStakeSummary(verified.option));
+        renderPanel(true);
+        console.log("[hty-inplay] \u624B\u52A8\u70B9\u51FB\u672A\u6267\u884C\u7B56\u7565\uFF0C\u5F00\u59CB\u6295\u6CE8", rh, verified.option.label);
+        await placeTestBet(verified.option, true);
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        console.warn("[hty-inplay] \u624B\u52A8\u6267\u884C\u7B56\u7565\u5931\u8D25", msg, err);
+        setBetResult("failed", msg);
+        setBetStep("\u624B\u52A8\u6267\u884C\u5931\u8D25\uFF1A" + msg);
+        renderPanel(true);
+      } finally {
+        autoBetInFlight = false;
+      }
+    }
     function schedulePoll() {
       if (pollTimer) return;
       if (pollCount >= MAX_POLLS) {
@@ -9127,12 +9858,18 @@
       if (!document.getElementById(STYLE_ID)) {
         const style = document.createElement("style");
         style.id = STYLE_ID;
-        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}#' + PANEL_ID + ".tm-hty-collapsed{width:auto;min-width:148px;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions{display:none;}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:flex-start;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:flex-start;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:fit-content;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main{flex:0 0 auto;color:#e2e8f0;text-decoration:none;}#" + PANEL_ID + " .tm-hty-match-pick{flex:0 0 auto;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
+        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}#' + PANEL_ID + ".tm-hty-collapsed{width:auto;min-width:148px;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions{display:none;}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
         document.head.appendChild(style);
+      }
+      if (!document.getElementById(MATCH_TIP_ID + "-style")) {
+        const tipStyle = document.createElement("style");
+        tipStyle.id = MATCH_TIP_ID + "-style";
+        tipStyle.textContent = "#" + MATCH_TIP_ID + '{position:fixed;z-index:100000;display:none;max-width:min(420px,calc(100vw - 24px));padding:8px 10px;border-radius:8px;background:#0b1220;color:#e2e8f0;border:1px solid #64748b;box-shadow:0 12px 28px rgba(0,0,0,.5);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:normal;word-break:break-word;pointer-events:none;}';
+        document.head.appendChild(tipStyle);
       }
       const panel = document.createElement("div");
       panel.id = PANEL_ID;
-      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">\u8D70\u52BF\u8FFD\u8E2A</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
+      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">\u8D70\u52BF\u8FFD\u8E2A</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-upcoming-toggle">\u672A\u5F00\u59CB (0) \u25B8</button><div class="tm-hty-matches-upcoming-list" style="display:none"></div></div><div class="tm-hty-matches-watch" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-watch-toggle">\u5173\u6CE8\u533A (0) \u25B8</button><div class="tm-hty-matches-watch-list" style="display:none"></div></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
       panel.querySelector(".tm-hty-head").addEventListener("click", function(e) {
         if (e.target.closest(".tm-hty-collapse") || e.target.closest(".tm-hty-login")) return;
         togglePanelCollapsed();
@@ -9188,6 +9925,16 @@
         });
       }
       panel.addEventListener("click", function(e) {
+        if (e.target.closest(".tm-hty-upcoming-toggle")) {
+          e.stopPropagation();
+          toggleUpcomingMatchesCollapsed(panel);
+          return;
+        }
+        if (e.target.closest(".tm-hty-watch-toggle")) {
+          e.stopPropagation();
+          toggleWatchMatchesCollapsed(panel);
+          return;
+        }
         if (e.target.closest(".tm-hty-ended-toggle")) {
           e.stopPropagation();
           toggleEndedMatchesCollapsed(panel);
@@ -9211,11 +9958,15 @@
         if (actionBtn.dataset.action === "open-cart") manualOpenCart();
         if (actionBtn.dataset.action === "test-bet") testBet03();
         if (actionBtn.dataset.action === "upload-match-bets") manualUploadMatchBetHistory();
+        if (actionBtn.dataset.action === "run-strategy") {
+          runManualStrategyBet(actionBtn.getAttribute("data-rec-hash") || "");
+        }
         if (actionBtn.dataset.action === "refresh-strategy") {
           loadActiveMatches(true);
           loadStrategies(true);
         }
       });
+      setupMatchTipWatch(panel);
       document.body.appendChild(panel);
       setupRouteWatcher();
       setupManualCartPanelWatch();

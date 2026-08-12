@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.80
+// @version      1.9.82
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -26,7 +26,7 @@
         checkInterval: 1000
     };
 
-    const JZ_STYLE_ID = 'tm500-jz-quick-style-167';
+    const JZ_STYLE_ID = 'tm500-jz-quick-style-168';
     const JZ_WRAP_ID = 'tm500-jz-quick-filters';
     /** 快捷按钮相对表格右缘外推的间距（避免与表格可点区域重叠） */
     const JZ_LEFT_GAP = 16;
@@ -50,8 +50,10 @@
     function injectJiaozhanQuickStyle() {
         const legacy = document.getElementById('tm500-jz-quick-style');
         const legacy166 = document.getElementById('tm500-jz-quick-style-166');
+        const legacy167 = document.getElementById('tm500-jz-quick-style-167');
         if (legacy) legacy.remove();
         if (legacy166) legacy166.remove();
+        if (legacy167) legacy167.remove();
         if (document.getElementById(JZ_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = JZ_STYLE_ID;
@@ -141,15 +143,18 @@
             '#' + JZ_WRAP_ID + ' button[data-jz="2"].tm500-jz-on:hover{' +
             'background:linear-gradient(180deg,#aacff0 0%,#7ab0df 100%);' +
             '}' +
-            '#' + JZ_WRAP_ID + ' button[data-jz="copy"]{' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy"],' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy-table"]{' +
             'color:#5c4a28;' +
             'background:linear-gradient(180deg,#fff3d4 0%,#ffe8a8 100%);' +
             'opacity:1;filter:saturate(1) brightness(1);font-weight:600;' +
             '}' +
-            '#' + JZ_WRAP_ID + ' button[data-jz="copy"]:hover:not(:disabled){' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy"]:hover:not(:disabled),' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy-table"]:hover:not(:disabled){' +
             'background:linear-gradient(180deg,#fff8e6 0%,#ffefb8 100%);' +
             '}' +
-            '#' + JZ_WRAP_ID + ' button[data-jz="copy"]:disabled{' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy"]:disabled,' +
+            '#' + JZ_WRAP_ID + ' button[data-jz="copy-table"]:disabled{' +
             'opacity:.55;cursor:wait;' +
             '}';
         document.head.appendChild(s);
@@ -197,7 +202,7 @@
         if (isJiaozhanWantHomeSame()) cur = '2';
         host.querySelectorAll('button[data-jz]').forEach(function(btn) {
             const v = btn.getAttribute('data-jz');
-            if (v === 'copy') return;
+            if (v === 'copy' || v === 'copy-table') return;
             if (v === cur) {
                 btn.classList.add('tm500-jz-on');
                 btn.setAttribute('aria-pressed', 'true');
@@ -875,6 +880,18 @@
             triggerCopyJiaozhanHandicap(copyBtn);
         });
         wrap.appendChild(copyBtn);
+
+        const copyTableBtn = document.createElement('button');
+        copyTableBtn.type = 'button';
+        copyTableBtn.textContent = '复制表格';
+        copyTableBtn.setAttribute('data-jz', 'copy-table');
+        copyTableBtn.setAttribute('title', '复制当前交战表可见行（不切换筛选）：联赛|日期|比分|初盘|终盘');
+        copyTableBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            runCopyJiaozhanHandicap(copyTableBtn);
+        });
+        wrap.appendChild(copyTableBtn);
 
         document.body.appendChild(wrap);
 
@@ -3271,8 +3288,9 @@
 
     function formatJiaozhanYapanCopyLine(o) {
         if (!o || typeof o !== 'object') return '';
-        const h = String(o.HOMEMONEYLINE != null ? o.HOMEMONEYLINE : '').trim();
-        const a = String(o.AWAYMONEYLINE != null ? o.AWAYMONEYLINE : '').trim();
+        // 初盘 AJAX 常带 3 位小数，与页面展示一致统一为 2 位
+        const h = formatJiaozhanOddsTwoDecimals(String(o.HOMEMONEYLINE != null ? o.HOMEMONEYLINE : '').trim());
+        const a = formatJiaozhanOddsTwoDecimals(String(o.AWAYMONEYLINE != null ? o.AWAYMONEYLINE : '').trim());
         const mid = formatJiaozhanYapanHandicapNum(o);
         if (!h && !mid && !a) return '';
         const parts = [];
@@ -3305,9 +3323,9 @@
     function buildJiaozhanYapanCopyTriple(h, midRaw, a, td) {
         const mid = normalizeJiaozhanHandicapMidForCopy(midRaw, td, h, a);
         const parts = [];
-        if (h) parts.push(h);
+        if (h) parts.push(formatJiaozhanOddsTwoDecimals(h));
         if (mid) parts.push(mid);
-        if (a) parts.push(a);
+        if (a) parts.push(formatJiaozhanOddsTwoDecimals(a));
         return parts.join(' ');
     }
 
@@ -3324,7 +3342,9 @@
             else if (p && /[\u4e00-\u9fff]/.test(p)) cn.push(p);
         }
         if (decs.length >= 3) {
-            return decs[0] + ' ' + formatJiaozhanHandicapSignedDisplay(decs[1]) + ' ' + decs[2];
+            return formatJiaozhanOddsTwoDecimals(decs[0]) + ' ' +
+                formatJiaozhanHandicapSignedDisplay(decs[1]) + ' ' +
+                formatJiaozhanOddsTwoDecimals(decs[2]);
         }
         if (decs.length === 2) {
             const midRaw = cn.length ? cn.join('') : '';

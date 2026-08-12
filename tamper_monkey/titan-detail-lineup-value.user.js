@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.5.1
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）。
+// @version      1.6.0
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -139,6 +139,30 @@
     return sign + formatMoney(Math.abs(d), unit);
   }
 
+  /** 身价倍数：较高一方相对较低一方，如「主 1.8倍」「客 3.2倍」 */
+  function formatRatio(home, away) {
+    if (!Number.isFinite(home) || !Number.isFinite(away)) {
+      return { text: '-', side: '' };
+    }
+    if (home <= 0 && away <= 0) return { text: '-', side: '' };
+    if (home <= 0) return { text: '客 ∞', side: 'a' };
+    if (away <= 0) return { text: '主 ∞', side: 'h' };
+
+    const lo = Math.min(home, away);
+    const hi = Math.max(home, away);
+    const r = hi / lo;
+    if (r < 1.02) return { text: '持平', side: '' };
+
+    const num =
+      r >= 100
+        ? r.toFixed(0)
+        : r >= 10
+          ? r.toFixed(1).replace(/\.0$/, '')
+          : r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    if (home >= away) return { text: '主 ' + num + '倍', side: 'h' };
+    return { text: '客 ' + num + '倍', side: 'a' };
+  }
+
   function teamNames() {
     const box = document.getElementById('matchBox2');
     const scope = box ? box.closest('#matchData, #content, .content') || document : document;
@@ -270,6 +294,13 @@
         const a = stats.away[g.key];
         const hPx = barHeightPx(h, globalMax);
         const aPx = barHeightPx(a, globalMax);
+        const ratio = formatRatio(h, a);
+        const ratioClass =
+          ratio.side === 'h'
+            ? ' tm-lv-ratio-h'
+            : ratio.side === 'a'
+              ? ' tm-lv-ratio-a'
+              : '';
         return (
           '<div class="tm-lv-cluster">' +
           '<div class="tm-lv-bars">' +
@@ -280,6 +311,11 @@
           escHtml(g.label) +
           '<span class="tm-lv-xsub">' +
           escHtml(g.sub) +
+          '</span>' +
+          '<span class="tm-lv-ratio' +
+          ratioClass +
+          '" title="身价倍数（较高方 / 较低方）">' +
+          escHtml(ratio.text) +
           '</span></div></div>'
         );
       })
@@ -598,6 +634,26 @@
       'font-size: 9px;' +
       'font-weight: 400;' +
       'color: #94a3b8;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-ratio {' +
+      'display: block;' +
+      'margin-top: 3px;' +
+      'font-size: 11px;' +
+      'font-weight: 700;' +
+      'line-height: 1.2;' +
+      'color: #64748b;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-ratio-h {' +
+      'color: #15803d;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-ratio-a {' +
+      'color: #0369a1;' +
       '}';
     (document.head || document.documentElement).appendChild(style);
   }

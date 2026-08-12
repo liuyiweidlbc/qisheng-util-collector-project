@@ -1,5 +1,7 @@
 # DoH (DNS over HTTPS) 手动设置指南
 
+> 在 `doh_v1/client/` 目录下执行下列命令。
+
 ## 方案：使用 Cloudflared
 
 Cloudflared 是 Cloudflare 提供的工具，可以在本地创建一个 DoH 代理，绕过运营商的 DNS 劫持。
@@ -7,7 +9,7 @@ Cloudflared 是 Cloudflare 提供的工具，可以在本地创建一个 DoH 代
 ## 快速设置（使用脚本）
 
 ```powershell
-# 以管理员身份运行PowerShell
+# 以管理员身份运行PowerShell（当前目录为 client/）
 .\setup_doh_complete.ps1
 ```
 
