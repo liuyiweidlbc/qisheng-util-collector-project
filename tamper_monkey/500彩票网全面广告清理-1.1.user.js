@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.82
+// @version      1.9.83
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -4470,6 +4470,79 @@
         return jzAny ? String(jzAny.value) : null;
     }
 
+    /** 站点 getZhanji 用 jQuery attr("checked")，必须同步 attribute，否则同联赛请求会串/变少 */
+    function setZhanjiLeagueCheckbox(cb, on) {
+        if (!cb) return;
+        cb.checked = !!on;
+        if (window.jQuery) {
+            const $cb = window.jQuery(cb);
+            if (on) $cb.attr('checked', 'checked');
+            else $cb.removeAttr('checked');
+            if (typeof $cb.prop === 'function') $cb.prop('checked', !!on);
+        } else if (on) {
+            cb.setAttribute('checked', 'checked');
+        } else {
+            cb.removeAttribute('checked');
+        }
+    }
+
+    /**
+     * 近期战绩 / 半全场等有 limit 下拉的块：同联赛刷新时保持 ≥10 场（默认 10；已选 15 保留）。
+     * 避免 limit 落到原生「6场」或 attr 异常导致可见场次变少。
+     */
+    function ensureZhanjiRecentFormLimitAtLeastTen(panel, side) {
+        if (!panel || (panel.zjMid !== '0' && panel.zjMid !== '1')) return;
+        const emId = panel.zjMid === '0' ? ('limit_zj_' + side) : ('limit_zj1_' + side);
+        const em = document.getElementById(emId);
+        if (!em) return;
+        let v = parseInt(em.getAttribute('val'), 10);
+        if (!v || v < 1) v = 10;
+        if (v >= 10) return;
+        em.setAttribute('val', '10');
+        if (window.jQuery) window.jQuery(em).attr('val', '10');
+        const raw = (em.textContent || '').trim();
+        em.textContent = /\d/.test(raw) ? raw.replace(/\d+/, '10') : '10场';
+    }
+
+    /** 同联赛开启时改写 getZhanji/getZhanji1 的 POST：强制仅本场联赛 + limit≥10 */
+    function withZhanjiSameLeaguePostPatch(fn) {
+        const lid = getZhanjiFixtureLeagueId();
+        if (!lid || !window.jQuery || typeof window.jQuery.post !== 'function') {
+            return fn();
+        }
+        const $ = window.jQuery;
+        const saved = $.post;
+        let restored = false;
+        const restore = function() {
+            if (!restored) {
+                $.post = saved;
+                restored = true;
+            }
+        };
+        $.post = function(url, v, success, dataType) {
+            const u = String(url || '');
+            const isZj = /shuju_zhanji\.php/.test(u) || /shuju_zhanji1\.php/.test(u);
+            if (isZj && v && typeof v === 'object') {
+                let lim = parseInt(v.limit, 10);
+                if (!lim || lim < 10) v.limit = 10;
+                if (!v.match || typeof v.match !== 'object') v.match = {};
+                const match = v.match;
+                let k;
+                for (k in match) {
+                    if (!Object.prototype.hasOwnProperty.call(match, k)) continue;
+                    match[k] = String(k) === String(lid) ? 1 : -1;
+                }
+                match[lid] = 1;
+            }
+            return saved.call(this, url, v, success, dataType);
+        };
+        try {
+            return fn();
+        } finally {
+            restore();
+        }
+    }
+
     function restoreAllZhanjiLeagueCheckboxes() {
         ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
             const fn = window[panel.getFn];
@@ -4480,7 +4553,7 @@
                 const boxes = root.querySelectorAll('input.zj' + panel.zjMid + '_' + side);
                 if (!boxes.length) return;
                 boxes.forEach(function(cb) {
-                    cb.checked = true;
+                    setZhanjiLeagueCheckbox(cb, true);
                 });
                 fn(side);
             });
@@ -4490,23 +4563,26 @@
     function applyZhanjiSameLeagueOnly() {
         const lid = getZhanjiFixtureLeagueId();
         if (!lid) return;
-        ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
-            const fn = window[panel.getFn];
-            if (typeof fn !== 'function') return;
-            [0, 1].forEach(function(side) {
-                const root = document.getElementById(panel.teamIds[side]);
-                if (!root) return;
-                const boxes = root.querySelectorAll('input.zj' + panel.zjMid + '_' + side);
-                if (!boxes.length) return;
-                let hit = false;
-                boxes.forEach(function(cb) {
-                    if (String(cb.value) === lid) hit = true;
+        withZhanjiSameLeaguePostPatch(function() {
+            ZHANJI_SAME_LEAGUE_PANELS.forEach(function(panel) {
+                const fn = window[panel.getFn];
+                if (typeof fn !== 'function') return;
+                [0, 1].forEach(function(side) {
+                    const root = document.getElementById(panel.teamIds[side]);
+                    if (!root) return;
+                    const boxes = root.querySelectorAll('input.zj' + panel.zjMid + '_' + side);
+                    if (!boxes.length) return;
+                    let hit = false;
+                    boxes.forEach(function(cb) {
+                        if (String(cb.value) === lid) hit = true;
+                    });
+                    if (!hit) return;
+                    ensureZhanjiRecentFormLimitAtLeastTen(panel, side);
+                    boxes.forEach(function(cb) {
+                        setZhanjiLeagueCheckbox(cb, String(cb.value) === lid);
+                    });
+                    fn(side);
                 });
-                if (!hit) return;
-                boxes.forEach(function(cb) {
-                    cb.checked = String(cb.value) === lid;
-                });
-                fn(side);
             });
         });
     }

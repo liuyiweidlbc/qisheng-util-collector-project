@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Forebet Predictions Debug
 // @namespace    https://www.forebet.com/
-// @version      1.4.7
-// @description  Forebet predictions: top-5, UCL/UEL/UECL, WC, Championship + upload + extra leagues
+// @version      1.4.8
+// @description  Forebet predictions: top-5, UCL/UEL/UECL, WC, Championship + upload + extra leagues + ad block
 // @match        https://www.forebet.com/*
 // @match        http://www.forebet.com/*
 // @exclude      *://*/football/matches/*
@@ -11,7 +11,7 @@
 // @exclude      *://*/contact-us*
 // @exclude      *://*/terms-of-use*
 // @exclude      *://*/privacy-policy*
-// @run-at       document-end
+// @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
@@ -20,7 +20,34 @@
 
   const LOG_PREFIX = '[Forebet Debug]';
   const PANEL_ID = 'fb-livescores-debug-panel';
-  const SCRIPT_VER = '1.4.7';
+  const SCRIPT_VER = '1.4.8';
+  const AD_BLOCK_STYLE_ID = 'fb-livescores-adblock-style';
+  const AD_SEL = [
+    'ins.adsbygoogle',
+    'ins.adsbygoogle-noablate',
+    '.adsbygoogle-noablate',
+    '.google-auto-placed',
+    '#google_vignette',
+    '[data-anchor-status]',
+    'iframe[id^="aswift_"]',
+    'iframe[id^="google_ads_iframe_"]',
+    'iframe[id^="google_ads_"]',
+    'div[id^="google_ads_iframe_"]',
+    'div[id^="aswift_"]',
+    'iframe[src*="googlesyndication"]',
+    'iframe[src*="doubleclick.net"]',
+    'iframe[src*="googletagservices"]',
+    'iframe[src*="pagead2.google"]',
+    'iframe[src*="criteo.com"]',
+    'iframe[src*="ctnsnet.com"]',
+    'div[data-google-query-id]',
+    '[id^="google_ads_frame"]',
+  ].join(',');
+  const AD_HIDE_CSS = `
+    ${AD_SEL}{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;
+      min-height:0!important;width:0!important;max-width:0!important;overflow:hidden!important;
+      opacity:0!important;pointer-events:none!important;position:absolute!important;left:-9999px!important}
+  `;
   const KAZAKH_TEAM_HINT_RE =
     /\b(turan|ekibastuz|kairat|astana|ordabasy|aktobe|tobol|atyrau|shakhter|kaisar|okzhetpes|zetysu|altai|akbulak|taraz|elimai|kaspiy)\b/i;
   /** Non-England countries that also use "Premier League" in the name */
@@ -107,6 +134,92 @@
   let domWatchTimer = null;
   let leagueBarSearchBlurTimer = null;
   let panelCollapsed = false;
+  let adSweepTimer = null;
+  let adWatchStarted = false;
+
+  function isAdBlockSkip(el) {
+    if (!el || el.nodeType !== 1) return true;
+    if (el.id === PANEL_ID || el.id === AD_BLOCK_STYLE_ID) return true;
+    return !!el.closest?.(`#${PANEL_ID}`);
+  }
+
+  function injectAdBlockStyle() {
+    if (document.getElementById(AD_BLOCK_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = AD_BLOCK_STYLE_ID;
+    style.textContent = AD_HIDE_CSS;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function neutralizeAdsByGoogle() {
+    try {
+      const s = document.createElement('script');
+      s.textContent =
+        '(function(){try{var n={push:function(){},loaded:true,pauseAdRequests:1};' +
+        'if(Array.isArray(window.adsbygoogle))window.adsbygoogle.length=0;' +
+        'window.adsbygoogle=n;' +
+        'Object.defineProperty(window,"adsbygoogle",{configurable:true,get:function(){return n},set:function(){}});' +
+        '}catch(e){try{window.adsbygoogle={push:function(){}};}catch(e2){}}})();';
+      (document.documentElement || document.head).appendChild(s);
+      s.remove();
+    } catch {
+      /* page CSP may block; CSS/DOM hide still applies */
+    }
+  }
+
+  function resetAnchorOffset() {
+    for (const el of [document.documentElement, document.body]) {
+      if (!el) continue;
+      const top = parseInt(el.style.paddingTop || el.style.marginTop, 10);
+      if (top > 20) {
+        el.style.setProperty('padding-top', '0px', 'important');
+        el.style.setProperty('margin-top', '0px', 'important');
+      }
+    }
+  }
+
+  function sweepAds(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll(AD_SEL).forEach((el) => {
+      if (isAdBlockSkip(el)) return;
+      el.remove();
+    });
+    resetAnchorOffset();
+  }
+
+  function scheduleAdSweep() {
+    clearTimeout(adSweepTimer);
+    adSweepTimer = setTimeout(() => sweepAds(document), 80);
+  }
+
+  function startAdBlockWatch() {
+    if (adWatchStarted) return;
+    adWatchStarted = true;
+    neutralizeAdsByGoogle();
+    sweepAds(document);
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === 'attributes') {
+          resetAnchorOffset();
+          continue;
+        }
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1 || isAdBlockSkip(node)) continue;
+          if (node.matches?.(AD_SEL)) {
+            node.remove();
+            continue;
+          }
+          if (node.querySelector?.(AD_SEL)) scheduleAdSweep();
+        }
+      }
+    });
+    mo.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style'],
+    });
+  }
 
   function isListPage() {
     return !/\/football\/matches\//i.test(location.pathname);
@@ -1673,6 +1786,17 @@
   function setPanelCollapsed(panel, collapsed) {
     panelCollapsed = collapsed;
     panel.classList.toggle('collapsed', collapsed);
+    if (collapsed) {
+      panel.style.setProperty('width', 'auto', 'important');
+      panel.style.setProperty('height', 'auto', 'important');
+      panel.style.setProperty('min-width', '0', 'important');
+      panel.style.setProperty('min-height', '0', 'important');
+    } else {
+      panel.style.removeProperty('width');
+      panel.style.removeProperty('height');
+      panel.style.removeProperty('min-width');
+      panel.style.removeProperty('min-height');
+    }
     const btn = panel.querySelector('[data-action="collapse"]');
     if (btn) btn.textContent = collapsed ? 'Expand' : 'Collapse';
     const leagueBar = panel.querySelector('#fb-livescores-league-bar');
@@ -1738,11 +1862,16 @@
         background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;
         box-shadow:0 8px 32px rgba(0,0,0,.45);font:12px/1.4 system-ui,sans-serif;
         display:flex;flex-direction:column;overflow:hidden}
-      #${PANEL_ID}.collapsed{height:auto;width:max-content;max-width:calc(100vw - 24px)}
-      #${PANEL_ID}.collapsed .hdr{border-bottom:none;flex-wrap:nowrap;gap:8px;padding:6px 10px}
-      #${PANEL_ID}.collapsed .sub,#${PANEL_ID}.collapsed .title-extra,#${PANEL_ID}.collapsed .hdr-extra-btn{display:none!important}
-      #${PANEL_ID}.collapsed .hdr button{margin-left:0}
-      #${PANEL_ID}.collapsed .upload-bar,#${PANEL_ID}.collapsed .league-bar,#${PANEL_ID}.collapsed .body{display:none!important}
+      #${PANEL_ID}.collapsed{width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;
+        max-width:none!important;align-items:flex-start}
+      #${PANEL_ID}.collapsed .hdr{border-bottom:none;flex-wrap:nowrap;justify-content:flex-start;gap:6px;
+        padding:4px 8px;width:max-content;max-width:none;cursor:pointer}
+      #${PANEL_ID}.collapsed .sub,#${PANEL_ID}.collapsed .title-extra,#${PANEL_ID}.collapsed .hdr-extra-btn,
+      #${PANEL_ID}.collapsed .hdr strong{display:none!important}
+      #${PANEL_ID}.collapsed .hdr button{margin-left:0;padding:2px 8px}
+      #${PANEL_ID}.collapsed .upload-bar,#${PANEL_ID}.collapsed .league-bar,#${PANEL_ID}.collapsed .body{
+        display:none!important;height:0!important;min-height:0!important;flex:0 0 0!important;overflow:hidden!important;
+        pointer-events:none!important}
       #${PANEL_ID} .hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
         gap:6px;padding:8px 12px;background:#1e293b;border-bottom:1px solid #334155}
       #${PANEL_ID} .hdr button{margin-left:6px;padding:4px 10px;border-radius:6px;
@@ -1898,8 +2027,12 @@
     urlInp.addEventListener('blur', () => readUploadConfigFromPanel());
     btnUpload.addEventListener('click', () => uploadRows());
     btnR.onclick = () => scheduleParse(0);
-    btnT.addEventListener('click', () => {
+    btnT.addEventListener('click', (e) => {
+      e.stopPropagation();
       setPanelCollapsed(panel, !panel.classList.contains('collapsed'));
+    });
+    hdr.addEventListener('click', () => {
+      if (panel.classList.contains('collapsed')) setPanelCollapsed(panel, false);
     });
     setPanelCollapsed(panel, panelCollapsed);
     syncUploadControls(uploadCfg);
@@ -2023,5 +2156,15 @@
     }, 5000);
   }
 
-  boot();
+  function whenReady(fn) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn, { once: true });
+    } else {
+      fn();
+    }
+  }
+
+  injectAdBlockStyle();
+  startAdBlockWatch();
+  whenReady(boot);
 })();
