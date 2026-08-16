@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-06-08.8
+// @version 2026-08-16.2
 // @description try to take over the world! Enhanced with timeout and error logging.
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
@@ -853,6 +853,21 @@
             'box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);' +
             'box-sizing: border-box;' +
             'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
+            'transition: width 0.22s ease, height 0.22s ease, border-radius 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease;' +
+            '}' +
+            '#' + PANEL_ID + '.tm-8868-collapsed {' +
+            'width: 44px;' +
+            'height: 44px;' +
+            'min-width: 44px;' +
+            'border: none;' +
+            'border-radius: 50%;' +
+            'background: radial-gradient(circle at 32% 28%, #ecfdf5 0%, #86efac 46%, #4ade80 100%);' +
+            'box-shadow: 0 6px 18px rgba(22, 163, 74, 0.32), inset 0 -8px 12px rgba(21, 128, 61, 0.16), inset 4px 4px 10px rgba(255,255,255,0.5);' +
+            'cursor: pointer;' +
+            '}' +
+            '#' + PANEL_ID + '.tm-8868-collapsed:hover {' +
+            'transform: scale(1.08);' +
+            'box-shadow: 0 8px 22px rgba(22, 163, 74, 0.4), inset 0 -8px 12px rgba(21, 128, 61, 0.16), inset 4px 4px 10px rgba(255,255,255,0.55);' +
             '}' +
             '#' + PANEL_ID + ' .tm-8868-head {' +
             'display: flex;' +
@@ -869,7 +884,28 @@
             'user-select: none;' +
             '}' +
             '#' + PANEL_ID + '.tm-8868-collapsed .tm-8868-head {' +
+            'width: 100%;' +
+            'height: 100%;' +
+            'padding: 0;' +
+            'background: transparent;' +
             'border-bottom: none;' +
+            'justify-content: center;' +
+            '}' +
+            '#' + PANEL_ID + '.tm-8868-collapsed .tm-8868-title,' +
+            '#' + PANEL_ID + '.tm-8868-collapsed .tm-8868-toggle {' +
+            'display: none;' +
+            '}' +
+            '#' + PANEL_ID + ' .tm-8868-ball-label {' +
+            'display: none;' +
+            '}' +
+            '#' + PANEL_ID + '.tm-8868-collapsed .tm-8868-ball-label {' +
+            'display: block;' +
+            'font-size: 12px;' +
+            'font-weight: 700;' +
+            'line-height: 1;' +
+            'letter-spacing: 0.5px;' +
+            'color: #166534;' +
+            'text-shadow: 0 1px 0 rgba(255,255,255,0.45);' +
             '}' +
             '#' + PANEL_ID + ' .tm-8868-toggle {' +
             'display: inline-flex;' +
@@ -1191,6 +1227,7 @@
         panel.innerHTML =
             '<div class="tm-8868-head">' +
             '<span class="tm-8868-title">8868 上传面板</span>' +
+            '<span class="tm-8868-ball-label">上传</span>' +
             '<span class="tm-8868-toggle">▾</span>' +
             '</div>' +
             '<div class="tm-8868-body">' +
