@@ -465,6 +465,8 @@ export function bootApp() {
       let panelCollapsed = false;
       let panelCollapsedBeforeBet = false;
       let panelBetAutoCollapsed = false;
+      let panelHistoryMode = false;
+      let panelCollapsedBeforeHistory = false;
       let manualCartPanelWatchReady = false;
       let lastCartOpenForPanel = false;
       let betResult = 'pending';
@@ -1396,6 +1398,48 @@ export function bootApp() {
       function isInplayListPage() {
           const path = window.location.pathname.replace(/\/$/, '');
           return /\/sportEvents\/inplay\/football$/i.test(path);
+      }
+  
+      /** 站点投注记录页（SPA：/history/order?menu=sport&bet=all&tab=0） */
+      function isHistoryOrderPage() {
+          return /\/history(\/|$)/i.test(window.location.pathname || '');
+      }
+  
+      function emitQuantRouteMode(onHistory) {
+          try {
+              window.__tmHtyOnHistory = !!onHistory;
+              window.dispatchEvent(new CustomEvent('tm-hty-quant-route', {
+                  detail: { history: !!onHistory }
+              }));
+          } catch (e) { /* ignore */ }
+      }
+  
+      function applyQuantPanelRouteMode() {
+          const onHistory = isHistoryOrderPage();
+          emitQuantRouteMode(onHistory);
+          let panel = document.getElementById(PANEL_ID);
+          if (!panel) {
+              if (document.body && !document.getElementById(PANEL_ID)) createPanel();
+              panel = document.getElementById(PANEL_ID);
+              if (!panel) return;
+          }
+          if (onHistory) {
+              if (!panelHistoryMode) {
+                  panelHistoryMode = true;
+                  panelCollapsedBeforeHistory = panelCollapsed;
+                  setPanelCollapsed(true);
+              } else {
+                  panel.classList.toggle('tm-hty-ball', panelCollapsed);
+              }
+              return;
+          }
+          if (panelHistoryMode) {
+              panelHistoryMode = false;
+              setPanelCollapsed(!!panelCollapsedBeforeHistory);
+              renderPanel(true);
+              return;
+          }
+          panel.classList.remove('tm-hty-ball');
       }
   
       function isStrandedSportEventsPage() {
@@ -3619,6 +3663,7 @@ export function bootApp() {
       }
   
       function maybeTriggerAutoBet(renderPanelAfter) {
+          if (isHistoryOrderPage()) return;
           syncTargetOptionFromStates();
           if (renderPanelAfter) renderPanel(false, false);
           if (placing || autoBetInFlight) return;
@@ -4849,6 +4894,7 @@ export function bootApp() {
       }
   
       function shouldAllowAutoNavigation(reason) {
+          if (isHistoryOrderPage()) return false;
           if (shouldBlockMatchAutoNav()) {
               console.log('[hty-inplay] 未登录/登录中，跳过导航', reason || '');
               return false;
@@ -5209,6 +5255,14 @@ export function bootApp() {
                       },
                   },
                   {
+                      name: 'history-stay',
+                      run: async function () {
+                          if (!isHistoryOrderPage()) return false;
+                          applyQuantPanelRouteMode();
+                          return true;
+                      },
+                  },
+                  {
                       name: 'bet-submitted-finish',
                       run: async function () {
                           if (!(placing && isBetSubmittedDrawerVisible())) return false;
@@ -5350,6 +5404,11 @@ export function bootApp() {
           const nextTab = isOnInplayMatchPage() ? getActiveMarketCategoryTab() : '';
           if (href === lastWatchedUrl) return;
           lastWatchedUrl = href;
+          applyQuantPanelRouteMode();
+          if (isHistoryOrderPage()) {
+              console.log('[hty-inplay] 投注记录页，收起量化面板');
+              return;
+          }
           if (isOnInplayMatchPage()) {
               syncUserManualCategoryTabFromUrl(prevTab, nextTab);
               lastWatchedCategoryTab = nextTab;
@@ -5358,6 +5417,7 @@ export function bootApp() {
           if (newId) {
               onMatchRouteChange(newId);
               rememberCurrentMatchReturnUrl();
+              if (!started) start();
               return;
           }
           if (isStrandedSportEventsPage()) {
@@ -9833,6 +9893,8 @@ export function bootApp() {
               'function onBetResponse(url,body,text){if(!/\\/product\\/game\\/bet/i.test(url||""))return;try{postBetResult(url,body,JSON.parse(text||"{}"))}catch(e){postBetResult(url,body,{code:-1,msg:"parse error"})}}' +
               'function isOrdersReportUrl(url){return /thirdparty-report\\/user\\/orders\\/sport/i.test(url||"")}' +
               'function postOrdersReport(url,headers,text){try{window.postMessage({source:HOOK_SRC,type:"orders-report",url:url||"",text:text||"",apiBase:apiBase(url),headers:hdrObj(headers||{}),ts:Date.now()},"*")}catch(e){}}' +
+              'function isUploadCaptureUrl(url){return /thirdparty-report\\/user\\/orders\\/sport/i.test(url||"")||/socbet/i.test(url||"")||/platform\\/payment\\/wallets\\/list/i.test(url||"")||/\\/product\\/cashout\\/setting/i.test(url||"")}' +
+              'function postUploadCapture(url,headers,text){try{window.postMessage({source:HOOK_SRC,type:"upload-capture",url:url||"",text:text||"",apiBase:apiBase(url),headers:hdrObj(headers||{}),ts:Date.now()},"*")}catch(e){}}' +
               'function isInplayMatchUrl(url){return /\\/product\\/business\\/sport\\/inplay\\/match/i.test(url||"")}' +
               'function parseInplayMatchId(url){try{var u=new URL(url,location.origin);return u.searchParams.get("iid")||u.searchParams.get("matchId")||""}catch(e){return ""}}' +
               'function postInplayMatchStatus(url,text){try{var data=JSON.parse(text||"{}");var code=String(data.code||"");var msg=String(data.msg||"");if(code==="40001"||/MATCH\\s*NOT\\s*FOUND/i.test(msg)){window.postMessage({source:HOOK_SRC,type:"inplay-match-gone",url:url||"",matchId:parseInplayMatchId(url),code:code,msg:msg,ts:Date.now()},"*")}}catch(e){}}' +
@@ -9846,12 +9908,13 @@ export function bootApp() {
               'if(/\\/product\\/game\\/bet/i.test(url)){xhr.addEventListener("load",function(){try{onBetResponse(url,reqBody,xhr.responseText||"")}catch(e){}})}' +
               'if(isInplayMatchUrl(url)){xhr.addEventListener("load",function(){try{postInplayMatchStatus(url,xhr.responseText||"")}catch(e){}})}' +
               'if(isOrdersReportUrl(url)){xhr.addEventListener("load",function(){try{postOrdersReport(url,hdr,xhr.responseText||"")}catch(e){}})}' +
+              'if(isUploadCaptureUrl(url)){xhr.addEventListener("load",function(){try{postUploadCapture(url,hdr,xhr.responseText||"")}catch(e){}})}' +
               'return oSend.apply(this,arguments)};' +
               'var oFetch=window.fetch;' +
               'if(typeof oFetch==="function"){' +
               'window.fetch=function(input,init){var url="";try{url=absUrl(typeof input==="string"?input:(input&&input.url)||"")}catch(e){}' +
               'try{onPlatformRequest(url,hdrObj(init&&init.headers))}catch(e){}' +
-              'var ret=oFetch.apply(this,arguments);' +
+              'var ret=oFetch.apply(this,arguments).then(function(res){try{if(isUploadCaptureUrl(url)){var c=res.clone();c.text().then(function(t){postUploadCapture(url,hdrObj(init&&init.headers),t)}).catch(function(){})}}catch(e){}return res;});' +
               'if(/\\/product\\/game\\/bet/i.test(url)){' +
               'return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){onBetResponse(url,init&&init.body,t)}).catch(function(){})}catch(e){}return res;});' +
               '}' +
@@ -10482,6 +10545,7 @@ export function bootApp() {
       }
   
       function kickoffAutoBet() {
+          if (isHistoryOrderPage()) return;
           panelReady = true;
           renderPanel(true);
           maybeTriggerAutoBet(false);
@@ -10499,6 +10563,7 @@ export function bootApp() {
           if (!panel) return;
           panelCollapsed = !!collapsed;
           panel.classList.toggle('tm-hty-collapsed', panelCollapsed);
+          panel.classList.toggle('tm-hty-ball', panelCollapsed && isHistoryOrderPage());
           const btn = panel.querySelector('.tm-hty-collapse');
           if (btn) btn.textContent = panelCollapsed ? '▸' : '▾';
           syncOddsObserverState();
@@ -10563,12 +10628,26 @@ export function bootApp() {
               const style = document.createElement('style');
               style.id = STYLE_ID;
               style.textContent =
-                  '#' + PANEL_ID + '{position:fixed;right:16px;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);' +
+                  '#' + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);' +
                   'border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;' +
-                  'box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}' +
+                  'box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;' +
+                  'transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}' +
                   '#' + PANEL_ID + '.tm-hty-collapsed{width:auto;min-width:148px;}' +
                   '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-body,' +
                   '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-actions{display:none;}' +
+                  '#' + PANEL_ID + '.tm-hty-ball{width:44px;height:44px;min-width:44px;right:auto;left:16px;bottom:20px;border:none;' +
+                  'border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);' +
+                  'box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;}' +
+                  '#' + PANEL_ID + '.tm-hty-ball:hover{transform:scale(1.08);' +
+                  'box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-title,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-version,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-login,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-collapse{display:none;}' +
+                  '#' + PANEL_ID + ' .tm-hty-ball-label{display:none;}' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-ball-label{display:block;font-size:12px;font-weight:700;line-height:1;' +
+                  'letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}' +
                   '#' + PANEL_ID + ' .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}' +
                   '#' + PANEL_ID + ' .tm-hty-title{flex:1;}' +
                   '#' + PANEL_ID + ' .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}' +
@@ -10706,6 +10785,7 @@ export function bootApp() {
           panel.innerHTML =
               '<div class="tm-hty-head">' +
               '<span class="tm-hty-title">HTY 滚球量化<span class="tm-hty-version">v' + SCRIPT_VERSION + '</span></span>' +
+              '<span class="tm-hty-ball-label">量化</span>' +
               '<span class="tm-hty-login">检测中</span>' +
               '<button type="button" class="tm-hty-collapse" title="折叠/展开">▾</button>' +
               '</div>' +
@@ -10873,6 +10953,7 @@ export function bootApp() {
           loadActiveMatches(false);
           scheduleStrategyPoll();
           renderPanel(true);
+          applyQuantPanelRouteMode();
       }
   
       async function startAutoBetFlow() {
@@ -10988,6 +11069,10 @@ export function bootApp() {
           ensureWrongSportSectionGuard();
           if (isWrongSportSectionPage()) {
               recoverFromWrongSportSection('启动于非足球版块，统一拉回足球滚球列表');
+              return;
+          }
+          if (isHistoryOrderPage()) {
+              createPanel();
               return;
           }
           if (!matchId && isInplayListPage()) {

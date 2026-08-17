@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.15
+// @version      2.16.17
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/?(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/?(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/.+/
+// @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/history(\/.*)?(\?|#|$)/
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @connect      alert.socbeta.xyz
@@ -100,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.15";
+  var SCRIPT_VERSION = "2.16.17";
 
   // src/storage-keys.js
   var KEYS = {
@@ -791,6 +792,8 @@
     let panelCollapsed = false;
     let panelCollapsedBeforeBet = false;
     let panelBetAutoCollapsed = false;
+    let panelHistoryMode = false;
+    let panelCollapsedBeforeHistory = false;
     let manualCartPanelWatchReady = false;
     let lastCartOpenForPanel = false;
     let betResult = "pending";
@@ -1623,6 +1626,45 @@
     function isInplayListPage() {
       const path = window.location.pathname.replace(/\/$/, "");
       return /\/sportEvents\/inplay\/football$/i.test(path);
+    }
+    function isHistoryOrderPage() {
+      return /\/history(\/|$)/i.test(window.location.pathname || "");
+    }
+    function emitQuantRouteMode(onHistory) {
+      try {
+        window.__tmHtyOnHistory = !!onHistory;
+        window.dispatchEvent(new CustomEvent("tm-hty-quant-route", {
+          detail: { history: !!onHistory }
+        }));
+      } catch (e) {
+      }
+    }
+    function applyQuantPanelRouteMode() {
+      const onHistory = isHistoryOrderPage();
+      emitQuantRouteMode(onHistory);
+      let panel = document.getElementById(PANEL_ID);
+      if (!panel) {
+        if (document.body && !document.getElementById(PANEL_ID)) createPanel();
+        panel = document.getElementById(PANEL_ID);
+        if (!panel) return;
+      }
+      if (onHistory) {
+        if (!panelHistoryMode) {
+          panelHistoryMode = true;
+          panelCollapsedBeforeHistory = panelCollapsed;
+          setPanelCollapsed(true);
+        } else {
+          panel.classList.toggle("tm-hty-ball", panelCollapsed);
+        }
+        return;
+      }
+      if (panelHistoryMode) {
+        panelHistoryMode = false;
+        setPanelCollapsed(!!panelCollapsedBeforeHistory);
+        renderPanel(true);
+        return;
+      }
+      panel.classList.remove("tm-hty-ball");
     }
     function isStrandedSportEventsPage() {
       const path = window.location.pathname.replace(/\/$/, "") || "/";
@@ -3635,6 +3677,7 @@
       return targetOption;
     }
     function maybeTriggerAutoBet(renderPanelAfter) {
+      if (isHistoryOrderPage()) return;
       syncTargetOptionFromStates();
       if (renderPanelAfter) renderPanel(false, false);
       if (placing || autoBetInFlight) return;
@@ -4741,6 +4784,7 @@
       suppressNavigation(hold, reason || "\u767B\u5F55\u4E2D\u7981\u6B62\u8DF3\u8F6C");
     }
     function shouldAllowAutoNavigation(reason) {
+      if (isHistoryOrderPage()) return false;
       if (shouldBlockMatchAutoNav()) {
         console.log("[hty-inplay] \u672A\u767B\u5F55/\u767B\u5F55\u4E2D\uFF0C\u8DF3\u8FC7\u5BFC\u822A", reason || "");
         return false;
@@ -5083,6 +5127,14 @@
             }
           },
           {
+            name: "history-stay",
+            run: async function() {
+              if (!isHistoryOrderPage()) return false;
+              applyQuantPanelRouteMode();
+              return true;
+            }
+          },
+          {
             name: "bet-submitted-finish",
             run: async function() {
               if (!(placing && isBetSubmittedDrawerVisible())) return false;
@@ -5219,6 +5271,11 @@
       const nextTab = isOnInplayMatchPage() ? getActiveMarketCategoryTab() : "";
       if (href === lastWatchedUrl) return;
       lastWatchedUrl = href;
+      applyQuantPanelRouteMode();
+      if (isHistoryOrderPage()) {
+        console.log("[hty-inplay] \u6295\u6CE8\u8BB0\u5F55\u9875\uFF0C\u6536\u8D77\u91CF\u5316\u9762\u677F");
+        return;
+      }
       if (isOnInplayMatchPage()) {
         syncUserManualCategoryTabFromUrl(prevTab, nextTab);
         lastWatchedCategoryTab = nextTab;
@@ -5227,6 +5284,7 @@
       if (newId) {
         onMatchRouteChange(newId);
         rememberCurrentMatchReturnUrl();
+        if (!started) start();
         return;
       }
       if (isStrandedSportEventsPage()) {
@@ -9218,7 +9276,7 @@
       if (!root || root.dataset.htyInplayApiHook === "1") return;
       root.dataset.htyInplayApiHook = "1";
       const script = document.createElement("script");
-      script.textContent = "(function(){if(window.__htyInplayApiHook)return;window.__htyInplayApiHook=true;var HOOK_SRC=" + JSON.stringify(PAGE_HOOK_SRC) + ";var USR_SRC=" + JSON.stringify(PAGE_USR_SRC) + ';function absUrl(url){var t=String(url||"").trim();if(!t)return"";if(/^https?:\\/\\//i.test(t))return t;try{return new URL(t,location.origin).href}catch(e){return t}}function apiBase(url){var t=String(url||"").trim();if(!t)return"";try{return new URL(t).origin}catch(e){var m=t.match(/^(https?:\\/\\/[^/?#]+)/i);return m?m[1]:""}}function isPlatformUrl(url){return /\\/product\\/game\\/bet/i.test(url)||/\\/thirdparty-report\\//i.test(url)||/\\/platform\\/payment\\//i.test(url)||/\\/product\\/cashout\\//i.test(url)}function postBetResult(url,body,resp){try{window.postMessage({source:HOOK_SRC,type:"bet-result",url:url||"",requestBody:body,response:resp||null,ts:Date.now()},"*")}catch(e){}}function hdrObj(h){var o={};if(!h)return o;if(typeof Headers!=="undefined"&&h instanceof Headers){h.forEach(function(v,k){o[String(k).toLowerCase()]=v});return o}if(Array.isArray(h)){h.forEach(function(p){if(p&&p.length>=2)o[String(p[0]).toLowerCase()]=p[1]});return o}if(typeof h==="object"){Object.keys(h).forEach(function(k){o[String(k).toLowerCase()]=h[k]});return o}return o}function postCapture(base,headers){try{window.postMessage({source:HOOK_SRC,type:"capture",apiBase:base||"",headers:headers||{},ts:Date.now()},"*")}catch(e){}}function onBetResponse(url,body,text){if(!/\\/product\\/game\\/bet/i.test(url||""))return;try{postBetResult(url,body,JSON.parse(text||"{}"))}catch(e){postBetResult(url,body,{code:-1,msg:"parse error"})}}function isOrdersReportUrl(url){return /thirdparty-report\\/user\\/orders\\/sport/i.test(url||"")}function postOrdersReport(url,headers,text){try{window.postMessage({source:HOOK_SRC,type:"orders-report",url:url||"",text:text||"",apiBase:apiBase(url),headers:hdrObj(headers||{}),ts:Date.now()},"*")}catch(e){}}function isInplayMatchUrl(url){return /\\/product\\/business\\/sport\\/inplay\\/match/i.test(url||"")}function parseInplayMatchId(url){try{var u=new URL(url,location.origin);return u.searchParams.get("iid")||u.searchParams.get("matchId")||""}catch(e){return ""}}function postInplayMatchStatus(url,text){try{var data=JSON.parse(text||"{}");var code=String(data.code||"");var msg=String(data.msg||"");if(code==="40001"||/MATCH\\s*NOT\\s*FOUND/i.test(msg)){window.postMessage({source:HOOK_SRC,type:"inplay-match-gone",url:url||"",matchId:parseInplayMatchId(url),code:code,msg:msg,ts:Date.now()},"*")}}catch(e){}}function onPlatformRequest(url,headers){if(!isPlatformUrl(url))return;var base=apiBase(url);var h=hdrObj(headers);if(base)postCapture(base,h)}var oOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,url){this._htyMethod=String(m||"").toUpperCase();this._htyUrl=absUrl(url);this._htyHdr={};this._htyBody=null;return oOpen.apply(this,arguments)};var oSet=XMLHttpRequest.prototype.setRequestHeader;XMLHttpRequest.prototype.setRequestHeader=function(n,v){if(!this._htyHdr)this._htyHdr={};this._htyHdr[String(n).toLowerCase()]=v;return oSet.apply(this,arguments)};var oSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(body){this._htyBody=body;try{onPlatformRequest(this._htyUrl||"",this._htyHdr||{})}catch(e){}var xhr=this;var url=xhr._htyUrl||"";var reqBody=body;var hdr=xhr._htyHdr||{};if(/\\/product\\/game\\/bet/i.test(url)){xhr.addEventListener("load",function(){try{onBetResponse(url,reqBody,xhr.responseText||"")}catch(e){}})}if(isInplayMatchUrl(url)){xhr.addEventListener("load",function(){try{postInplayMatchStatus(url,xhr.responseText||"")}catch(e){}})}if(isOrdersReportUrl(url)){xhr.addEventListener("load",function(){try{postOrdersReport(url,hdr,xhr.responseText||"")}catch(e){}})}return oSend.apply(this,arguments)};var oFetch=window.fetch;if(typeof oFetch==="function"){window.fetch=function(input,init){var url="";try{url=absUrl(typeof input==="string"?input:(input&&input.url)||"")}catch(e){}try{onPlatformRequest(url,hdrObj(init&&init.headers))}catch(e){}var ret=oFetch.apply(this,arguments);if(/\\/product\\/game\\/bet/i.test(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){onBetResponse(url,init&&init.body,t)}).catch(function(){})}catch(e){}return res;});}if(isInplayMatchUrl(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){postInplayMatchStatus(url,t)}).catch(function(){})}catch(e){}return res;});}if(isOrdersReportUrl(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){postOrdersReport(url,hdrObj(init&&init.headers),t)}).catch(function(){})}catch(e){}return res;});}return ret;}}})();';
+      script.textContent = "(function(){if(window.__htyInplayApiHook)return;window.__htyInplayApiHook=true;var HOOK_SRC=" + JSON.stringify(PAGE_HOOK_SRC) + ";var USR_SRC=" + JSON.stringify(PAGE_USR_SRC) + ';function absUrl(url){var t=String(url||"").trim();if(!t)return"";if(/^https?:\\/\\//i.test(t))return t;try{return new URL(t,location.origin).href}catch(e){return t}}function apiBase(url){var t=String(url||"").trim();if(!t)return"";try{return new URL(t).origin}catch(e){var m=t.match(/^(https?:\\/\\/[^/?#]+)/i);return m?m[1]:""}}function isPlatformUrl(url){return /\\/product\\/game\\/bet/i.test(url)||/\\/thirdparty-report\\//i.test(url)||/\\/platform\\/payment\\//i.test(url)||/\\/product\\/cashout\\//i.test(url)}function postBetResult(url,body,resp){try{window.postMessage({source:HOOK_SRC,type:"bet-result",url:url||"",requestBody:body,response:resp||null,ts:Date.now()},"*")}catch(e){}}function hdrObj(h){var o={};if(!h)return o;if(typeof Headers!=="undefined"&&h instanceof Headers){h.forEach(function(v,k){o[String(k).toLowerCase()]=v});return o}if(Array.isArray(h)){h.forEach(function(p){if(p&&p.length>=2)o[String(p[0]).toLowerCase()]=p[1]});return o}if(typeof h==="object"){Object.keys(h).forEach(function(k){o[String(k).toLowerCase()]=h[k]});return o}return o}function postCapture(base,headers){try{window.postMessage({source:HOOK_SRC,type:"capture",apiBase:base||"",headers:headers||{},ts:Date.now()},"*")}catch(e){}}function onBetResponse(url,body,text){if(!/\\/product\\/game\\/bet/i.test(url||""))return;try{postBetResult(url,body,JSON.parse(text||"{}"))}catch(e){postBetResult(url,body,{code:-1,msg:"parse error"})}}function isOrdersReportUrl(url){return /thirdparty-report\\/user\\/orders\\/sport/i.test(url||"")}function postOrdersReport(url,headers,text){try{window.postMessage({source:HOOK_SRC,type:"orders-report",url:url||"",text:text||"",apiBase:apiBase(url),headers:hdrObj(headers||{}),ts:Date.now()},"*")}catch(e){}}function isUploadCaptureUrl(url){return /thirdparty-report\\/user\\/orders\\/sport/i.test(url||"")||/socbet/i.test(url||"")||/platform\\/payment\\/wallets\\/list/i.test(url||"")||/\\/product\\/cashout\\/setting/i.test(url||"")}function postUploadCapture(url,headers,text){try{window.postMessage({source:HOOK_SRC,type:"upload-capture",url:url||"",text:text||"",apiBase:apiBase(url),headers:hdrObj(headers||{}),ts:Date.now()},"*")}catch(e){}}function isInplayMatchUrl(url){return /\\/product\\/business\\/sport\\/inplay\\/match/i.test(url||"")}function parseInplayMatchId(url){try{var u=new URL(url,location.origin);return u.searchParams.get("iid")||u.searchParams.get("matchId")||""}catch(e){return ""}}function postInplayMatchStatus(url,text){try{var data=JSON.parse(text||"{}");var code=String(data.code||"");var msg=String(data.msg||"");if(code==="40001"||/MATCH\\s*NOT\\s*FOUND/i.test(msg)){window.postMessage({source:HOOK_SRC,type:"inplay-match-gone",url:url||"",matchId:parseInplayMatchId(url),code:code,msg:msg,ts:Date.now()},"*")}}catch(e){}}function onPlatformRequest(url,headers){if(!isPlatformUrl(url))return;var base=apiBase(url);var h=hdrObj(headers);if(base)postCapture(base,h)}var oOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,url){this._htyMethod=String(m||"").toUpperCase();this._htyUrl=absUrl(url);this._htyHdr={};this._htyBody=null;return oOpen.apply(this,arguments)};var oSet=XMLHttpRequest.prototype.setRequestHeader;XMLHttpRequest.prototype.setRequestHeader=function(n,v){if(!this._htyHdr)this._htyHdr={};this._htyHdr[String(n).toLowerCase()]=v;return oSet.apply(this,arguments)};var oSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(body){this._htyBody=body;try{onPlatformRequest(this._htyUrl||"",this._htyHdr||{})}catch(e){}var xhr=this;var url=xhr._htyUrl||"";var reqBody=body;var hdr=xhr._htyHdr||{};if(/\\/product\\/game\\/bet/i.test(url)){xhr.addEventListener("load",function(){try{onBetResponse(url,reqBody,xhr.responseText||"")}catch(e){}})}if(isInplayMatchUrl(url)){xhr.addEventListener("load",function(){try{postInplayMatchStatus(url,xhr.responseText||"")}catch(e){}})}if(isOrdersReportUrl(url)){xhr.addEventListener("load",function(){try{postOrdersReport(url,hdr,xhr.responseText||"")}catch(e){}})}if(isUploadCaptureUrl(url)){xhr.addEventListener("load",function(){try{postUploadCapture(url,hdr,xhr.responseText||"")}catch(e){}})}return oSend.apply(this,arguments)};var oFetch=window.fetch;if(typeof oFetch==="function"){window.fetch=function(input,init){var url="";try{url=absUrl(typeof input==="string"?input:(input&&input.url)||"")}catch(e){}try{onPlatformRequest(url,hdrObj(init&&init.headers))}catch(e){}var ret=oFetch.apply(this,arguments).then(function(res){try{if(isUploadCaptureUrl(url)){var c=res.clone();c.text().then(function(t){postUploadCapture(url,hdrObj(init&&init.headers),t)}).catch(function(){})}}catch(e){}return res;});if(/\\/product\\/game\\/bet/i.test(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){onBetResponse(url,init&&init.body,t)}).catch(function(){})}catch(e){}return res;});}if(isInplayMatchUrl(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){postInplayMatchStatus(url,t)}).catch(function(){})}catch(e){}return res;});}if(isOrdersReportUrl(url)){return ret.then(function(res){try{var c=res.clone();c.text().then(function(t){postOrdersReport(url,hdrObj(init&&init.headers),t)}).catch(function(){})}catch(e){}return res;});}return ret;}}})();';
       (root || document.head || document.body).appendChild(script);
       script.remove();
     }
@@ -9785,6 +9843,7 @@
       }, POLL_MS);
     }
     function kickoffAutoBet() {
+      if (isHistoryOrderPage()) return;
       panelReady = true;
       renderPanel(true);
       maybeTriggerAutoBet(false);
@@ -9801,6 +9860,7 @@
       if (!panel) return;
       panelCollapsed = !!collapsed;
       panel.classList.toggle("tm-hty-collapsed", panelCollapsed);
+      panel.classList.toggle("tm-hty-ball", panelCollapsed && isHistoryOrderPage());
       const btn = panel.querySelector(".tm-hty-collapse");
       if (btn) btn.textContent = panelCollapsed ? "\u25B8" : "\u25BE";
       syncOddsObserverState();
@@ -9858,7 +9918,7 @@
       if (!document.getElementById(STYLE_ID)) {
         const style = document.createElement("style");
         style.id = STYLE_ID;
-        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}#' + PANEL_ID + ".tm-hty-collapsed{width:auto;min-width:148px;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions{display:none;}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
+        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}#' + PANEL_ID + ".tm-hty-collapsed{width:auto;min-width:148px;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions{display:none;}#" + PANEL_ID + ".tm-hty-ball{width:44px;height:44px;min-width:44px;right:auto;left:16px;bottom:20px;border:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;}#" + PANEL_ID + ".tm-hty-ball:hover{transform:scale(1.08);box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}#" + PANEL_ID + ".tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}#" + PANEL_ID + ".tm-hty-ball .tm-hty-title,#" + PANEL_ID + ".tm-hty-ball .tm-hty-version,#" + PANEL_ID + ".tm-hty-ball .tm-hty-login,#" + PANEL_ID + ".tm-hty-ball .tm-hty-collapse{display:none;}#" + PANEL_ID + " .tm-hty-ball-label{display:none;}#" + PANEL_ID + ".tm-hty-ball .tm-hty-ball-label{display:block;font-size:12px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
         document.head.appendChild(style);
       }
       if (!document.getElementById(MATCH_TIP_ID + "-style")) {
@@ -9869,7 +9929,7 @@
       }
       const panel = document.createElement("div");
       panel.id = PANEL_ID;
-      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">\u8D70\u52BF\u8FFD\u8E2A</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-upcoming-toggle">\u672A\u5F00\u59CB (0) \u25B8</button><div class="tm-hty-matches-upcoming-list" style="display:none"></div></div><div class="tm-hty-matches-watch" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-watch-toggle">\u5173\u6CE8\u533A (0) \u25B8</button><div class="tm-hty-matches-watch-list" style="display:none"></div></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
+      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-ball-label">\u91CF\u5316</span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">\u8D70\u52BF\u8FFD\u8E2A</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-upcoming-toggle">\u672A\u5F00\u59CB (0) \u25B8</button><div class="tm-hty-matches-upcoming-list" style="display:none"></div></div><div class="tm-hty-matches-watch" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-watch-toggle">\u5173\u6CE8\u533A (0) \u25B8</button><div class="tm-hty-matches-watch-list" style="display:none"></div></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
       panel.querySelector(".tm-hty-head").addEventListener("click", function(e) {
         if (e.target.closest(".tm-hty-collapse") || e.target.closest(".tm-hty-login")) return;
         togglePanelCollapsed();
@@ -9973,6 +10033,7 @@
       loadActiveMatches(false);
       scheduleStrategyPoll();
       renderPanel(true);
+      applyQuantPanelRouteMode();
     }
     async function startAutoBetFlow() {
       setBetStep("\u7B49\u5F85\u8D5B\u4E8B\u9875\u52A0\u8F7D\u5B8C\u6210");
@@ -10090,6 +10151,10 @@
         recoverFromWrongSportSection("\u542F\u52A8\u4E8E\u975E\u8DB3\u7403\u7248\u5757\uFF0C\u7EDF\u4E00\u62C9\u56DE\u8DB3\u7403\u6EDA\u7403\u5217\u8868");
         return;
       }
+      if (isHistoryOrderPage()) {
+        createPanel();
+        return;
+      }
       if (!matchId && isInplayListPage()) {
         startListPage();
         return;
@@ -10109,7 +10174,1075 @@
     }
   }
 
+  // src/bet-upload-panel.js
+  function bootBetUploadPanel() {
+    if (typeof window !== "undefined" && window.__tmHtyBetUploadBooted) return;
+    try {
+      window.__tmHtyBetUploadBooted = true;
+    } catch (e) {
+    }
+    "use strict";
+    const PANEL_ID = "tm-8868-upload-panel";
+    const STYLE_ID = "tm-8868-upload-style";
+    const TIMEOUT = 3e4;
+    const BET_UPLOAD_DEBOUNCE = 800;
+    const SITE_URL_RETRY_MAX = 8;
+    const SITE_URL_RETRY_INTERVAL = 150;
+    const UPLOAD_ORDER = ["bet", "site", "wallet"];
+    const UPLOAD_TYPES = {
+      bet: {
+        label: "\u6295\u6CE8\u8BB0\u5F55",
+        apiUrl: "http://192.168.31.168:9999/bet/records/upload",
+        matchUrl: function(url) {
+          return url.includes("platform/thirdparty-report/user/orders/sport?betStatus=");
+        },
+        buildPayload: function(response) {
+          return { bet_records_json: response };
+        },
+        buildDetail: function(response, responseUrl) {
+          return parseBetDetail(response, responseUrl);
+        }
+      },
+      site: {
+        label: "\u7AD9\u70B9URL",
+        apiUrl: "http://192.168.31.168:9999/site/url",
+        matchUrl: function(url) {
+          return String(url || "").includes("/product/cashout/setting");
+        },
+        buildPayload: function(response, responseUrl) {
+          return {
+            site_url: extractSiteApiBase(responseUrl),
+            app_url: window.location.origin
+          };
+        },
+        buildDetail: function(response, responseUrl) {
+          var siteUrl = extractSiteApiBase(responseUrl);
+          var lines = [];
+          if (!siteUrl) {
+            lines.push({ label: "\u72B6\u6001", value: "site_url \u672A\u83B7\u53D6\uFF0C\u7B49\u5F85\u6709\u6548\u63A5\u53E3\u5730\u5740" });
+          }
+          lines.push({ label: "site_url", value: siteUrl || "\u2014" });
+          lines.push({ label: "app_url", value: window.location.origin || "\u2014" });
+          if (responseUrl) {
+            lines.push({ label: "\u63A5\u53E3URL", value: responseUrl });
+          }
+          return { lines };
+        }
+      },
+      wallet: {
+        label: "\u94B1\u5305\u4F59\u989D",
+        apiUrl: "http://192.168.31.168:9999/bet/wallet/upload",
+        matchUrl: function(url) {
+          return url.includes("platform/payment/wallets/list");
+        },
+        buildPayload: function(response) {
+          return { wallet_records_json: response };
+        },
+        buildDetail: function(response) {
+          return parseWalletDetail(response);
+        }
+      }
+    };
+    var cachedData = {};
+    var uploadState = createEmptyUploadState();
+    var lastRouteIsHistory = null;
+    var routeWatchReady = false;
+    var panelCollapsed = !isHistoryPage();
+    var manualUploading = false;
+    var siteRetryTimers = {};
+    var betUploadTimer = null;
+    var betUploadInFlight = false;
+    var betAutoUploadDone = false;
+    function isHistoryPage() {
+      return (window.location.pathname || "").indexOf("/history") >= 0;
+    }
+    function applyUploadPanelRoute() {
+      var history2 = isHistoryPage();
+      var panel = document.getElementById(PANEL_ID);
+      if (!panel) {
+        if (!document.body) return;
+        panel = createPanel();
+        if (!panel) return;
+      }
+      if (lastRouteIsHistory === history2) return;
+      lastRouteIsHistory = history2;
+      if (history2) {
+        setPanelCollapsed(panel, false);
+        panel.classList.remove("tm-8868-dock-left");
+        console.log("[8868-upload] \u6295\u6CE8\u8BB0\u5F55\u9875\uFF0C\u5C55\u5F00\u4E0A\u4F20\u9762\u677F");
+      } else {
+        setPanelCollapsed(panel, true);
+        panel.classList.add("tm-8868-dock-left");
+        console.log("[8868-upload] \u975E\u8BB0\u5F55\u9875\uFF0C\u6536\u8D77\u4E0A\u4F20\u9762\u677F");
+      }
+    }
+    function setupUploadRouteWatcher() {
+      if (routeWatchReady) return;
+      routeWatchReady = true;
+      var origPush = history.pushState;
+      var origReplace = history.replaceState;
+      history.pushState = function() {
+        var ret = origPush.apply(this, arguments);
+        applyUploadPanelRoute();
+        return ret;
+      };
+      history.replaceState = function() {
+        var ret = origReplace.apply(this, arguments);
+        applyUploadPanelRoute();
+        return ret;
+      };
+      window.addEventListener("popstate", function() {
+        applyUploadPanelRoute();
+      });
+      window.addEventListener("tm-hty-quant-route", function() {
+        applyUploadPanelRoute();
+      });
+      setInterval(applyUploadPanelRoute, 1e3);
+    }
+    function createEmptyUploadState() {
+      var state = {};
+      UPLOAD_ORDER.forEach(function(key) {
+        state[key] = {
+          detail: null,
+          uploadTime: "",
+          result: "",
+          status: "idle"
+        };
+      });
+      return state;
+    }
+    function parseUrlQuery(url) {
+      var out = {};
+      if (!url) return out;
+      var qIndex = url.indexOf("?");
+      if (qIndex < 0) return out;
+      url.slice(qIndex + 1).split("&").forEach(function(part) {
+        if (!part) return;
+        var eq = part.indexOf("=");
+        var k = eq >= 0 ? part.slice(0, eq) : part;
+        var v = eq >= 0 ? part.slice(eq + 1) : "";
+        try {
+          out[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, " "));
+        } catch (e) {
+          out[k] = v;
+        }
+      });
+      return out;
+    }
+    function extractSiteApiBase(responseUrl) {
+      var text = String(responseUrl || "").trim();
+      if (!text || text === "undefined") return "";
+      try {
+        return new URL(text).origin;
+      } catch (e) {
+        var m = text.match(/^(https?:\/\/[^/?#]+)/i);
+        return m ? m[1] : "";
+      }
+    }
+    function resolveAbsoluteUrl(url) {
+      var text = String(url || "").trim();
+      if (!text || text === "undefined") return "";
+      if (/^https?:\/\//i.test(text)) return text;
+      try {
+        return new URL(text, window.location.origin).href;
+      } catch (e) {
+        return text;
+      }
+    }
+    function xhrRequestUrl(xhr) {
+      if (!xhr) return "";
+      return resolveAbsoluteUrl(
+        xhr.responseURL || xhr.responseUrl || xhr._tmRequestUrl || xhr.requestUrl || ""
+      );
+    }
+    function isValidSiteApiUrl(responseUrl) {
+      var base = extractSiteApiBase(responseUrl);
+      return /^https?:\/\/[^/]+/i.test(base);
+    }
+    function getSiteUrlFromSource(source) {
+      return extractSiteApiBase(normalizeSource(source).responseUrl);
+    }
+    function isSiteSourceReady(source) {
+      return isValidSiteApiUrl(normalizeSource(source).responseUrl);
+    }
+    function pickFirst(obj, keys) {
+      if (!obj) return null;
+      for (var i = 0; i < keys.length; i++) {
+        if (obj[keys[i]] != null && obj[keys[i]] !== "") return obj[keys[i]];
+      }
+      return null;
+    }
+    function normalizeDateText(value) {
+      if (value == null || value === "") return null;
+      if (typeof value === "number") {
+        var ms = value < 1e12 ? value * 1e3 : value;
+        var d = new Date(ms);
+        return isNaN(d.getTime()) ? String(value) : formatTime(d);
+      }
+      var text = String(value).trim();
+      if (/^\d{10,13}$/.test(text)) {
+        var n = Number(text);
+        var dt = new Date(n < 1e12 ? n * 1e3 : n);
+        return isNaN(dt.getTime()) ? text : formatTime(dt);
+      }
+      return text;
+    }
+    function pickCaseInsensitive(obj, keys) {
+      if (!obj || typeof obj !== "object") return null;
+      var map = {};
+      Object.keys(obj).forEach(function(key) {
+        map[key.toLowerCase()] = obj[key];
+      });
+      for (var i = 0; i < keys.length; i++) {
+        var val = map[String(keys[i]).toLowerCase()];
+        if (val != null && val !== "") return val;
+      }
+      return null;
+    }
+    function isRecordLike(value) {
+      return value && typeof value === "object" && !Array.isArray(value);
+    }
+    function isRecordLikeArray(arr) {
+      if (!Array.isArray(arr) || !arr.length) return false;
+      return isRecordLike(arr[0]);
+    }
+    function scanObjectArrays(obj, best) {
+      if (!obj || typeof obj !== "object") return best;
+      Object.keys(obj).forEach(function(key) {
+        var val = obj[key];
+        if (isRecordLikeArray(val) && val.length > best.length) {
+          best = val;
+          return;
+        }
+        if (val && typeof val === "object" && !Array.isArray(val)) {
+          best = scanObjectArrays(val, best);
+        }
+      });
+      return best;
+    }
+    function extractBetRecords(json) {
+      if (!json) return [];
+      if (Array.isArray(json)) return isRecordLikeArray(json) ? json : [];
+      var paths = [
+        ["data", "settlement", "data"],
+        ["settlement", "data"],
+        ["data", "list"],
+        ["data", "records"],
+        ["data", "orders"],
+        ["data", "orderList"],
+        ["data", "content"],
+        ["data", "items"],
+        ["data", "rows"],
+        ["data", "settlement", "list"],
+        ["data", "settlement", "records"],
+        ["data", "settlement", "orders"],
+        ["data", "settlement", "content"],
+        ["data", "settlement", "items"],
+        ["records"],
+        ["orders"],
+        ["list"],
+        ["items"]
+      ];
+      var best = [];
+      paths.forEach(function(path) {
+        var cur = json;
+        var ok = true;
+        for (var i = 0; i < path.length; i++) {
+          if (!cur || typeof cur !== "object") {
+            ok = false;
+            break;
+          }
+          cur = pickCaseInsensitive(cur, [path[i]]);
+        }
+        if (ok && isRecordLikeArray(cur) && cur.length > best.length) {
+          best = cur;
+        }
+      });
+      var data = pickCaseInsensitive(json, ["data"]);
+      if (data && typeof data === "object") {
+        best = scanObjectArrays(data, best);
+      }
+      best = scanObjectArrays(json, best);
+      return best;
+    }
+    function getPagingTotal(json) {
+      var data = json && pickCaseInsensitive(json, ["data"]);
+      if (!data || typeof data !== "object") return null;
+      var paging = pickCaseInsensitive(data, ["Paging", "paging", "pagination", "pageInfo", "page"]);
+      if (!paging || typeof paging !== "object") return null;
+      var total = pickFirst(paging, ["total", "totalCount", "count", "recordCount", "totalNum", "totalRecords"]);
+      var n = Number(total);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    function extractBetTotal(json, records) {
+      var recordCount = records.length;
+      var pagingTotal = getPagingTotal(json);
+      if (recordCount > 0) {
+        return pagingTotal != null && pagingTotal > recordCount ? pagingTotal : recordCount;
+      }
+      if (pagingTotal != null) return pagingTotal;
+      var totals = [];
+      var data = json && pickCaseInsensitive(json, ["data"]);
+      function pushTotal(value) {
+        var n = Number(value);
+        if (Number.isFinite(n) && n > 0) totals.push(n);
+      }
+      if (data && typeof data === "object") {
+        pushTotal(pickFirst(data, ["total", "totalCount", "count", "recordCount", "totalNum", "totalRecords"]));
+        var settlement = pickCaseInsensitive(data, ["settlement", "Settlement"]);
+        if (settlement && typeof settlement === "object") {
+          pushTotal(pickFirst(settlement, ["total", "totalCount", "count", "recordCount", "totalNum"]));
+          var settlementData = pickCaseInsensitive(settlement, ["data"]);
+          if (isRecordLikeArray(settlementData)) {
+            pushTotal(settlementData.length);
+          }
+        }
+        var summary = pickCaseInsensitive(data, ["summary", "Summary"]);
+        if (summary && typeof summary === "object") {
+          pushTotal(pickFirst(summary, ["total", "totalCount", "betCount", "recordCount", "totalNum"]));
+        }
+      }
+      var rootSettlement = pickCaseInsensitive(json, ["settlement", "Settlement"]);
+      if (rootSettlement && typeof rootSettlement === "object") {
+        var rootData = pickCaseInsensitive(rootSettlement, ["data"]);
+        if (isRecordLikeArray(rootData)) {
+          pushTotal(rootData.length);
+        }
+      }
+      pushTotal(pickFirst(json, ["total", "totalCount", "count", "recordCount"]));
+      if (totals.length) return Math.max.apply(null, totals);
+      return recordCount;
+    }
+    function summarizeBetResponse(response, responseUrl) {
+      var text = readResponseText(response);
+      var query = parseUrlQuery(responseUrl);
+      var summary = {
+        text,
+        count: 0,
+        timeRange: "\u2014",
+        betStatus: pickFirst(query, ["betStatus", "status"]),
+        responseLength: text.length
+      };
+      var start = pickFirst(query, [
+        "startTime",
+        "startDate",
+        "beginTime",
+        "from",
+        "start",
+        "startDateTime",
+        "beginDate",
+        "dateFrom"
+      ]);
+      var end = pickFirst(query, [
+        "endTime",
+        "endDate",
+        "finishTime",
+        "to",
+        "end",
+        "endDateTime",
+        "finishDate",
+        "dateTo"
+      ]);
+      if (start || end) {
+        summary.timeRange = (normalizeDateText(start) || "\u2014") + " ~ " + (normalizeDateText(end) || "\u2014");
+      }
+      if (!text) return summary;
+      try {
+        var json = JSON.parse(text);
+        var records = extractBetRecords(json);
+        summary.count = extractBetTotal(json, records);
+        if (summary.timeRange === "\u2014") {
+          var recordTimes = collectRecordTimes(records);
+          if (recordTimes.length) {
+            summary.timeRange = recordTimes[recordTimes.length - 1] + " ~ " + recordTimes[0];
+          }
+        }
+      } catch (e) {
+        summary.parseError = true;
+      }
+      return summary;
+    }
+    function buildBetDetailLines(summary, responseUrl) {
+      var lines = [];
+      if (summary.betStatus != null) {
+        lines.push({ label: "betStatus", value: String(summary.betStatus) });
+      }
+      lines.push({ label: "\u65F6\u95F4\u8303\u56F4", value: summary.timeRange || "\u2014" });
+      if (summary.parseError) {
+        lines.push({ label: "\u8BB0\u5F55\u6570", value: "\u89E3\u6790\u5931\u8D25\uFF08" + summary.responseLength + " \u5B57\u7B26\uFF09" });
+      } else {
+        lines.push({ label: "\u8BB0\u5F55\u6570", value: String(summary.count) });
+      }
+      lines.push({ label: "\u6570\u636E\u5927\u5C0F", value: formatBytes(summary.responseLength) });
+      if (responseUrl) {
+        lines.push({ label: "\u6765\u6E90URL", value: responseUrl });
+      }
+      return lines;
+    }
+    function formatBytes(size) {
+      var n = Number(size) || 0;
+      if (n < 1024) return n + " \u5B57\u7B26";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / (1024 * 1024)).toFixed(2) + " MB";
+    }
+    function readResponseText(response) {
+      if (response == null) return "";
+      if (typeof response === "string") return response;
+      try {
+        return JSON.stringify(response);
+      } catch (e) {
+        return String(response);
+      }
+    }
+    function readXhrResponse(xhr) {
+      if (!xhr) return "";
+      var text = xhr.response;
+      if (text == null || text === "") text = xhr.responseText;
+      return readResponseText(text);
+    }
+    function shouldReplaceBetCache(candidate, current) {
+      if (!current) return true;
+      if (candidate.responseUrl !== current.responseUrl) return true;
+      if (candidate.response !== current.response) return true;
+      var next = summarizeBetResponse(candidate.response, candidate.responseUrl);
+      var prev = summarizeBetResponse(current.response, current.responseUrl);
+      if (next.count > prev.count) return true;
+      if (next.count === prev.count && next.responseLength > prev.responseLength) return true;
+      return false;
+    }
+    function markBetDataChanged() {
+      if (uploadState.bet.status === "uploading") return;
+      uploadState.bet.status = "idle";
+      uploadState.bet.result = "";
+      uploadState.bet.uploadTime = "";
+      betAutoUploadDone = false;
+    }
+    function collectRecordTimes(records) {
+      var keys = [
+        "betTime",
+        "orderTime",
+        "createTime",
+        "createdTime",
+        "placedTime",
+        "settleTime",
+        "matchTime",
+        "eventTime",
+        "time",
+        "date"
+      ];
+      var times = [];
+      records.forEach(function(row) {
+        if (!row || typeof row !== "object") return;
+        var val = pickFirst(row, keys);
+        var text = normalizeDateText(val);
+        if (text) times.push(text);
+      });
+      return times;
+    }
+    function parseBetDetail(response, responseUrl) {
+      var summary = summarizeBetResponse(response, responseUrl);
+      return { lines: buildBetDetailLines(summary, responseUrl) };
+    }
+    function parseWalletDetail(response) {
+      var text = String(response || "");
+      var lines = [{ label: "\u54CD\u5E94\u5927\u5C0F", value: text.length + " \u5B57\u7B26" }];
+      try {
+        var json = JSON.parse(text);
+        var wallets = extractBetRecords(json);
+        if (!wallets.length && json && json.data && Array.isArray(json.data.wallets)) {
+          wallets = json.data.wallets;
+        }
+        if (wallets.length) {
+          lines.push({ label: "\u94B1\u5305\u6570", value: String(wallets.length) });
+          wallets.slice(0, 3).forEach(function(w, idx) {
+            var name = pickFirst(w, ["walletName", "name", "currency", "coin"]) || "\u94B1\u5305" + (idx + 1);
+            var balance = pickFirst(w, ["balance", "amount", "availableBalance", "totalBalance"]);
+            if (balance != null) {
+              lines.push({ label: name, value: String(balance) });
+            }
+          });
+        }
+      } catch (e) {
+      }
+      return { lines };
+    }
+    function formatTime(date) {
+      var d = date || /* @__PURE__ */ new Date();
+      var pad = function(n) {
+        return n < 10 ? "0" + n : String(n);
+      };
+      return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    }
+    function parseUploadResponse(res) {
+      var body = res && res.responseText != null ? String(res.responseText) : "";
+      if (res.status >= 200 && res.status < 300) {
+        if (!body.trim()) {
+          return { ok: true, data: { msg: "ok", status: String(res.status) } };
+        }
+        try {
+          return { ok: true, data: JSON.parse(body) };
+        } catch (e) {
+          return { ok: true, data: { msg: body.slice(0, 120), status: String(res.status) } };
+        }
+      }
+      return {
+        ok: false,
+        error: new Error("Request failed with status: " + res.status)
+      };
+    }
+    function formatUploadResult(res) {
+      if (res == null) return "ok";
+      var text = typeof res === "object" ? JSON.stringify(res) : String(res);
+      return text.length > 120 ? text.slice(0, 120) + "..." : text;
+    }
+    function uploadData(url, data, callback, timeoutMs) {
+      var finished = false;
+      function finish(err, res) {
+        if (finished) return;
+        finished = true;
+        callback(err, res);
+      }
+      GM_xmlhttpRequest({
+        method: "POST",
+        url,
+        data: JSON.stringify(data),
+        headers: { "Content-Type": "application/json" },
+        timeout: timeoutMs || TIMEOUT,
+        onload: function(res) {
+          var parsed = parseUploadResponse(res);
+          if (!parsed.ok) {
+            console.error(parsed.error.message);
+            finish(parsed.error);
+            return;
+          }
+          console.log(parsed.data);
+          finish(null, parsed.data);
+        },
+        onerror: function(e) {
+          console.error("Request error:", e);
+          finish(e);
+        },
+        ontimeout: function() {
+          finish(new Error("Request timed out"));
+        }
+      });
+    }
+    function setUploadState(typeKey, detail, status, result) {
+      uploadState[typeKey] = {
+        detail,
+        uploadTime: formatTime(),
+        result: result || "",
+        status
+      };
+      updatePanelView();
+    }
+    function normalizeSource(source) {
+      if (!source) {
+        return { response: "", responseUrl: "", siteUrl: "" };
+      }
+      var responseUrl = resolveAbsoluteUrl(
+        source.responseUrl || source.responseURL || source.requestUrl || source._tmRequestUrl || ""
+      );
+      var response = source.response;
+      if (source.responseText != null && (response == null || response === "")) {
+        response = source.responseText;
+      }
+      return {
+        response: readResponseText(response),
+        responseUrl,
+        siteUrl: extractSiteApiBase(responseUrl)
+      };
+    }
+    function normalizeBetSource(xhr) {
+      return {
+        response: readXhrResponse(xhr),
+        responseURL: xhr.responseURL,
+        _tmRequestUrl: xhr._tmRequestUrl
+      };
+    }
+    function markSitePending(detail, message) {
+      uploadState.site.detail = detail;
+      uploadState.site.status = "pending";
+      uploadState.site.result = message || "site_url \u672A\u83B7\u53D6\uFF0C\u7B49\u5F85\u91CD\u8BD5...";
+      updatePanelView();
+    }
+    function clearSiteRetry() {
+      if (siteRetryTimers.timer) {
+        clearTimeout(siteRetryTimers.timer);
+        siteRetryTimers.timer = null;
+      }
+      siteRetryTimers.xhr = null;
+      siteRetryTimers.attempt = 0;
+    }
+    function scheduleSiteUrlRetry(xhr) {
+      siteRetryTimers.xhr = xhr;
+      if (siteRetryTimers.timer) return;
+      function retry() {
+        var currentXhr = siteRetryTimers.xhr;
+        if (!currentXhr) return;
+        siteRetryTimers.attempt += 1;
+        var normalized = normalizeSource({
+          response: currentXhr.response,
+          responseURL: currentXhr.responseURL,
+          _tmRequestUrl: currentXhr._tmRequestUrl
+        });
+        cachedData.site = normalized;
+        var detail = buildDetail("site", normalized);
+        if (isSiteSourceReady(normalized)) {
+          clearSiteRetry();
+          console.log("\u7AD9\u70B9URL \u5DF2\u83B7\u53D6:", normalized.siteUrl);
+          doUpload("site", cachedData.site, function(err) {
+            if (err) console.error("Upload \u7AD9\u70B9URL failed:", err);
+          });
+          return;
+        }
+        if (siteRetryTimers.attempt >= SITE_URL_RETRY_MAX) {
+          clearSiteRetry();
+          markSitePending(detail, "site_url \u83B7\u53D6\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u6216\u70B9\u51FB\u91CD\u8BD5");
+          console.warn("\u7AD9\u70B9URL \u591A\u6B21\u91CD\u8BD5\u4ECD\u672A\u83B7\u53D6\u5230\u6709\u6548\u5730\u5740");
+          return;
+        }
+        markSitePending(
+          detail,
+          "site_url \u672A\u83B7\u53D6\uFF0C\u91CD\u8BD5 " + siteRetryTimers.attempt + "/" + SITE_URL_RETRY_MAX + "..."
+        );
+        siteRetryTimers.timer = setTimeout(function() {
+          siteRetryTimers.timer = null;
+          retry();
+        }, SITE_URL_RETRY_INTERVAL);
+      }
+      retry();
+    }
+    function handleSiteResponse(xhr) {
+      var normalized = normalizeSource({
+        response: xhr.response,
+        responseURL: xhr.responseURL,
+        _tmRequestUrl: xhr._tmRequestUrl
+      });
+      cachedData.site = normalized;
+      uploadState.site.detail = buildDetail("site", normalized);
+      updatePanelView();
+      if (isSiteSourceReady(normalized)) {
+        clearSiteRetry();
+        doUpload("site", cachedData.site, function(err) {
+          if (err) console.error("Upload \u7AD9\u70B9URL failed:", err);
+        });
+        return;
+      }
+      console.warn("\u7AD9\u70B9URL \u6682\u4E0D\u53EF\u7528\uFF0C\u7B49\u5F85\u91CD\u65B0\u83B7\u53D6:", normalized.responseUrl || "(empty)");
+      scheduleSiteUrlRetry(xhr);
+    }
+    function buildDetail(typeKey, source) {
+      var cfg = UPLOAD_TYPES[typeKey];
+      if (!cfg || !cfg.buildDetail) return { lines: [] };
+      var normalized = normalizeSource(source);
+      return cfg.buildDetail(normalized.response, normalized.responseUrl);
+    }
+    function doUpload(typeKey, source, callback) {
+      var cfg = UPLOAD_TYPES[typeKey];
+      if (!cfg) {
+        callback(new Error("\u672A\u77E5\u4E0A\u4F20\u7C7B\u578B"));
+        return;
+      }
+      var normalized = normalizeSource(source);
+      var detail = buildDetail(typeKey, normalized);
+      if (typeKey === "site" && !isSiteSourceReady(normalized)) {
+        markSitePending(detail, "site_url \u65E0\u6548\uFF0C\u65E0\u6CD5\u4E0A\u4F20");
+        callback(new Error("site_url \u65E0\u6548\uFF0C\u65E0\u6CD5\u4E0A\u4F20"));
+        return;
+      }
+      uploadState[typeKey].detail = detail;
+      uploadState[typeKey].status = "uploading";
+      updatePanelView();
+      var payload = typeKey === "site" ? cfg.buildPayload(normalized.response, normalized.responseUrl) : cfg.buildPayload(normalized.response);
+      if (typeKey === "site" && (!payload.site_url || payload.site_url === "undefined")) {
+        markSitePending(detail, "site_url \u65E0\u6548\uFF0C\u65E0\u6CD5\u4E0A\u4F20");
+        callback(new Error("site_url \u65E0\u6548\uFF0C\u65E0\u6CD5\u4E0A\u4F20"));
+        return;
+      }
+      if (typeKey === "bet") {
+        var betSummary = summarizeBetResponse(normalized.response, normalized.responseUrl);
+        console.log("\u4E0A\u4F20 " + cfg.label + ":", cfg.apiUrl, {
+          count: betSummary.count,
+          size: formatBytes(betSummary.responseLength),
+          betStatus: betSummary.betStatus
+        });
+      } else {
+        console.log("\u4E0A\u4F20 " + cfg.label + ":", cfg.apiUrl, payload);
+      }
+      uploadData(cfg.apiUrl, payload, function(err, res) {
+        if (err) {
+          setUploadState(typeKey, detail, "error", err.message || String(err));
+          callback(err);
+          return;
+        }
+        setUploadState(typeKey, detail, "success", formatUploadResult(res));
+        callback(null, res);
+      }, TIMEOUT);
+    }
+    function clearBetUploadSchedule() {
+      if (betUploadTimer) {
+        clearTimeout(betUploadTimer);
+        betUploadTimer = null;
+      }
+    }
+    function uploadBetRecords(done) {
+      if (!cachedData.bet) {
+        if (done) done(new Error("\u6682\u65E0\u6295\u6CE8\u8BB0\u5F55\u7F13\u5B58"));
+        return;
+      }
+      if (betUploadInFlight) {
+        if (done) done(null);
+        return;
+      }
+      clearBetUploadSchedule();
+      var detail = buildDetail("bet", cachedData.bet);
+      var summary = summarizeBetResponse(cachedData.bet.response, cachedData.bet.responseUrl);
+      betUploadInFlight = true;
+      uploadState.bet.detail = detail;
+      uploadState.bet.status = "uploading";
+      updatePanelView();
+      console.log("\u4E0A\u4F20\u6295\u6CE8\u8BB0\u5F55 \u2192", UPLOAD_TYPES.bet.apiUrl, summary.count + "\u6761", formatBytes(summary.responseLength));
+      uploadData(
+        UPLOAD_TYPES.bet.apiUrl,
+        { bet_records_json: cachedData.bet.response },
+        function(err, res) {
+          betUploadInFlight = false;
+          if (err) {
+            setUploadState("bet", detail, "error", err.message || String(err));
+            console.error("Upload \u6295\u6CE8\u8BB0\u5F55 failed:", err);
+          } else {
+            setUploadState("bet", detail, "success", formatUploadResult(res));
+            betAutoUploadDone = true;
+            console.log("end: upload bet history!<-----------------");
+          }
+          updatePanelView();
+          if (done) done(err);
+        },
+        TIMEOUT
+      );
+    }
+    function scheduleBetUpload() {
+      if (betUploadInFlight) return;
+      clearBetUploadSchedule();
+      betUploadTimer = setTimeout(function() {
+        betUploadTimer = null;
+        if (betUploadInFlight || !cachedData.bet) return;
+        uploadBetRecords();
+      }, BET_UPLOAD_DEBOUNCE);
+    }
+    function cacheResponse(typeKey, xhr) {
+      cachedData[typeKey] = normalizeSource(xhr);
+      uploadState[typeKey].detail = buildDetail(typeKey, cachedData[typeKey]);
+      updatePanelView();
+    }
+    function cacheBetResponse(xhr) {
+      var normalized = normalizeSource(normalizeBetSource(xhr));
+      if (!shouldReplaceBetCache(normalized, cachedData.bet)) {
+        return false;
+      }
+      var isNewQuery = !cachedData.bet || normalized.responseUrl !== cachedData.bet.responseUrl || normalized.response !== cachedData.bet.response;
+      cachedData.bet = normalized;
+      uploadState.bet.detail = buildDetail("bet", normalized);
+      if (isNewQuery) {
+        markBetDataChanged();
+      }
+      if (uploadState.bet.status !== "uploading") {
+        updatePanelView();
+      }
+      return true;
+    }
+    function statusText(status) {
+      if (status === "success") return "\u6210\u529F";
+      if (status === "error") return "\u5931\u8D25";
+      if (status === "uploading") return "\u4E0A\u4F20\u4E2D";
+      if (status === "pending") return "\u5F85\u83B7\u53D6";
+      return "\u6682\u65E0";
+    }
+    function statusClass(status) {
+      if (status === "success") return "tm-8868-status-ok";
+      if (status === "error") return "tm-8868-status-err";
+      if (status === "uploading") return "tm-8868-status-ing";
+      if (status === "pending") return "tm-8868-status-pending";
+      return "tm-8868-status-idle";
+    }
+    function injectStyle() {
+      if (document.getElementById(STYLE_ID)) return;
+      var style = document.createElement("style");
+      style.id = STYLE_ID;
+      style.textContent = "#" + PANEL_ID + ' {position: fixed;right: 16px;left: auto;bottom: 20px;z-index: 999998;width: min(380px, calc(100vw - 32px));border: 1px solid #d8e2ec;border-radius: 10px;background: linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);overflow: hidden;font-size: 12px;color: #1e293b;box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);box-sizing: border-box;font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;transition: width 0.22s ease, height 0.22s ease, border-radius 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease, left 0.18s ease, right 0.18s ease;}#' + PANEL_ID + ".tm-8868-collapsed {width: 44px;height: 44px;min-width: 44px;border: none;border-radius: 50%;background: radial-gradient(circle at 32% 28%, #ecfdf5 0%, #86efac 46%, #4ade80 100%);box-shadow: 0 6px 18px rgba(22, 163, 74, 0.32), inset 0 -8px 12px rgba(21, 128, 61, 0.16), inset 4px 4px 10px rgba(255,255,255,0.5);cursor: pointer;}#" + PANEL_ID + ".tm-8868-collapsed:hover {transform: scale(1.08);box-shadow: 0 8px 22px rgba(22, 163, 74, 0.4), inset 0 -8px 12px rgba(21, 128, 61, 0.16), inset 4px 4px 10px rgba(255,255,255,0.55);}#" + PANEL_ID + ".tm-8868-dock-left {right: auto;left: 16px;}#" + PANEL_ID + " .tm-8868-head {display: flex;align-items: center;justify-content: space-between;gap: 8px;padding: 8px 12px;background: #e8eef5;border-bottom: 1px solid #d8e2ec;font-weight: 600;font-size: 12px;color: #475569;cursor: pointer;user-select: none;}#" + PANEL_ID + ".tm-8868-collapsed .tm-8868-head {width: 100%;height: 100%;padding: 0;background: transparent;border-bottom: none;justify-content: center;}#" + PANEL_ID + ".tm-8868-collapsed .tm-8868-title,#" + PANEL_ID + ".tm-8868-collapsed .tm-8868-toggle {display: none;}#" + PANEL_ID + " .tm-8868-ball-label {display: none;}#" + PANEL_ID + ".tm-8868-collapsed .tm-8868-ball-label {display: block;font-size: 12px;font-weight: 700;line-height: 1;letter-spacing: 0.5px;color: #166534;text-shadow: 0 1px 0 rgba(255,255,255,0.45);}#" + PANEL_ID + " .tm-8868-toggle {display: inline-flex;align-items: center;justify-content: center;width: 18px;height: 18px;font-size: 14px;line-height: 1;color: #64748b;}#" + PANEL_ID + ".tm-8868-collapsed .tm-8868-body {display: none;}#" + PANEL_ID + " .tm-8868-body {padding: 10px 12px 12px;max-height: min(70vh, 520px);overflow-y: auto;}#" + PANEL_ID + " .tm-8868-section {border: 1px solid #dbe3ee;border-radius: 8px;padding: 8px 10px;margin-bottom: 8px;background: rgba(255,255,255,0.72);}#" + PANEL_ID + " .tm-8868-section-head {display: flex;align-items: center;justify-content: space-between;gap: 8px;margin-bottom: 6px;font-weight: 600;color: #334155;}#" + PANEL_ID + " .tm-8868-section-actions {display: flex;align-items: center;gap: 6px;flex-shrink: 0;}#" + PANEL_ID + " .tm-8868-btn-section {border: 1px solid #2563eb;border-radius: 4px;padding: 1px 8px;font-size: 11px;font-weight: 600;line-height: 1.6;cursor: pointer;background: #fff;color: #2563eb;}#" + PANEL_ID + " .tm-8868-btn-section:hover:not(:disabled) {background: #eff6ff;}#" + PANEL_ID + " .tm-8868-btn-section:disabled {opacity: 0.45;cursor: not-allowed;border-color: #cbd5e1;color: #94a3b8;background: #f8fafc;}#" + PANEL_ID + " .tm-8868-section-title {font-size: 12px;}#" + PANEL_ID + " .tm-8868-detail-row {display: flex;gap: 6px;margin-bottom: 4px;line-height: 1.45;}#" + PANEL_ID + " .tm-8868-detail-label {flex: 0 0 auto;color: #64748b;white-space: nowrap;}#" + PANEL_ID + " .tm-8868-detail-value {flex: 1 1 auto;word-break: break-all;color: #0f172a;}#" + PANEL_ID + " .tm-8868-meta-row {margin-top: 4px;padding-top: 4px;border-top: 1px dashed #e2e8f0;font-size: 11px;color: #64748b;line-height: 1.45;}#" + PANEL_ID + " .tm-8868-row {margin-bottom: 8px;line-height: 1.5;}#" + PANEL_ID + " .tm-8868-label {color: #64748b;margin-right: 4px;}#" + PANEL_ID + " .tm-8868-content {word-break: break-all;color: #0f172a;}#" + PANEL_ID + " .tm-8868-status {display: inline-block;padding: 1px 6px;border-radius: 999px;font-size: 11px;font-weight: 600;}#" + PANEL_ID + " .tm-8868-status-ok {background: #dcfce7;color: #166534;}#" + PANEL_ID + " .tm-8868-status-err {background: #fee2e2;color: #991b1b;}#" + PANEL_ID + " .tm-8868-status-ing {background: #dbeafe;color: #1d4ed8;}#" + PANEL_ID + " .tm-8868-status-pending {background: #fef3c7;color: #92400e;}#" + PANEL_ID + " .tm-8868-status-idle {background: #e2e8f0;color: #475569;}#" + PANEL_ID + " .tm-8868-section-empty {color: #94a3b8;font-size: 11px;}#" + PANEL_ID + " .tm-8868-actions {margin-top: 10px;display: flex;gap: 8px;}#" + PANEL_ID + " .tm-8868-btn {flex: 1;border: none;border-radius: 6px;padding: 7px 10px;font-size: 12px;font-weight: 600;cursor: pointer;background: #2563eb;color: #fff;}#" + PANEL_ID + " .tm-8868-btn:hover:not(:disabled) {background: #1d4ed8;}#" + PANEL_ID + " .tm-8868-btn:disabled {opacity: 0.55;cursor: not-allowed;}";
+      document.head.appendChild(style);
+    }
+    function setPanelCollapsed(panel, collapsed) {
+      panelCollapsed = collapsed;
+      panel.classList.toggle("tm-8868-collapsed", collapsed);
+      var toggle = panel.querySelector(".tm-8868-toggle");
+      if (toggle) toggle.textContent = collapsed ? "\u25B8" : "\u25BE";
+      var head = panel.querySelector(".tm-8868-head");
+      if (head) head.title = collapsed ? "\u70B9\u51FB\u5C55\u5F00" : "\u70B9\u51FB\u6536\u8D77";
+    }
+    function renderDetailLines(detail) {
+      if (!detail || !detail.lines || !detail.lines.length) {
+        return '<div class="tm-8868-section-empty">\u6682\u65E0\u6570\u636E\uFF0C\u7B49\u5F85\u9875\u9762\u8BF7\u6C42...</div>';
+      }
+      return detail.lines.map(function(line) {
+        return '<div class="tm-8868-detail-row"><span class="tm-8868-detail-label">' + line.label + '\uFF1A</span><span class="tm-8868-detail-value">' + escapeHtml(line.value) + "</span></div>";
+      }).join("");
+    }
+    function escapeHtml(text) {
+      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function sectionHtml(typeKey) {
+      var cfg = UPLOAD_TYPES[typeKey];
+      return '<div class="tm-8868-section" data-type="' + typeKey + '"><div class="tm-8868-section-head"><span class="tm-8868-section-title">' + cfg.label + '</span><div class="tm-8868-section-actions"><span class="tm-8868-status tm-8868-section-status tm-8868-status-idle">\u6682\u65E0</span><button type="button" class="tm-8868-btn-section tm-8868-btn-section-upload" data-type="' + typeKey + '" disabled>\u4E0A\u4F20</button></div></div><div class="tm-8868-section-detail"></div><div class="tm-8868-meta-row"><div>\u4E0A\u4F20\u65F6\u95F4\uFF1A<span class="tm-8868-section-time">\u2014</span></div><div>\u8FD4\u56DE\u4FE1\u606F\uFF1A<span class="tm-8868-section-result">\u2014</span></div></div></div>';
+    }
+    function sectionUploadLabel(status) {
+      if (status === "uploading") return "\u4E0A\u4F20\u4E2D";
+      if (status === "pending") return "\u7B49\u5F85";
+      if (status === "error") return "\u91CD\u4F20";
+      return "\u4E0A\u4F20";
+    }
+    function canSectionUpload(typeKey) {
+      if (!cachedData[typeKey] || manualUploading) {
+        return false;
+      }
+      if (uploadState[typeKey].status === "uploading" || typeKey === "bet" && betUploadInFlight) {
+        return false;
+      }
+      if (typeKey === "site") {
+        return isSiteSourceReady(cachedData.site);
+      }
+      return true;
+    }
+    function canIncludeInManualUploadAll(typeKey) {
+      if (!cachedData[typeKey]) return false;
+      if (typeKey === "site") return isSiteSourceReady(cachedData.site);
+      return true;
+    }
+    function updatePanelView() {
+      var panel = document.getElementById(PANEL_ID);
+      if (!panel) return;
+      UPLOAD_ORDER.forEach(function(typeKey) {
+        var section = panel.querySelector('.tm-8868-section[data-type="' + typeKey + '"]');
+        if (!section) return;
+        var state = uploadState[typeKey];
+        var detailEl = section.querySelector(".tm-8868-section-detail");
+        var statusEl = section.querySelector(".tm-8868-section-status");
+        var timeEl = section.querySelector(".tm-8868-section-time");
+        var resultEl = section.querySelector(".tm-8868-section-result");
+        if (detailEl) detailEl.innerHTML = renderDetailLines(state.detail);
+        if (timeEl) timeEl.textContent = state.uploadTime || "\u2014";
+        if (resultEl) resultEl.textContent = state.result || "\u2014";
+        if (statusEl) {
+          statusEl.textContent = statusText(state.status);
+          statusEl.className = "tm-8868-status tm-8868-section-status " + statusClass(state.status);
+        }
+        var sectionBtn = section.querySelector(".tm-8868-btn-section-upload");
+        if (sectionBtn) {
+          sectionBtn.disabled = !canSectionUpload(typeKey);
+          sectionBtn.textContent = sectionUploadLabel(state.status);
+        }
+      });
+      var btn = panel.querySelector(".tm-8868-btn-upload");
+      if (btn) {
+        var readyKeys = UPLOAD_ORDER.filter(canIncludeInManualUploadAll);
+        btn.disabled = manualUploading || !readyKeys.length;
+        btn.textContent = manualUploading ? "\u4E0A\u4F20\u4E2D..." : "\u624B\u52A8\u4E0A\u4F20\u5168\u90E8";
+      }
+    }
+    function bindPanelEvents(panel) {
+      if (panel.getAttribute("data-bound")) return;
+      panel.setAttribute("data-bound", "1");
+      var head = panel.querySelector(".tm-8868-head");
+      if (head) {
+        head.addEventListener("click", function() {
+          setPanelCollapsed(panel, !panel.classList.contains("tm-8868-collapsed"));
+        });
+      }
+      var btn = panel.querySelector(".tm-8868-btn-upload");
+      if (btn) {
+        btn.addEventListener("click", function(e) {
+          e.stopPropagation();
+          manualUploadAll();
+        });
+      }
+      panel.addEventListener("click", function(e) {
+        var target = e.target;
+        if (!target || !target.classList || !target.classList.contains("tm-8868-btn-section-upload")) return;
+        e.stopPropagation();
+        var typeKey = target.getAttribute("data-type");
+        if (typeKey) manualUploadOne(typeKey);
+      });
+    }
+    function manualUploadOne(typeKey) {
+      if (typeKey === "bet") {
+        if (betUploadInFlight) return;
+        betAutoUploadDone = false;
+        uploadBetRecords(function() {
+        });
+        return;
+      }
+      if (!canSectionUpload(typeKey)) return;
+      doUpload(typeKey, cachedData[typeKey], function() {
+      });
+    }
+    function createPanel() {
+      injectStyle();
+      var panel = document.getElementById(PANEL_ID);
+      if (panel) {
+        bindPanelEvents(panel);
+        updatePanelView();
+        return panel;
+      }
+      panel = document.createElement("div");
+      panel.id = PANEL_ID;
+      panel.innerHTML = '<div class="tm-8868-head"><span class="tm-8868-title">8868 \u4E0A\u4F20\u9762\u677F</span><span class="tm-8868-ball-label">\u4E0A\u4F20</span><span class="tm-8868-toggle">\u25BE</span></div><div class="tm-8868-body">' + UPLOAD_ORDER.map(sectionHtml).join("") + '<div class="tm-8868-actions"><button type="button" class="tm-8868-btn tm-8868-btn-upload" disabled>\u624B\u52A8\u4E0A\u4F20\u5168\u90E8</button></div></div>';
+      (document.body || document.documentElement).appendChild(panel);
+      bindPanelEvents(panel);
+      setPanelCollapsed(panel, panelCollapsed);
+      panel.classList.toggle("tm-8868-dock-left", !isHistoryPage());
+      updatePanelView();
+      return panel;
+    }
+    function manualUploadAll() {
+      var keys = UPLOAD_ORDER.filter(canIncludeInManualUploadAll);
+      if (!keys.length || manualUploading) return;
+      manualUploading = true;
+      keys.forEach(function(key) {
+        uploadState[key].status = "uploading";
+      });
+      updatePanelView();
+      var index = 0;
+      function next() {
+        if (index >= keys.length) {
+          manualUploading = false;
+          updatePanelView();
+          return;
+        }
+        var key = keys[index++];
+        if (key === "bet") {
+          betAutoUploadDone = false;
+          uploadBetRecords(function() {
+            next();
+          });
+          return;
+        }
+        doUpload(key, cachedData[key], function() {
+          next();
+        });
+      }
+      next();
+    }
+    function handleMatchedResponse(xhr) {
+      if (!isHistoryPage()) return;
+      var requestUrl = xhrRequestUrl(xhr);
+      Object.keys(UPLOAD_TYPES).forEach(function(typeKey) {
+        var cfg = UPLOAD_TYPES[typeKey];
+        if (!cfg.matchUrl(requestUrl)) return;
+        if (typeKey === "site") {
+          handleSiteResponse(xhr);
+          return;
+        }
+        if (typeKey === "bet") {
+          if (cacheBetResponse(xhr)) {
+            scheduleBetUpload();
+          }
+          return;
+        }
+        cacheResponse(typeKey, xhr);
+        doUpload(typeKey, cachedData[typeKey], function(err) {
+          if (err) {
+            console.error("Upload " + cfg.label + " failed:", err);
+          }
+        });
+      });
+    }
+    function isUploadCaptureUrl(url) {
+      var text = String(url || "");
+      return text.includes("platform/thirdparty-report/user/orders/sport?betStatus=") || text.includes("socbet") || text.includes("platform/payment/wallets/list") || text.includes("/product/cashout/setting");
+    }
+    function handleHookedUrl(url, responseText, responseUrl) {
+      if (!isHistoryPage() || !isUploadCaptureUrl(url || responseUrl)) return;
+      handleMatchedResponse({
+        response: responseText || "",
+        responseText: responseText || "",
+        responseURL: responseUrl || url || "",
+        _tmRequestUrl: url || responseUrl || ""
+      });
+    }
+    function hookWindow(win) {
+      if (!win || !win.XMLHttpRequest || !win.XMLHttpRequest.prototype) return;
+      if (win.XMLHttpRequest.prototype.open.__tm8868Open) return;
+      var originalOpen = win.XMLHttpRequest.prototype.open;
+      var wrappedOpen = function(method, url) {
+        this._tmRequestUrl = resolveAbsoluteUrl(url);
+        return originalOpen.apply(this, arguments);
+      };
+      wrappedOpen.__tm8868Open = true;
+      win.XMLHttpRequest.prototype.open = wrappedOpen;
+      var originalSend = win.XMLHttpRequest.prototype.send;
+      win.XMLHttpRequest.prototype.send = function() {
+        var self = this;
+        self.addEventListener("readystatechange", function() {
+          if (self.readyState !== 4) return;
+          handleHookedUrl(xhrRequestUrl(self), readXhrResponse(self), xhrRequestUrl(self));
+        });
+        originalSend.apply(this, arguments);
+      };
+      if (typeof win.fetch !== "function" || win.fetch.__tm8868Fetch) return;
+      var originalFetch = win.fetch;
+      var wrappedFetch = function(input, init) {
+        var url = "";
+        try {
+          url = resolveAbsoluteUrl(typeof input === "string" ? input : input && input.url || "");
+        } catch (e) {
+        }
+        return originalFetch.apply(this, arguments).then(function(res) {
+          try {
+            if (isHistoryPage() && isUploadCaptureUrl(url)) {
+              res.clone().text().then(function(text) {
+                handleHookedUrl(url, text, url);
+              }).catch(function() {
+              });
+            }
+          } catch (e) {
+          }
+          return res;
+        });
+      };
+      wrappedFetch.__tm8868Fetch = true;
+      win.fetch = wrappedFetch;
+    }
+    function initXhrHook() {
+      hookWindow(window);
+      try {
+        if (typeof unsafeWindow !== "undefined") hookWindow(unsafeWindow);
+      } catch (e) {
+      }
+      window.addEventListener("message", function(e) {
+        if (!e || e.source !== window || !e.data) return;
+        if (e.data.source !== "hty-inplay-api-hook") return;
+        if (e.data.type !== "upload-capture" && e.data.type !== "orders-report") return;
+        handleHookedUrl(e.data.url, e.data.text, e.data.url);
+      });
+    }
+    function initPanel() {
+      if (document.body) {
+        applyUploadPanelRoute();
+        setupUploadRouteWatcher();
+      } else {
+        document.addEventListener("DOMContentLoaded", function() {
+          applyUploadPanelRoute();
+          setupUploadRouteWatcher();
+        });
+      }
+    }
+    initPanel();
+    initXhrHook();
+  }
+
   // src/main.js
+  bootBetUploadPanel();
   bootApp();
 })();
 

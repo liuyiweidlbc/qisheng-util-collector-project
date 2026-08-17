@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-08-16.2
+// @version 2026-08-17.1
 // @description try to take over the world! Enhanced with timeout and error logging.
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
 // @include /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/history/
+// @include /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents/
 // @icon https://www.google.com/s2/favicons?sz=64&domain=8868a34.app
 // @grant GM_xmlhttpRequest
 // @run-at document-end
@@ -13,11 +14,6 @@
 
 (function () {
     'use strict';
-
-    if (!window.location.pathname.includes('/history')) {
-        console.log('不是history页面，直接退出');
-        return;
-    }
 
     const PANEL_ID = 'tm-8868-upload-panel';
     const STYLE_ID = 'tm-8868-upload-style';
@@ -85,12 +81,63 @@
 
     var cachedData = {};
     var uploadState = createEmptyUploadState();
-    var panelCollapsed = false;
+    var lastRouteIsHistory = null;
+    var routeWatchReady = false;
+    var panelCollapsed = !isHistoryPage();
     var manualUploading = false;
     var siteRetryTimers = {};
     var betUploadTimer = null;
     var betUploadInFlight = false;
     var betAutoUploadDone = false;
+
+    function isHistoryPage() {
+        return (window.location.pathname || '').indexOf('/history') >= 0;
+    }
+
+    function applyUploadPanelRoute() {
+        var history = isHistoryPage();
+        var panel = document.getElementById(PANEL_ID);
+        if (!panel) {
+            if (!document.body) return;
+            panel = createPanel();
+            if (!panel) return;
+        }
+        if (lastRouteIsHistory === history) return;
+        lastRouteIsHistory = history;
+        if (history) {
+            setPanelCollapsed(panel, false);
+            panel.classList.remove('tm-8868-dock-left');
+            console.log('[8868-upload] 投注记录页，展开上传面板');
+        } else {
+            setPanelCollapsed(panel, true);
+            panel.classList.add('tm-8868-dock-left');
+            console.log('[8868-upload] 非记录页，收起上传面板');
+        }
+    }
+
+    function setupUploadRouteWatcher() {
+        if (routeWatchReady) return;
+        routeWatchReady = true;
+        var origPush = history.pushState;
+        var origReplace = history.replaceState;
+        history.pushState = function () {
+            var ret = origPush.apply(this, arguments);
+            applyUploadPanelRoute();
+            return ret;
+        };
+        history.replaceState = function () {
+            var ret = origReplace.apply(this, arguments);
+            applyUploadPanelRoute();
+            return ret;
+        };
+        window.addEventListener('popstate', function () {
+            applyUploadPanelRoute();
+        });
+        window.addEventListener('tm-hty-quant-route', function () {
+            applyUploadPanelRoute();
+        });
+        setInterval(applyUploadPanelRoute, 1000);
+    }
 
     function createEmptyUploadState() {
         var state = {};
@@ -841,6 +888,7 @@
             '#' + PANEL_ID + ' {' +
             'position: fixed;' +
             'right: 16px;' +
+            'left: auto;' +
             'bottom: 20px;' +
             'z-index: 999998;' +
             'width: min(380px, calc(100vw - 32px));' +
@@ -853,7 +901,7 @@
             'box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);' +
             'box-sizing: border-box;' +
             'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
-            'transition: width 0.22s ease, height 0.22s ease, border-radius 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease;' +
+            'transition: width 0.22s ease, height 0.22s ease, border-radius 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease, left 0.18s ease, right 0.18s ease;' +
             '}' +
             '#' + PANEL_ID + '.tm-8868-collapsed {' +
             'width: 44px;' +
@@ -868,6 +916,10 @@
             '#' + PANEL_ID + '.tm-8868-collapsed:hover {' +
             'transform: scale(1.08);' +
             'box-shadow: 0 8px 22px rgba(22, 163, 74, 0.4), inset 0 -8px 12px rgba(21, 128, 61, 0.16), inset 4px 4px 10px rgba(255,255,255,0.55);' +
+            '}' +
+            '#' + PANEL_ID + '.tm-8868-dock-left {' +
+            'right: auto;' +
+            'left: 16px;' +
             '}' +
             '#' + PANEL_ID + ' .tm-8868-head {' +
             'display: flex;' +
@@ -1240,6 +1292,7 @@
         (document.body || document.documentElement).appendChild(panel);
         bindPanelEvents(panel);
         setPanelCollapsed(panel, panelCollapsed);
+        panel.classList.toggle('tm-8868-dock-left', !isHistoryPage());
         updatePanelView();
         return panel;
     }
@@ -1277,6 +1330,7 @@
     }
 
     function handleMatchedResponse(xhr) {
+        if (!isHistoryPage()) return;
         var requestUrl = xhrRequestUrl(xhr);
 
         Object.keys(UPLOAD_TYPES).forEach(function (typeKey) {
@@ -1306,18 +1360,22 @@
     }
 
     function initXhrHook() {
+        if (XMLHttpRequest.prototype.open.__tm8868Open) return;
+
         var originalOpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function (method, url) {
+        var wrappedOpen = function (method, url) {
             this._tmRequestUrl = resolveAbsoluteUrl(url);
             return originalOpen.apply(this, arguments);
         };
+        wrappedOpen.__tm8868Open = true;
+        XMLHttpRequest.prototype.open = wrappedOpen;
 
         var originalSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function () {
             var self = this;
-
-            this.onreadystatechange = function () {
+            self.addEventListener('readystatechange', function () {
                 if (self.readyState !== 4) return;
+                if (!isHistoryPage()) return;
 
                 var url = xhrRequestUrl(self);
                 var matched = url.includes('platform/thirdparty-report/user/orders/sport?betStatus=') ||
@@ -1327,7 +1385,7 @@
 
                 if (!matched) return;
                 handleMatchedResponse(self);
-            };
+            });
 
             originalSend.apply(this, arguments);
         };
@@ -1335,9 +1393,13 @@
 
     function initPanel() {
         if (document.body) {
-            createPanel();
+            applyUploadPanelRoute();
+            setupUploadRouteWatcher();
         } else {
-            document.addEventListener('DOMContentLoaded', createPanel);
+            document.addEventListener('DOMContentLoaded', function () {
+                applyUploadPanelRoute();
+                setupUploadRouteWatcher();
+            });
         }
     }
 
