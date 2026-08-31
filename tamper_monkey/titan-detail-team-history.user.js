@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 两队历史排名快捷入口
 // @namespace    https://titan007.com/
-// @version      1.3.6
+// @version      1.3.7
 // @description  在 detail 页面增加“两队历史排名”“联赛排名”等快捷按钮，并支持 F1–F4 快捷键；联赛排名链接附带 tm_home/tm_away 等参数，统计 Tab 经独立 Cookie 传递；detail 页 URL 含 tab 参数时自动打开联赛排名并定位对应统计 Tab。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -296,15 +296,29 @@
     return m ? m[1] : null;
   }
 
+  function isLeagueStandingsHref(href) {
+    const h = String(href || '');
+    return /sclassid=/i.test(h) || /\/(?:sub)?league(?:\.aspx|\/)/i.test(h);
+  }
+
+  function findLeagueNameAnchors(root) {
+    const scope = root || document;
+    return [...scope.querySelectorAll('a.LName, a[href*="sclassid="], a[href*="subleague"], a[href*="SubLeague"], a[href*="league.aspx"]')].filter(
+      (a) => isLeagueStandingsHref(a.getAttribute('href'))
+    );
+  }
+
   function extractSclassId() {
     const header = getMatchHeaderRoot(document);
     if (header) {
-      const lName = header.querySelector('a.LName[href*="sclassid="], a.LName[href*="/SubLeague/"]');
+      const lName = header.querySelector(
+        'a.LName[href*="sclassid="], a.LName[href*="subleague"], a.LName[href*="/SubLeague/"]'
+      );
       if (lName) {
         const sid = parseSclassIdFromHref(lName.getAttribute('href'));
         if (sid) return sid;
       }
-      for (const a of header.querySelectorAll('a[href*="sclassid="], a[href*="/SubLeague/"]')) {
+      for (const a of findLeagueNameAnchors(header)) {
         const sid = parseSclassIdFromHref(a.getAttribute('href'));
         if (sid) return sid;
       }
@@ -354,15 +368,64 @@
     }
   }
 
-  /** 统一打开 league.aspx，主客参数写入 query；统计 Tab 仅经 Cookie 传递（URL hash/query 均会干扰页面加载） */
-  function buildLeagueStandingsUrl(sid, teams) {
+  /** 优先沿用页面上的联赛链接（日职联等是 subleague.aspx）；统计 Tab 仍走 Cookie，避免干扰页面加载 */
+  function getLeagueStandingsBaseUrl(sid) {
+    const header = getMatchHeaderRoot(document);
+    const anchors = findLeagueNameAnchors(header);
+    for (const a of anchors) {
+      const href = a.getAttribute('href');
+      if (!href) continue;
+      try {
+        const u = new URL(href, window.location.href);
+        if (!/titan007\.com$/i.test(u.hostname)) continue;
+        if (sid) u.searchParams.set('sclassid', sid);
+        return u;
+      } catch (_) {
+        /* noop */
+      }
+    }
     const u = new URL('https://zq.titan007.com/cn/league.aspx');
-    u.searchParams.set('sclassid', sid);
+    if (sid) u.searchParams.set('sclassid', sid);
+    return u;
+  }
+
+  function buildLeagueStandingsUrl(sid, teams) {
+    const u = getLeagueStandingsBaseUrl(sid);
     if (teams.homeName) u.searchParams.set('tm_home', teams.homeName);
     if (teams.awayName) u.searchParams.set('tm_away', teams.awayName);
     if (teams.homeId) u.searchParams.set('tm_home_id', String(teams.homeId));
     if (teams.awayId) u.searchParams.set('tm_away_id', String(teams.awayId));
     return u.toString();
+  }
+
+  function enhanceLeagueNameLinks() {
+    const sid = extractSclassId();
+    const teams = extractMatchTeams();
+    if (!sid || (!teams.homeId && !teams.awayId && !teams.homeName && !teams.awayName)) return false;
+    const header = getMatchHeaderRoot(document);
+    const next = buildLeagueStandingsUrl(sid, teams);
+    let patched = 0;
+    findLeagueNameAnchors(header).forEach((a) => {
+      if ((a.getAttribute('href') || '') === next) {
+        patched += 1;
+        return;
+      }
+      a.setAttribute('href', next);
+      if (a.dataset.tmLeaguePatched === '1') {
+        patched += 1;
+        return;
+      }
+      a.dataset.tmLeaguePatched = '1';
+      a.addEventListener(
+        'click',
+        () => {
+          saveStandingsMarkCookie(sid, teams);
+        },
+        true
+      );
+      patched += 1;
+    });
+    return patched > 0;
   }
 
   function saveStandingsMarkCookie(sclassid, teams) {
@@ -573,6 +636,12 @@
   function init() {
     injectButton();
     bindHotkey();
+    enhanceLeagueNameLinks();
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (enhanceLeagueNameLinks() || tries >= 20) window.clearInterval(timer);
+    }, 400);
     tryAutoOpenLeagueRankingFromTab();
   }
 

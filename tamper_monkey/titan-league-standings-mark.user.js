@@ -1,8 +1,12 @@
 // ==UserScript==
 // @name         Titan007 联赛积分榜主客队标记
 // @namespace    https://titan007.com/
-// @version      2.5.2
+// @version      2.5.5
 // @description  读取 Cookie 中 tm_home / tm_away / tabs，积分榜/亚让/大小球主客标记与盘路/大球统计标签；增强 Tab 对比图表；积分榜数据就绪后再 showHtml 切换 Tab。
+// @match        https://zq.titan007.com/cn/*
+// @match        http://zq.titan007.com/cn/*
+// @match        https://zq.titan007.com/cn/subleague.aspx*
+// @match        http://zq.titan007.com/cn/subleague.aspx*
 // @match        https://zq.titan007.com/cn/SubLeague/*
 // @match        http://zq.titan007.com/cn/SubLeague/*
 // @match        https://zq.titan007.com/cn/subleague/*
@@ -13,6 +17,7 @@
 // @match        http://zq.titan007.com/cn/league.aspx*
 // @match        https://zq.titan007.com/cn/cupmatch.aspx*
 // @match        http://zq.titan007.com/cn/cupmatch.aspx*
+// @include      /^https?:\/\/zq\.titan007\.com\/cn\//i
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -20,7 +25,9 @@
 (function () {
   'use strict';
 
+  const SCRIPT_VERSION = '2.5.5';
   const STYLE_ID = 'tm-league-standings-mark-style';
+  const VERSION_PANEL_ID = 'tm-league-standings-version';
   const ATTR_DONE = 'data-tm-standings-marked';
   const GOALS_PANEL_ID = 'tm-goals-compare-panel';
   const GOALS_ATTR_DONE = 'data-tm-goals-charted';
@@ -459,9 +466,65 @@
     return cfg;
   }
 
-  const { cfgHomeName, cfgAwayName, cfgHomeId, cfgAwayId } = loadMarkConfig();
+  function injectVersionPanel(statusText) {
+    const mount = () => {
+      const host = document.body || document.documentElement;
+      if (!host) return false;
+      let el = document.getElementById(VERSION_PANEL_ID);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = VERSION_PANEL_ID;
+        el.setAttribute('data-tm-version', SCRIPT_VERSION);
+        el.title = '点击关闭 · Titan007 联赛积分榜主客队标记';
+        Object.assign(el.style, {
+          position: 'fixed',
+          right: '12px',
+          bottom: '12px',
+          zIndex: '2147483646',
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: '8px',
+          padding: '6px 10px',
+          borderRadius: '8px',
+          background: 'rgba(15, 23, 42, 0.9)',
+          color: '#e2e8f0',
+          font: '12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif',
+          boxShadow: '0 4px 14px rgba(15, 23, 42, 0.28)',
+          cursor: 'pointer',
+          letterSpacing: '0.02em',
+          userSelect: 'none',
+        });
+        host.appendChild(el);
+        el.addEventListener('click', () => el.remove());
+      }
+      el.textContent = '';
+      const ver = document.createElement('strong');
+      ver.textContent = `v${SCRIPT_VERSION}`;
+      Object.assign(ver.style, { fontWeight: '700', color: '#f8fafc' });
+      el.appendChild(ver);
+      if (statusText) {
+        const status = document.createElement('span');
+        status.className = 'tm-ver-status';
+        status.textContent = statusText;
+        Object.assign(status.style, { color: '#fbbf24', fontSize: '11px' });
+        el.appendChild(status);
+      }
+      return true;
+    };
+    if (mount()) return;
+    document.addEventListener('DOMContentLoaded', mount, { once: true });
+  }
 
-  if (!cfgHomeName && !cfgAwayName && !cfgHomeId && !cfgAwayId) return;
+  const { cfgHomeName, cfgAwayName, cfgHomeId, cfgAwayId } = loadMarkConfig();
+  const hasTeamMark =
+    !!(cfgHomeName || cfgAwayName || cfgHomeId || cfgAwayId);
+  const versionStatus = hasTeamMark
+    ? [cfgHomeId || cfgHomeName, cfgAwayId || cfgAwayName].filter(Boolean).join(' / ')
+    : '无主客参数';
+
+  injectVersionPanel(versionStatus);
+
+  if (!hasTeamMark) return;
 
   function ensureStandingsTabActiveOnce() {
     if (standingsTabEnsured) return;
@@ -1883,7 +1946,7 @@
   }
 
   function injectStyle() {
-    const ver = '2.4.0';
+    const ver = SCRIPT_VERSION;
     let style = document.getElementById(STYLE_ID);
     if (style && style.getAttribute('data-tm-ver') === ver) return;
     if (!style) {
@@ -1893,6 +1956,32 @@
     }
     style.setAttribute('data-tm-ver', ver);
     style.textContent = `
+      #${VERSION_PANEL_ID} {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        z-index: 2147483646;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.9);
+        color: #e2e8f0;
+        font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
+        cursor: pointer;
+        letter-spacing: 0.02em;
+        user-select: none;
+      }
+      #${VERSION_PANEL_ID} strong {
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      #${VERSION_PANEL_ID} .tm-ver-status {
+        color: #fbbf24;
+        font-size: 11px;
+      }
       /* 主队：绿系；客队：蓝系（与现场 detail 主客习惯一致） */
       td.tm-league-band-home {
         background-color: rgba(21, 128, 61, 0.16) !important;

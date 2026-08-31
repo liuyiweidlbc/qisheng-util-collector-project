@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WhoScored Livescores Debug
 // @namespace    https://www.whoscored.com/
-// @version      1.10.15
+// @version      1.10.18
 // @description  WhoScored livescores: top-5, UCL, UEL, UECL(欧协,含决赛阶段), World Cup, Championship + extra leagues
 // @match        https://www.whoscored.com/livescores*
 // @match        http://www.whoscored.com/livescores*
@@ -14,7 +14,7 @@
 
   const LOG_PREFIX = '[WhoScored Livescores]';
   const PANEL_ID = 'ws-livescores-debug-panel';
-  const SCRIPT_VER = '1.10.15';
+  const SCRIPT_VER = '1.10.18';
   const EXTRA_LEAGUE_CFG_KEY = 'ws-livescores-extra-leagues';
   const LEAGUE_BAR_EXPANDED_KEY = 'ws-livescores-league-bar-expanded';
   const LEAGUE_BAR_AUTO_COLLAPSE_N = 8;
@@ -43,6 +43,10 @@
   const PAGE_DUMP_RE = /AllIn\s*Play|UpcomingOdds|Refreshing\s*in/i;
   const SCORE_RE = /^\s*(\d+)\s*[-\u2013]\s*(\d+)\s*$|^\s*(\d+)\s+(\d+)\s*$/;
   const TIME_RE = /^\s*(FT|HT|AET|Pen|Postp\.?|\d{1,2}:\d{2}|\d{1,3}'?)\s*$/i;
+  const MATCH_STATUS_RE = /^(FT|HT|AET|PEN|POSTP\.?|POST|LIVE|\d{1,3}'?)$/i;
+  const KICKOFF_CLOCK_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+  const BJ_TZ = 'Asia/Shanghai';
+  const SITE_TZ = 'Europe/London';
   const NOISE_RE = /refreshing|today\s*\u25bc|all\s*in\s*play|upcoming|odds|1x2/i;
   const KICKOFF_NOISE_RE = /[Pp]remier|[Ll]eague|Copa|England\s*-|Spain\s*-|Germany\s*-|Italy\s*-|France\s*-/;
 
@@ -50,6 +54,7 @@
   let lastPreparedRows = [];
   let selectedExtraLeagues = loadSelectedExtraLeagues();
   let leagueBarExpanded = loadLeagueBarExpanded();
+  let panelCollapsed = false;
   let lastNonTargetLeagues = [];
   let lastWhitelistLeagues = [];
   let uploadInFlight = false;
@@ -62,6 +67,8 @@
   /** 上次与地址栏同步的 d=；<> 换日时 URL 常不变，不能一直信 urlDate */
   let lastSyncedUrlDate = '';
   let lastHookedRequestDate = '';
+  /** WhoScored payload timezoneOffset（分钟，相对 UTC；夏令时多为 60） */
+  let lastTimezoneOffsetMin = null;
   /** matchId -> 最完整 link（slug），避免 API 刷新把长链接盖回 /show */
   const bestLinkByMatchId = new Map();
   const FULL_SNAPSHOT_MIN = 15;
@@ -294,9 +301,74 @@
     return true;
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
   function formatDateOnly(date) {
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  }
+
+  function datetimePartsInTimeZone(date, timeZone) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+    const get = (type) => parts.find((p) => p.type === type)?.value || '';
+    let hour = get('hour');
+    if (hour === '24') hour = '00';
+    return {
+      year: get('year'),
+      month: get('month'),
+      day: get('day'),
+      hour,
+      minute: get('minute'),
+    };
+  }
+
+  /** 上传接口要求可解析的北京时间 YYYY-MM-DD HH:mm */
+  function formatKickoffBeijing(date) {
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const p = datetimePartsInTimeZone(date, BJ_TZ);
+    if (!p.year || p.hour === '' || p.minute === '') return '';
+    return `${p.year}-${p.month}-${p.day} ${pad2(p.hour)}:${pad2(p.minute)}`;
+  }
+
+  function hasKickoffClock(k) {
+    return KICKOFF_CLOCK_RE.test(String(k || '').trim());
+  }
+
+  function londonLocalToUtcMs(y, mo, d, h, mi) {
+    const target = Date.UTC(y, mo - 1, d, h, mi);
+    const guess = Date.UTC(y, mo - 1, d, h, mi);
+    const shown = datetimePartsInTimeZone(new Date(guess), SITE_TZ);
+    const shownUtc = Date.UTC(+shown.year, +shown.month - 1, +shown.day, +shown.hour, +shown.minute);
+    return guess + (target - shownUtc);
+  }
+
+  /** WhoScored 页面/startTime 为英国当地时间 → 北京 YYYY-MM-DD HH:mm */
+  function siteLocalClockToBeijing(ymd, hm) {
+    const dm = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const tm = String(hm || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!dm || !tm) return '';
+    const y = +dm[1];
+    const mo = +dm[2];
+    const day = +dm[3];
+    const h = +tm[1];
+    const mi = +tm[2];
+    if (h > 23 || mi > 59) return '';
+    let utcMs;
+    if (lastTimezoneOffsetMin != null && Number.isFinite(lastTimezoneOffsetMin)) {
+      utcMs = Date.UTC(y, mo - 1, day, h, mi) - lastTimezoneOffsetMin * 60 * 1000;
+    } else {
+      utcMs = londonLocalToUtcMs(y, mo, day, h, mi);
+    }
+    return formatKickoffBeijing(new Date(utcMs));
   }
 
   function getPageDateFallback() {
@@ -322,44 +394,56 @@
     return '';
   }
 
-  /** Kickoff: YYYY-MM-DD HH:MM or YYYY-MM-DD status */
+  /** Kickoff: 北京时间 YYYY-MM-DD HH:mm（不要 FT/HT/直播分钟） */
   function normalizeKickoff(raw, dateContext) {
-    const s = String(raw || '').trim();
+    const s = String(raw || '').replace(/\s+/g, ' ').trim();
     if (!s) return '';
     if (s.length > 40 || REFRESH_RE.test(s) || PAGE_DUMP_RE.test(s)) return '';
     if (KICKOFF_NOISE_RE.test(s) && !/^\d{4}-\d{2}-\d{2}/.test(s)) return '';
+    if (MATCH_STATUS_RE.test(s)) return '';
 
-    const full = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})$/);
-    if (full) return `${full[1]} ${full[2]}`;
+    const clock = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (clock) return `${clock[1]} ${pad2(clock[2])}:${clock[3]}`;
 
-    const fullStatus = s.match(/^(\d{4}-\d{2}-\d{2})\s+(FT|HT|AET|\d{1,3}'?)$/i);
-    if (fullStatus) return `${fullStatus[1]} ${fullStatus[2]}`;
+    const isoZ = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i);
+    if (isoZ) return formatKickoffBeijing(parseDotNetDate(s));
 
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const isoLocal = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/);
+    if (isoLocal) return siteLocalClockToBeijing(isoLocal[1], `${isoLocal[2]}:${isoLocal[3]}`);
+
+    const hourOnly = s.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2})$/);
+    if (hourOnly && +hourOnly[2] <= 23) {
+      return siteLocalClockToBeijing(hourOnly[1], `${hourOnly[2]}:00`);
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+
+    const ctx = dateContext || '';
+    if (/^\d{1,2}:\d{2}$/.test(s)) return ctx ? siteLocalClockToBeijing(ctx, s) : '';
 
     const embedded = tryParseDateHeader(s);
     if (embedded) {
       const tm = s.match(/\b(\d{1,2}:\d{2})\b/);
-      if (tm) return `${embedded} ${tm[1]}`;
-      if (/^(FT|HT|AET|\d{1,3}'?)$/i.test(s)) return `${embedded} ${s}`;
-      return embedded;
+      if (tm) return siteLocalClockToBeijing(embedded, tm[1]);
     }
 
-    const ctx = dateContext || '';
-
-    if (/^\d{1,2}:\d{2}$/.test(s)) return ctx ? `${ctx} ${s}` : s;
-
-    if (/^(FT|HT|AET|\d{1,3}'?)$/i.test(s)) return ctx ? `${ctx} ${s}` : s;
-
     const tm = s.match(/\b(\d{1,2}:\d{2})\b/);
-    if (tm && ctx) return `${ctx} ${tm[1]}`;
+    if (tm && ctx) return siteLocalClockToBeijing(ctx, tm[1]);
 
     return '';
   }
 
+  function pickKickoff(preferred, fallback) {
+    const a = normalizeKickoff(preferred);
+    const b = normalizeKickoff(fallback);
+    if (hasKickoffClock(a)) return a;
+    if (hasKickoffClock(b)) return b;
+    return a || b || '';
+  }
+
   function isValidKickoff(k) {
     if (!k) return true;
-    return /^\d{4}-\d{2}-\d{2}(\s+\S+)?$/.test(k) || /^\d{1,2}:\d{2}$/.test(k) || /^(FT|HT|AET|\d{1,3}'?)$/i.test(k);
+    return hasKickoffClock(k) || /^\d{4}-\d{2}-\d{2}$/.test(k);
   }
 
   function trimField(value, maxLen) {
@@ -472,10 +556,13 @@
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  function formatKickoff(date) {
-    if (!date) return '';
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  function parseMatchStartDate(ev) {
+    const utc = pickString(ev.startTimeUtc, ev.StartTimeUtc, ev.startedAtUtc);
+    if (utc) {
+      const d = parseDotNetDate(utc);
+      if (d) return d;
+    }
+    return null;
   }
 
   function parseScoreText(text) {
@@ -590,7 +677,7 @@
     return {
       country: preferDomMeta ? domRow.country || apiRow.country : apiRow.country || domRow.country,
       league: preferDomMeta ? domRow.league || apiRow.league : apiRow.league || domRow.league,
-      kickoff: normalizeKickoff(apiRow.kickoff) || domRow.kickoff || '',
+      kickoff: pickKickoff(apiRow.kickoff, domRow.kickoff),
       home: apiRow.home || domRow.home || '',
       away: apiRow.away || domRow.away || '',
       score: normalizeScore(apiRow.score) || normalizeScore(domRow.score) || '',
@@ -695,16 +782,12 @@
         ? normalizeScore(`${hs}-${as}`)
         : normalizeScore(ev.scoreText || ev.ScoreText || '');
 
-    const startDate = parseDotNetDate(
-      ev.startTimeUtc || ev.StartTimeUtc || ev.startTime || ev.StartTime || ev.kickOffTime
-    );
-    let kickoff = normalizeKickoff(
-      formatKickoff(startDate) || pickString(ev.kickOff, ev.KickOff, ev.startTimeText)
-    );
+    const startDate = parseMatchStartDate(ev);
+    let kickoff = formatKickoffBeijing(startDate);
     if (!kickoff) {
-      const elapsed = pickString(ev.elapsed, ev.Elapsed);
-      const day = startDate ? formatDateOnly(startDate) : getPageDateFallback();
-      if (elapsed) kickoff = normalizeKickoff(`${day} ${elapsed}`);
+      kickoff = normalizeKickoff(
+        pickString(ev.kickOff, ev.KickOff, ev.startTimeText, ev.startTime, ev.StartTime, ev.kickOffTime)
+      );
     }
 
     const rawUrl = pickString(ev.url, ev.Url, ev.link, ev.Link, ev.matchUrl, ev.MatchUrl);
@@ -859,7 +942,7 @@
 
     for (const c of candidates) {
       const k = normalizeKickoff(c, dateCtx);
-      if (k) return k;
+      if (hasKickoffClock(k)) return k;
     }
     return '';
   }
@@ -934,7 +1017,7 @@
       return {
         country: r.country || p.country || '',
         league: r.league || p.league || '',
-        kickoff: normalizeKickoff(r.kickoff) || p.kickoff || '',
+        kickoff: pickKickoff(r.kickoff, p.kickoff),
         home: r.home || p.home || '',
         away: r.away || p.away || '',
         score: normalizeScore(r.score) || normalizeScore(p.score) || '',
@@ -959,7 +1042,7 @@
       map.set(key, {
         country: r.country || prev?.country || '',
         league: r.league || prev?.league || '',
-        kickoff: normalizeKickoff(r.kickoff) || prev?.kickoff || '',
+        kickoff: pickKickoff(r.kickoff, prev?.kickoff),
         home: r.home || prev?.home || '',
         away: r.away || prev?.away || '',
         score: normalizeScore(r.score) || normalizeScore(prev?.score) || '',
@@ -1023,6 +1106,9 @@
   /** Single API entry: trust request d=; ignore only background "today" poll while on another day */
   function acceptApiData(data, requestUrl) {
     if (!data || typeof data !== 'object') return;
+    if (data.timezoneOffset != null && Number.isFinite(Number(data.timezoneOffset))) {
+      lastTimezoneOffsetMin = Number(data.timezoneOffset);
+    }
 
     const reqDate = dateParamFromUrl(requestUrl);
     if (reqDate) lastHookedRequestDate = reqDate;
@@ -1283,12 +1369,12 @@
           match_link: cleanMatchLink(r.link),
           country: String(r.country || '').trim(),
           league: String(r.league || '').trim(),
-          kickoff: String(r.kickoff || '').trim(),
+          kickoff: normalizeKickoff(r.kickoff),
           home_team: String(r.home || '').trim(),
           away_team: String(r.away || '').trim(),
           score: String(r.score || '').trim(),
         }))
-        .filter((it) => it.match_link && it.home_team && it.away_team),
+        .filter((it) => it.match_link && it.home_team && it.away_team && hasKickoffClock(it.kickoff)),
     };
   }
 
@@ -1409,14 +1495,25 @@
 
     const rows = getRowsForUpload();
     const payload = buildUploadPayload(rows);
+    const eligible = rows.filter((r) => cleanMatchLink(r.link) && r.home && r.away);
+    const skippedKickoff = Math.max(0, eligible.length - payload.items.length);
     if (!payload.items.length) {
-      setUploadStatus('无可上传数据（请先刷新并等待解析）', true);
+      setUploadStatus(
+        skippedKickoff
+          ? `无可上传数据（${skippedKickoff} 条 kickoff 不是北京时间 HH:mm）`
+          : '无可上传数据（请先刷新并等待解析）',
+        true
+      );
       return;
     }
 
     uploadInFlight = true;
     syncUploadControls(cfg);
-    setUploadStatus(`上传中 ${payload.items.length} 条 → ${uploadEnvLabel(cfg.env)}...`, false);
+    setUploadStatus(
+      `上传中 ${payload.items.length} 条 → ${uploadEnvLabel(cfg.env)}${skippedKickoff ? `（跳过 ${skippedKickoff} 条无开球时刻）` : ''}...`,
+      false
+    );
+    if (skippedKickoff) console.warn(LOG_PREFIX, 'skip rows without kickoff clock', skippedKickoff);
     console.log(LOG_PREFIX, 'upload', cfg.env, url, payload);
 
     try {
@@ -1428,7 +1525,8 @@
         throw new Error(body?.msg || body?.message || `code ${body?.code}`);
       }
       const summary = formatUploadResult(body) || body?.msg || body?.message || 'ok';
-      setUploadStatus(`上传成功 (${uploadEnvLabel(cfg.env)}): ${summary}`, 'success');
+      const skipNote = skippedKickoff ? `，跳过 ${skippedKickoff} 条无开球时刻` : '';
+      setUploadStatus(`上传成功 (${uploadEnvLabel(cfg.env)}): ${summary}${skipNote}`, 'success');
       console.log(LOG_PREFIX, 'upload ok', body);
     } catch (err) {
       const msg = err?.message || String(err);
@@ -1545,6 +1643,7 @@
     let panel = document.getElementById(PANEL_ID);
     if (panel) {
       patchLeagueBarPanel(panel);
+      setPanelCollapsed(panel, panelCollapsed);
       return panel;
     }
 
@@ -1560,6 +1659,31 @@
         background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:10px;
         box-shadow:0 8px 32px rgba(0,0,0,.45);font:12px/1.4 system-ui,sans-serif;
         display:flex;flex-direction:column;overflow:hidden;
+        transition:width .22s ease,height .22s ease,border-radius .22s ease,box-shadow .22s ease,transform .18s ease;
+      }
+      #${PANEL_ID}.collapsed{
+        width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;
+        border:none;border-radius:50%;cursor:pointer;
+        background:radial-gradient(circle at 32% 28%,#ecfdf5 0%,#86efac 46%,#4ade80 100%);
+        box-shadow:0 6px 18px rgba(22,163,74,.32),inset 0 -8px 12px rgba(21,128,61,.16),inset 4px 4px 10px rgba(255,255,255,.5);
+      }
+      #${PANEL_ID}.collapsed:hover{
+        transform:scale(1.08);
+        box-shadow:0 8px 22px rgba(22,163,74,.4),inset 0 -8px 12px rgba(21,128,61,.16),inset 4px 4px 10px rgba(255,255,255,.55);
+      }
+      #${PANEL_ID}.collapsed .upload-bar,
+      #${PANEL_ID}.collapsed .league-bar,
+      #${PANEL_ID}.collapsed .body{display:none!important}
+      #${PANEL_ID}.collapsed .hdr{
+        flex:1 1 auto;width:100%;height:100%;padding:0;border:none;background:transparent;
+        justify-content:center;align-items:center;flex-wrap:nowrap;
+      }
+      #${PANEL_ID}.collapsed .hdr > *:not(.ball-label){display:none!important}
+      #${PANEL_ID} .ball-label{display:none}
+      #${PANEL_ID}.collapsed .ball-label{
+        display:flex!important;align-items:center;justify-content:center;
+        width:100%;height:100%;margin:0;font-size:12px;font-weight:700;letter-spacing:.5px;
+        color:#166534;text-shadow:0 1px 0 rgba(255,255,255,.45);pointer-events:none;
       }
       #${PANEL_ID} .hdr{
         flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
@@ -1687,9 +1811,12 @@
     const btnToggle = document.createElement('button');
     btnToggle.type = 'button';
     btnToggle.dataset.action = 'toggle';
-    btnToggle.textContent = 'Collapse';
+    btnToggle.textContent = panelCollapsed ? 'Expand' : 'Collapse';
     btnWrap.append(btnUpload, btnRefresh, btnToggle);
-    hdr.append(title, sub, btnWrap);
+    const ballLabel = document.createElement('span');
+    ballLabel.className = 'ball-label';
+    ballLabel.textContent = 'WS';
+    hdr.append(title, sub, btnWrap, ballLabel);
 
     const uploadCfg = loadUploadConfig();
     const uploadBar = document.createElement('div');
@@ -1783,14 +1910,27 @@
       clearCacheForDate(livescoreDateParam());
       reloadForCurrentDate().finally(() => scheduleParse(0));
     });
-    btnToggle.addEventListener('click', () => {
-      const hidden = body.style.display === 'none';
-      body.style.display = hidden ? '' : 'none';
-      uploadBar.style.display = hidden ? '' : 'none';
-      leagueBar.style.display = hidden && leagueBar.dataset.hasLeagues === '1' ? 'flex' : 'none';
-      btnToggle.textContent = hidden ? 'Collapse' : 'Expand';
+    btnToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setPanelCollapsed(panel, !panelCollapsed);
     });
+    panel.addEventListener('click', () => {
+      if (panelCollapsed) setPanelCollapsed(panel, false);
+    });
+    setPanelCollapsed(panel, panelCollapsed);
     return panel;
+  }
+
+  function setPanelCollapsed(panel, collapsed) {
+    if (!panel) panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+    panelCollapsed = !!collapsed;
+    panel.classList.toggle('collapsed', panelCollapsed);
+    panel.title = panelCollapsed ? '点击展开' : '';
+    const btn = panel.querySelector('[data-action="toggle"]');
+    if (btn) btn.textContent = panelCollapsed ? 'Expand' : 'Collapse';
+    const leagueBar = panel.querySelector('#ws-livescores-league-bar');
+    if (leagueBar) syncLeagueBarVisibility(leagueBar);
   }
 
   let leagueBarSearchBlurTimer = null;
@@ -1936,9 +2076,7 @@
 
   function syncLeagueBarVisibility(leagueBar) {
     if (!leagueBar || leagueBar.id !== 'ws-livescores-league-bar') return;
-    const panel = document.getElementById(PANEL_ID);
-    const bodyHidden = panel?.querySelector('.body')?.style.display === 'none';
-    leagueBar.style.display = !bodyHidden && leagueBar.dataset.hasLeagues === '1' ? 'flex' : 'none';
+    leagueBar.style.display = !panelCollapsed && leagueBar.dataset.hasLeagues === '1' ? 'flex' : 'none';
   }
 
   function ensureLeagueBarWhitelistWrap(leagueBar) {
@@ -1987,7 +2125,7 @@
     updatePanelSubtitle(subtitle);
     const body = panel.querySelector('.body');
     if (!body) return;
-    body.style.display = '';
+    if (!panelCollapsed) body.style.display = '';
     const leagueBar = panel.querySelector('#ws-livescores-league-bar');
     if (leagueBar) syncLeagueBarVisibility(leagueBar);
     body.replaceChildren();

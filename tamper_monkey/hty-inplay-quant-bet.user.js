@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.17
+// @version      2.16.18
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.17";
+  var SCRIPT_VERSION = "2.16.18";
 
   // src/storage-keys.js
   var KEYS = {
@@ -2124,6 +2124,17 @@
         tick();
       });
     }
+    async function waitForSettled(getter, timeoutMs, intervalMs) {
+      try {
+        return await waitFor(getter, timeoutMs, intervalMs);
+      } catch (e) {
+        try {
+          return getter() || null;
+        } catch (e2) {
+          return null;
+        }
+      }
+    }
     function safeClick(el) {
       if (!el || el.disabled) return false;
       if (shouldBlockProgrammaticNavClick(el)) {
@@ -2194,6 +2205,22 @@
       }
     }
     function getSportCartRoot() {
+      const selectors = [
+        '[data-testid="SportCart"]',
+        '[data-testid="overlay-container-cart-overlay-task-id"]',
+        '[data-testid*="SportCart"]',
+        '[data-testid*="cart-overlay"]'
+      ];
+      for (let i = 0; i < selectors.length; i++) {
+        const el = document.querySelector(selectors[i]);
+        if (el && isElementVisible(el)) return el;
+      }
+      const input = document.querySelector('[data-testid="SportCartBetInput"]');
+      if (input) {
+        const wrap = input.closest('[data-testid*="Cart"], [data-testid*="cart"], [class*="SportCart"], [class*="cart"]');
+        if (wrap && isElementVisible(wrap)) return wrap;
+        if (isElementVisible(input)) return input;
+      }
       return document.querySelector('[data-testid="SportCart"]') || document.querySelector('[data-testid="overlay-container-cart-overlay-task-id"]');
     }
     function isCartOpen() {
@@ -2346,7 +2373,7 @@
           }
           continue;
         }
-        const btn = await waitFor(findBetActionButton, 8e3, 300);
+        const btn = await waitForSettled(findBetActionButton, 8e3, 300);
         if (!btn) {
           if (isBetSubmittedDrawerVisible()) return true;
           throw new Error("\u627E\u4E0D\u5230\u6295\u6CE8\u6309\u94AE");
@@ -2712,8 +2739,8 @@
           if (!isElementVisible(el)) continue;
           if (el.closest && el.closest("#" + PANEL_ID)) continue;
           const tid = (el.getAttribute("data-testid") || "").toLowerCase();
-          if (tid && tid !== tabId) continue;
-          if (tid === tabId) {
+          const tidHit = tid === tabId || tid === "tab-" + tabId || new RegExp("(^|[-_])" + tabId + "$").test(tid);
+          if (tidHit) {
             safeClick(el);
             return true;
           }
@@ -4785,6 +4812,12 @@
     }
     function shouldAllowAutoNavigation(reason) {
       if (isHistoryOrderPage()) return false;
+      const reasonText = String(reason || "");
+      const sameMatchTab = /^tab-/.test(reasonText) && reasonText !== "tab-stranded";
+      const loginModalUp = typeof isSimplePasswordModalVisible === "function" && isSimplePasswordModalVisible() || typeof isIdleLoginModalVisible === "function" && isIdleLoginModalVisible();
+      if (sameMatchTab && isOnInplayMatchPage() && isLoggedIn() && !loginModalUp) {
+        return true;
+      }
       if (shouldBlockMatchAutoNav()) {
         console.log("[hty-inplay] \u672A\u767B\u5F55/\u767B\u5F55\u4E2D\uFF0C\u8DF3\u8FC7\u5BFC\u822A", reason || "");
         return false;
@@ -5123,6 +5156,9 @@
           {
             name: "login-gate",
             run: async function() {
+              if (isLoggedIn() && !(typeof isSimplePasswordModalVisible === "function" && isSimplePasswordModalVisible()) && !(typeof isIdleLoginModalVisible === "function" && isIdleLoginModalVisible())) {
+                return false;
+              }
               return shouldBlockMatchAutoNav();
             }
           },
@@ -6323,6 +6359,7 @@
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i];
         if (!isElementVisible(el)) continue;
+        if (el.closest && el.closest("#" + PANEL_ID)) continue;
         const rect = el.getBoundingClientRect();
         if (rect.top > 140) continue;
         if (rect.width < 28 || rect.height < 18) continue;
@@ -9473,9 +9510,19 @@
           setBetStep("\u6EDA\u52A8\u5230\u8D54\u7387\u6309\u94AE");
           await humanScrollTo(liveBtn);
           setBetStep("\u70B9\u51FB " + option.label + " \u8D54\u7387");
-          safeClick(liveBtn);
+          robustClick(liveBtn);
           await humanDelay(600, 1100);
-          opened = await waitFor(isCartOpen, 12e3, 300);
+          opened = !!await waitForSettled(isCartOpen, 8e3, 300);
+        }
+        if (!opened) {
+          setBetStep("\u6295\u6CE8\u5355\u672A\u6253\u5F00\uFF0C\u518D\u6B21\u70B9\u51FB\u8D54\u7387");
+          renderPanel(true);
+          robustClick(liveBtn);
+          await humanDelay(700, 1200);
+          opened = !!await waitForSettled(isCartOpen, 8e3, 300);
+        }
+        if (!opened) {
+          opened = await openBetDrawer();
         }
         if (!opened) throw new Error("\u6295\u6CE8\u5355\u672A\u6253\u5F00");
         await ensureBetCartVisible();
@@ -9596,7 +9643,7 @@
         setBetStep("\u4E0B\u6CE8\u5931\u8D25\uFF1A" + msg + "\uFF0C\u6761\u4EF6\u6EE1\u8DB3\u5C06\u91CD\u8BD5");
         renderPanel(true);
         schedulePoll();
-        if (!/超时|等待/i.test(msg)) {
+        if (betAttemptAt === 0 || !/超时|等待/i.test(msg)) {
           maybeTriggerAutoBet(false);
         }
         return false;

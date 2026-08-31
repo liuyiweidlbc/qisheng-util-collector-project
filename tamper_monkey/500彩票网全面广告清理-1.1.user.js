@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.83
+// @version      1.9.86
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表增亚盘列；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -1644,30 +1644,61 @@
         }
         ensureJiaozhanOupeiColumn(table);
         cols = getJiaozhanYapanBeizhuIndices(table);
-        if (cols.shishi >= 0) return cols;
+        if (cols.shishi < 0) {
+            const thRow = findJiaozhanHeaderThRow(table);
+            if (!thRow) return cols;
+            const ths = thRow.querySelectorAll('th');
+            const refTh = ths[cols.beizhu];
+            if (!refTh) return cols;
+            const newTh = document.createElement('th');
+            newTh.textContent = '实时';
+            newTh.className = 'tm500-jz-ss-col';
+            insertAfterJiaozhanNode(newTh, refTh);
+            const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
+                return tr.querySelector('td') && !tr.querySelector('th');
+            });
+            rows.forEach(function(tr) {
+                const tds = tr.querySelectorAll('td');
+                const refTd = tds[cols.beizhu];
+                if (!refTd) return;
+                const newTd = document.createElement('td');
+                newTd.className = 'tm500-jz-ss-cell';
+                newTd.textContent = '-';
+                insertAfterJiaozhanNode(newTd, refTd);
+            });
+            table.dataset.tm500JzShishiCol = '1';
+        }
+        // 表头已有欧赔/实时时，补上后出现的本场行（勾选「包含本场」才显示）缺格
+        syncJiaozhanScriptColumnCells(table);
+        return getJiaozhanYapanBeizhuIndices(table);
+    }
+
+    /** 按表头把脚本列（欧赔/实时）补进缺格的数据行，避免本场行少 td 导致初盘/实时写不到 */
+    function syncJiaozhanScriptColumnCells(table) {
         const thRow = findJiaozhanHeaderThRow(table);
-        if (!thRow) return cols;
+        if (!thRow) return;
         const ths = thRow.querySelectorAll('th');
-        const refTh = ths[cols.beizhu];
-        if (!refTh) return cols;
-        const newTh = document.createElement('th');
-        newTh.textContent = '实时';
-        newTh.className = 'tm500-jz-ss-col';
-        insertAfterJiaozhanNode(newTh, refTh);
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
         rows.forEach(function(tr) {
-            const tds = tr.querySelectorAll('td');
-            const refTd = tds[cols.beizhu];
-            if (!refTd) return;
-            const newTd = document.createElement('td');
-            newTd.className = 'tm500-jz-ss-cell';
-            newTd.textContent = '-';
-            insertAfterJiaozhanNode(newTd, refTd);
+            let i;
+            for (i = 0; i < ths.length; i++) {
+                const th = ths[i];
+                const isOp = th.classList.contains('tm500-jz-op-col');
+                const isSs = th.classList.contains('tm500-jz-ss-col');
+                if (!isOp && !isSs) continue;
+                const cells = tr.querySelectorAll('td');
+                const cell = cells[i];
+                const needClass = isOp ? 'tm500-jz-op-cell' : 'tm500-jz-ss-cell';
+                if (cell && cell.classList.contains(needClass)) continue;
+                const newTd = document.createElement('td');
+                newTd.className = needClass;
+                newTd.textContent = '-';
+                if (cell) tr.insertBefore(newTd, cell);
+                else tr.appendChild(newTd);
+            }
         });
-        table.dataset.tm500JzShishiCol = '1';
-        return getJiaozhanYapanBeizhuIndices(table);
     }
 
     const JZ_BEIZHU_STYLE_ID = 'tm500-jz-beizhu-style-196';
@@ -2814,9 +2845,20 @@
         return m ? m[1] : '';
     }
 
-    function getJiaozhanTrSid(tr) {
+    function getJiaozhanYapanCompanyIdFromTable(table) {
+        const yp = table && (table.querySelector('select[name="yapan"][data-t="yp"]') ||
+            table.querySelector('select[name="yapan"]'));
+        let cid = (yp && yp.value !== undefined && yp.value !== null && String(yp.value).trim() !== '')
+            ? String(yp.value).trim() : '5';
+        if (cid === '0' || cid === '') cid = '5';
+        return cid;
+    }
+
+    function getJiaozhanTrSid(tr, cidOpt) {
         const s = tr.getAttribute('sid');
-        if (s !== null && s !== '') return String(s);
+        // 本场行站点常写 sid=1 占位，不能带进批量 ajax（会拖垮初盘/实时）
+        if (s !== null && s !== '' && s !== '1') return String(s);
+        if (cidOpt) return String(cidOpt);
         return '5';
     }
 
@@ -2843,6 +2885,7 @@
         const out = [];
         const root = document.getElementById('team_jiaozhan');
         const includeBmatch = isJiaozhanIncludeBmatchChecked(root);
+        const cid = getJiaozhanYapanCompanyIdFromTable(table);
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
@@ -2855,7 +2898,7 @@
             }
             const fid = getJiaozhanTrFid(tr);
             if (!fid) return;
-            out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr) });
+            out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr, cid) });
         });
         return out;
     }
@@ -3128,6 +3171,7 @@
                 fillMissingJiaozhanRemarkFromZhongMap(table, cols, pairs, zhongMap);
                 applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, chuMap, zhongMap);
                 applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap, zhongMap);
+                fillMissingJiaozhanYapanFromHkjc(table, cols, pairs, cid, reqId, chuMap);
             });
         });
     }
@@ -3150,6 +3194,7 @@
             fillMissingJiaozhanRemarkFromZhongMap(table, cols, pairs, zhongMap);
             applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, chuMap || {}, zhongMap);
             applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap || {}, zhongMap);
+            fillMissingJiaozhanYapanFromHkjc(table, cols, pairs, cid, reqId, chuMap || {});
         });
     }
 
@@ -3654,19 +3699,11 @@
     }
 
     /**
-     * yazhiajax 返回盘口变动（新→旧），末条为初盘。
-     * 用于 p_t=1 无初盘数据时的备注列兜底。
+     * yazhiajax 返回盘口变动（新→旧）：首条=即时，末条=初盘。
+     * 用于 p_t=1 无初盘、以及本场行 ajax.php 无亚盘时的兜底。
      */
-    function parseJiaozhanYazhiAjaxOpeningObj(text) {
-        let arr;
-        try {
-            arr = JSON.parse((text || '').replace(/^\uFEFF?\s*/, ''));
-        } catch (e0) {
-            return null;
-        }
-        if (!Array.isArray(arr) || !arr.length) return null;
-        const html = String(arr[arr.length - 1] || '');
-        const m = html.match(/<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+    function parseJiaozhanYazhiAjaxRowHtml(html) {
+        const m = String(html || '').match(/<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
         if (!m) return null;
         let h = stripJiaozhanHtmlText(m[1]);
         let name = stripJiaozhanHtmlText(m[2]);
@@ -3684,12 +3721,98 @@
         };
     }
 
-    /** 对备注仍空的行，按公司 id 拉 yazhiajax 取末条初盘写入备注 */
+    function parseJiaozhanYazhiAjaxBook(text) {
+        let arr;
+        try {
+            arr = JSON.parse((text || '').replace(/^\uFEFF?\s*/, ''));
+        } catch (e0) {
+            return null;
+        }
+        if (!Array.isArray(arr) || !arr.length) return null;
+        const zhong = parseJiaozhanYazhiAjaxRowHtml(arr[0]);
+        const chu = parseJiaozhanYazhiAjaxRowHtml(arr[arr.length - 1]);
+        if (!chu && !zhong) return null;
+        return { chu: chu, zhong: zhong };
+    }
+
+    function parseJiaozhanYazhiAjaxOpeningObj(text) {
+        const book = parseJiaozhanYazhiAjaxBook(text);
+        return book && book.chu ? book.chu : null;
+    }
+
+    function isJiaozhanShishiCellFilled(sTd) {
+        if (!sTd) return false;
+        if (sTd.getAttribute('data-tm500-jz-ss-zp') === '1') return true;
+        const t = (sTd.getAttribute('data-tm500-jz-cell-val') || sTd.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!t || t === '-') return false;
+        if (!/\d+(?:\.\d+)?/.test(t) && !/[\u4e00-\u9fff]/.test(t)) return false;
+        return true;
+    }
+
+    function collectJiaozhanPairsMissingYapanDisplay(cols, pairs) {
+        const out = [];
+        if (!pairs || !pairs.length) return out;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            const missBz = cols.beizhu < 0 || tds.length <= cols.beizhu ||
+                !isJiaozhanBeizhuCellFilled(tds[cols.beizhu]);
+            const missSs = cols.shishi < 0 || tds.length <= cols.shishi ||
+                !isJiaozhanShishiCellFilled(tds[cols.shishi]);
+            if (missBz || missSs) out.push(p);
+        });
+        return out;
+    }
+
+    /** 500 香港马会（交战表下拉里没有，亚盘页/yazhiajax 用 cid=122） */
+    const JZ_HKJC_YAPAN_CID = '122';
+
+    function tagJiaozhanHkjcFallbackCells(cols, pairs) {
+        if (!pairs || !pairs.length) return;
+        pairs.forEach(function(p) {
+            const tds = p.tr.querySelectorAll('td');
+            const tip = '马会（所选公司无亚盘）';
+            if (cols.beizhu >= 0 && tds.length > cols.beizhu &&
+                isJiaozhanBeizhuCellFilled(tds[cols.beizhu])) {
+                tds[cols.beizhu].setAttribute('data-tm500-jz-yp-hkjc', '1');
+                if (!tds[cols.beizhu].getAttribute('title')) tds[cols.beizhu].setAttribute('title', tip);
+            }
+            if (cols.shishi >= 0 && tds.length > cols.shishi &&
+                isJiaozhanShishiCellFilled(tds[cols.shishi])) {
+                tds[cols.shishi].setAttribute('data-tm500-jz-yp-hkjc', '1');
+                if (!tds[cols.shishi].getAttribute('title')) tds[cols.shishi].setAttribute('title', tip);
+            }
+        });
+    }
+
+    /**
+     * 所选公司（常见为澳门）无亚盘时，只用马会补仍空的行。
+     * 交战 ajax.php 对马会常空/超时，yazhiajax（cid=122）有初盘/即时。
+     */
+    function fillMissingJiaozhanYapanFromHkjc(table, cols, pairs, preferredCid, reqId, chuMap) {
+        if (String(preferredCid) === JZ_HKJC_YAPAN_CID) return;
+        const missing = collectJiaozhanPairsMissingYapanDisplay(cols, pairs);
+        if (!missing.length) return;
+        fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, missing, JZ_HKJC_YAPAN_CID, reqId, function(extraChu, extraZhong) {
+            if (!jiaozhanRemarkAjaxReqActive(reqId)) return;
+            if (extraZhong) applyJiaozhanShishiFromAjaxPayload(table, cols, missing, extraZhong);
+            if (chuMap && extraChu) {
+                Object.keys(extraChu).forEach(function(k) { chuMap[k] = extraChu[k]; });
+            }
+            tagJiaozhanHkjcFallbackCells(cols, missing);
+            applyJiaozhanShishiRangqiuOddsChg(table, cols, pairs, chuMap || {}, extraZhong || {});
+            applyJiaozhanShishiPkChgMarks(table, cols, pairs, chuMap || {}, extraZhong || {});
+        });
+    }
+
+    /** 对仍空的行，按当前公司拉 yazhiajax：末条→初盘，首条→实时 */
     function fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, pairs, cid, reqId, onDone) {
-        const missing = collectJiaozhanPairsMissingBeizhu(cols, pairs);
+        const missing = collectJiaozhanPairsMissingYapanDisplay(cols, pairs);
         const extraMap = {};
+        const extraZhong = {};
         if (!missing.length) {
-            if (onDone) onDone(extraMap);
+            if (onDone) onDone(extraMap, extraZhong);
             return;
         }
         const origin = location.origin || (location.protocol + '//' + location.host);
@@ -3701,7 +3824,7 @@
             pending--;
             if (pending > 0) return;
             settled = true;
-            if (onDone) onDone(extraMap);
+            if (onDone) onDone(extraMap, extraZhong);
         }
         missing.forEach(function(p) {
             const url = origin + '/fenxi1/inc/yazhiajax.php?fid=' + encodeURIComponent(p.fid) +
@@ -3713,17 +3836,27 @@
                     return;
                 }
                 if (!err && text) {
-                    const obj = parseJiaozhanYazhiAjaxOpeningObj(text);
-                    if (obj) {
-                        extraMap[p.fid] = obj;
-                        const txt = formatJiaozhanYapanAjaxRemark(obj);
-                        if (txt) {
-                            const tds = p.tr.querySelectorAll('td');
-                            if (tds.length > cols.beizhu) {
-                                const bTd = tds[cols.beizhu];
-                                renderJiaozhanBeizhuCell(bTd, txt);
-                                bTd.setAttribute('data-tm500-jz-bz-cp', '1');
-                                bTd.setAttribute('data-tm500-jz-bz-yazhi', '1');
+                    const book = parseJiaozhanYazhiAjaxBook(text);
+                    const tds = p.tr.querySelectorAll('td');
+                    if (book && book.chu) {
+                        extraMap[p.fid] = book.chu;
+                        const txt = formatJiaozhanYapanAjaxRemark(book.chu);
+                        if (txt && tds.length > cols.beizhu && !isJiaozhanBeizhuCellFilled(tds[cols.beizhu])) {
+                            const bTd = tds[cols.beizhu];
+                            renderJiaozhanBeizhuCell(bTd, txt);
+                            bTd.setAttribute('data-tm500-jz-bz-cp', '1');
+                            bTd.setAttribute('data-tm500-jz-bz-yazhi', '1');
+                        }
+                    }
+                    if (book && book.zhong && cols.shishi >= 0 && tds.length > cols.shishi) {
+                        extraZhong[p.fid] = book.zhong;
+                        if (!isJiaozhanShishiCellFilled(tds[cols.shishi])) {
+                            const txtSs = formatJiaozhanYapanAjaxShishi(book.zhong);
+                            if (txtSs) {
+                                const sTd = tds[cols.shishi];
+                                renderJiaozhanShishiCell(sTd, txtSs);
+                                sTd.setAttribute('data-tm500-jz-ss-zp', '1');
+                                sTd.setAttribute('data-tm500-jz-ss-yazhi', '1');
                             }
                         }
                     }
@@ -4018,13 +4151,14 @@
             }
             const chuMap = sanitizeJiaozhanYapanAjaxMap(data);
             applyJiaozhanRemarkFromAjaxPayload(table, cols, pairs, chuMap);
-            fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, pairs, cid, reqId, function(extraChuMap) {
+            fillMissingJiaozhanRemarkFromYazhiAjax(table, cols, pairs, cid, reqId, function(extraChuMap, extraZhongMap) {
                 if (!jiaozhanRemarkAjaxReqActive(reqId)) return;
                 if (extraChuMap && typeof extraChuMap === 'object') {
                     Object.keys(extraChuMap).forEach(function(k) {
                         chuMap[k] = extraChuMap[k];
                     });
                 }
+                if (extraZhongMap) applyJiaozhanShishiFromAjaxPayload(table, cols, pairs, extraZhongMap);
                 fillMissingJiaozhanRemarkFromYapanDom(table, cols, pairs);
                 const stillMissing = collectJiaozhanPairsMissingBeizhu(cols, pairs);
                 const filledAny = pairs.length > stillMissing.length;
@@ -4315,8 +4449,9 @@
                     if (wrap) cb = wrap.querySelector('input[name="bhbc"]');
                 }
                 if (!cb) return;
-                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 100);
-                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 450);
+                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 80);
+                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 320);
+                window.setTimeout(fillJiaozhanRemarkFromChupanYapan, 900);
             }, true);
         }
         function ensureJiaozhanRemarkSelectHook() {
@@ -5218,6 +5353,9 @@
     function collectZhanjiYapanAjaxPairs(table) {
         const out = [];
         const includeBmatch = isJiaozhanIncludeBmatchChecked(document.getElementById('team_jiaozhan'));
+        const cid = getJiaozhanYapanCompanyIdFromTable(
+            (document.getElementById('team_jiaozhan') || document).querySelector('table.pub_table') || table
+        );
         const rows = Array.from(table.querySelectorAll('tr')).filter(function(tr) {
             return tr.querySelector('td') && !tr.querySelector('th');
         });
@@ -5230,7 +5368,7 @@
             }
             const fid = getJiaozhanTrFid(tr);
             if (!fid) return;
-            out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr) });
+            out.push({ tr: tr, fid: fid, sid: getJiaozhanTrSid(tr, cid) });
         });
         return out;
     }
