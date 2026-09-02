@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-09-03.5
+// @version 2026-09-03.6
 // @description 投注记录上传；sportEvents / inplay 左侧计划比赛列表
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
@@ -11,6 +11,7 @@
 // @grant GM_xmlhttpRequest
 // @connect i.socbeta.xyz
 // @connect socbeta.xyz
+// @connect 192.168.31.168
 // @run-at document-end
 // ==/UserScript==
 
