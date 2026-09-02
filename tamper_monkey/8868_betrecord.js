@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-09-01.10
+// @version 2026-09-03.5
 // @description 投注记录上传；sportEvents / inplay 左侧计划比赛列表
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
@@ -1398,11 +1398,11 @@
         };
     }
 
-    var PLAN_PANEL_ID = 'tm-8868-plan-list';
     var PLAN_STYLE_ID = 'tm-8868-plan-style';
+    var PLAN_DOCK_ID = 'tm-8868-plan-dock';
+    var PLAN_SHELL_ID = 'tm-8868-plan-shell';
     var PLAN_API = 'http://i.socbeta.xyz/api/v1/soc/bet/plan/list';
     var PLAN_MATCH_ENTITY_API = 'http://socbeta.xyz/api/v1/soc/match/entity/';
-    var PLAN_ID = '4';
     var PLAN_LIVE_MS = 150 * 60 * 1000;
     var PLAN_INPLAY_EARLY_MS = 60 * 1000;
     var PLAN_POLL_MS = 60000;
@@ -1411,26 +1411,217 @@
         { key: 'upcoming', label: '未开始' },
         { key: 'ended', label: '已经结束' }
     ];
-
-    var planMatches = [];
-    var planStatus = 'idle';
-    var planError = '';
-    var planCollapsed = false;
-    var planGroupCollapsed = { live: false, upcoming: false, ended: true };
-    var planPollTimer = null;
-    var planTickTimer = null;
-    var planFetchInFlight = false;
-    var lastPlanListPath = null;
-    var lastPlanRenderKey = '';
-    var planMatchMetaCache = {};
-    var planFilterQuery = '';
-    var planDateBegin = '';
-    var planDateEnd = '';
-    var planFetchSeq = 0;
-    var PLAN_FILTER_HISTORY_KEY = 'tm-8868-plan-filter-history';
     var PLAN_FILTER_HISTORY_MAX = 10;
-    var PLAN_DATE_KEY = 'tm-8868-plan-date-range';
     var PLAN_DATE_MAX_SPAN = 31;
+    var planMatchMetaCache = {};
+    var S = null;
+    var lastPlanRoutePath = null;
+
+    function makePlanBoard(opts) {
+        return {
+            panelId: opts.panelId,
+            title: opts.title,
+            magnetLabel: opts.magnetLabel,
+            theme: opts.theme,
+            planId: opts.planId || '',
+            excludePlanId: opts.excludePlanId || '',
+            filterHistoryKey: opts.storageKey + '-filter-history',
+            dateKey: opts.storageKey + '-date-range',
+            matches: [],
+            status: 'idle',
+            error: '',
+            collapsed: !!opts.defaultCollapsed,
+            groupCollapsed: { live: false, upcoming: false, ended: true },
+            pollTimer: null,
+            tickTimer: null,
+            fetchInFlight: false,
+            lastRenderKey: '',
+            filterQuery: '',
+            dateBegin: '',
+            dateEnd: '',
+            fetchSeq: 0
+        };
+    }
+
+    var planBoards = [
+        makePlanBoard({
+            panelId: 'tm-8868-plan-list',
+            title: '竞彩优势',
+            magnetLabel: '竞彩优势',
+            theme: 'green',
+            planId: '4',
+            storageKey: 'tm-8868-plan',
+            defaultCollapsed: false
+        }),
+        makePlanBoard({
+            panelId: 'tm-8868-plan-other',
+            title: '滚球大小',
+            magnetLabel: '滚球大小',
+            theme: 'gold',
+            excludePlanId: '4',
+            storageKey: 'tm-8868-plan-other',
+            defaultCollapsed: true
+        })
+    ];
+
+    function withBoard(board, fn) {
+        var prev = S;
+        S = board;
+        try {
+            return fn();
+        } finally {
+            S = prev;
+        }
+    }
+
+    function boardFromPanel(panel) {
+        var id = panel && panel.id;
+        for (var i = 0; i < planBoards.length; i++) {
+            if (planBoards[i].panelId === id) return planBoards[i];
+        }
+        return S;
+    }
+
+    function getPlanShell() {
+        return document.getElementById(PLAN_SHELL_ID);
+    }
+
+    function currentOpenBoard() {
+        for (var i = 0; i < planBoards.length; i++) {
+            if (!planBoards[i].collapsed) return planBoards[i];
+        }
+        return null;
+    }
+
+    function withOpenBoard(fn) {
+        var board = currentOpenBoard() || S;
+        if (!board) return;
+        return withBoard(board, fn);
+    }
+
+    function collapseOtherPlanBoards(except) {
+        planBoards.forEach(function (board) {
+            if (board !== except) board.collapsed = true;
+        });
+    }
+
+    function updatePlanDock() {
+        var dock = document.getElementById(PLAN_DOCK_ID);
+        if (!dock) return;
+        var anyOpen = false;
+        var tabs = dock.querySelectorAll('.tm-8868-plan-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            var tab = tabs[i];
+            var board = null;
+            for (var j = 0; j < planBoards.length; j++) {
+                if (planBoards[j].panelId === tab.getAttribute('data-board')) {
+                    board = planBoards[j];
+                    break;
+                }
+            }
+            var active = !!(board && !board.collapsed);
+            tab.classList.toggle('is-active', active);
+            if (active) anyOpen = true;
+        }
+        dock.classList.toggle('is-panel-open', anyOpen);
+        syncPlanSwitchers();
+    }
+
+    function findPlanBoard(panelId) {
+        for (var i = 0; i < planBoards.length; i++) {
+            if (planBoards[i].panelId === panelId) return planBoards[i];
+        }
+        return null;
+    }
+
+    function applyOpenBoardChrome(panel) {
+        panel = panel || getPlanShell();
+        if (!panel || !S) return;
+        var filterInput = panel.querySelector('.tm-8868-plan-filter-input');
+        if (filterInput) filterInput.value = S.filterQuery || '';
+        syncPlanDateInputs(panel);
+        closePlanFilterHistory(panel);
+        syncPlanSwitchers();
+    }
+
+    function switchPlanBoard(panelId) {
+        var board = findPlanBoard(panelId);
+        if (!board) return;
+        withBoard(board, function () {
+            var panel = createPlanListPanel();
+            setPlanPanelCollapsed(panel, false);
+            applyOpenBoardChrome(panel);
+            S.lastRenderKey = '';
+            renderPlanList();
+            if (S.status === 'idle') fetchPlanMatches(false);
+        });
+    }
+
+    function planHeadInnerHtml() {
+        var open = currentOpenBoard() || S;
+        return '<div class="tm-8868-plan-switch">' +
+            planBoards.map(function (board) {
+                var on = open && board.panelId === open.panelId ? ' is-on' : '';
+                return '<button type="button" class="is-theme-' + board.theme + on + '" data-board="' + board.panelId + '">' +
+                    escapeHtml(board.title) + '</button>';
+            }).join('') +
+            '</div>' +
+            '<span class="tm-8868-plan-head-actions">' +
+            '<button type="button" class="tm-8868-plan-icon-btn tm-8868-plan-refresh" title="刷新">↻</button>' +
+            '<button type="button" class="tm-8868-plan-icon-btn tm-8868-plan-toggle" title="收起">‹</button>' +
+            '</span>';
+    }
+
+    function syncPlanSwitchers() {
+        var panel = getPlanShell();
+        if (!panel) return;
+        var open = currentOpenBoard();
+        var btns = panel.querySelectorAll('.tm-8868-plan-switch [data-board]');
+        for (var i = 0; i < btns.length; i++) {
+            var btn = btns[i];
+            var board = findPlanBoard(btn.getAttribute('data-board'));
+            btn.classList.toggle('is-on', !!(open && board && board.panelId === open.panelId));
+            if (board) {
+                btn.classList.toggle('is-theme-green', board.theme === 'green');
+                btn.classList.toggle('is-theme-gold', board.theme === 'gold');
+            }
+        }
+    }
+
+    function ensurePlanDock(show) {
+        var dock = document.getElementById(PLAN_DOCK_ID);
+        if (!show) {
+            if (dock) dock.classList.add('tm-8868-plan-hidden');
+            return;
+        }
+        if (!dock) {
+            dock = document.createElement('div');
+            dock.id = PLAN_DOCK_ID;
+            dock.innerHTML = planBoards.map(function (board) {
+                return '<button type="button" class="tm-8868-plan-tab is-theme-' + board.theme +
+                    '" data-board="' + board.panelId + '" title="' + escapeHtml(board.magnetLabel) + '">' +
+                    escapeHtml(board.magnetLabel) + '</button>';
+            }).join('');
+            (document.body || document.documentElement).appendChild(dock);
+            dock.addEventListener('click', function (e) {
+                var tab = eventElement(e);
+                tab = tab && tab.closest ? tab.closest('.tm-8868-plan-tab') : null;
+                if (!tab) return;
+                var boardId = tab.getAttribute('data-board');
+                var board = null;
+                for (var i = 0; i < planBoards.length; i++) {
+                    if (planBoards[i].panelId === boardId) {
+                        board = planBoards[i];
+                        break;
+                    }
+                }
+                if (!board) return;
+                switchPlanBoard(board.panelId);
+            });
+        }
+        dock.classList.remove('tm-8868-plan-hidden');
+        updatePlanDock();
+    }
 
     function getPlanScriptVersion() {
         try {
@@ -1438,7 +1629,7 @@
                 return String(GM_info.script.version);
             }
         } catch (e) { /* ignore */ }
-        return '2026-09-01.10';
+        return '2026-09-03.5';
     }
 
     function pad2(n) {
@@ -1475,7 +1666,7 @@
 
     function loadPlanDates() {
         try {
-            var raw = localStorage.getItem(PLAN_DATE_KEY);
+            var raw = localStorage.getItem(S.dateKey);
             var obj = raw ? JSON.parse(raw) : null;
             var begin = obj && parsePlanYmd(obj.begin);
             var end = obj && parsePlanYmd(obj.end);
@@ -1485,21 +1676,21 @@
                     begin = end;
                     end = tmp;
                 }
-                planDateBegin = formatYmd(begin);
-                planDateEnd = formatYmd(end);
+                S.dateBegin = formatYmd(begin);
+                S.dateEnd = formatYmd(end);
                 return;
             }
         } catch (e) { /* ignore */ }
         var fallback = defaultPlanDates();
-        planDateBegin = fallback.begin;
-        planDateEnd = fallback.end;
+        S.dateBegin = fallback.begin;
+        S.dateEnd = fallback.end;
     }
 
     function savePlanDates() {
         try {
-            localStorage.setItem(PLAN_DATE_KEY, JSON.stringify({
-                begin: planDateBegin,
-                end: planDateEnd
+            localStorage.setItem(S.dateKey, JSON.stringify({
+                begin: S.dateBegin,
+                end: S.dateEnd
             }));
         } catch (e) { /* ignore */ }
     }
@@ -1521,11 +1712,13 @@
     }
 
     function buildPlanListUrl() {
-        if (!planDateBegin || !planDateEnd) loadPlanDates();
-        return PLAN_API +
-            '?date_begin=' + encodeURIComponent(planDateBegin) +
-            '&date_end=' + encodeURIComponent(planDateEnd) +
-            '&plan_id=' + encodeURIComponent(PLAN_ID);
+        if (!S.dateBegin || !S.dateEnd) loadPlanDates();
+        var url = PLAN_API +
+            '?date_begin=' + encodeURIComponent(S.dateBegin) +
+            '&date_end=' + encodeURIComponent(S.dateEnd);
+        if (S.planId) url += '&plan_id=' + encodeURIComponent(S.planId);
+        if (S.excludePlanId) url += '&exclude_plan_id=' + encodeURIComponent(S.excludePlanId);
+        return url;
     }
 
     function parsePlanKickoffMs(kickoffTime) {
@@ -1673,7 +1866,8 @@
     }
 
     function enrichPlanMatchNames() {
-        var missing = planMatches.filter(function (item) {
+        var board = S;
+        var missing = S.matches.filter(function (item) {
             return item && item.matchId && !planItemHasNames(item);
         });
         if (!missing.length) return;
@@ -1686,8 +1880,10 @@
                 applyMatchMeta(item, cached);
                 pending -= 1;
                 if (pending <= 0) {
-                    lastPlanRenderKey = '';
-                    renderPlanList();
+                    withBoard(board, function () {
+                        S.lastRenderKey = '';
+                        renderPlanList();
+                    });
                 }
                 return;
             }
@@ -1698,8 +1894,10 @@
                 }
                 pending -= 1;
                 if (pending <= 0) {
-                    lastPlanRenderKey = '';
-                    renderPlanList();
+                    withBoard(board, function () {
+                        S.lastRenderKey = '';
+                        renderPlanList();
+                    });
                 }
             });
         });
@@ -1748,7 +1946,7 @@
     }
 
     function planFilterTokens() {
-        var q = normalizePlanFilter(planFilterQuery);
+        var q = normalizePlanFilter(S.filterQuery);
         if (!q) return [];
         return q.split(' ').filter(Boolean);
     }
@@ -1787,8 +1985,8 @@
 
     function filteredPlanMatches() {
         var tokens = planFilterTokens();
-        if (!tokens.length) return planMatches;
-        return planMatches.filter(function (item) {
+        if (!tokens.length) return S.matches;
+        return S.matches.filter(function (item) {
             return matchPlanFilter(item, tokens);
         });
     }
@@ -1802,89 +2000,152 @@
         style.id = PLAN_STYLE_ID;
         style.setAttribute('data-ver', ver);
         style.textContent =
-            '#' + PLAN_PANEL_ID + ' {' +
+            '.tm-8868-plan-panel' + ' {' +
             'position: fixed;' +
             'left: 12px;' +
-            'top: 72px;' +
+            'top: 88px;' +
             'z-index: 999997;' +
             'width: 300px;' +
-            'max-height: calc(100vh - 160px);' +
+            'max-height: calc(100vh - 140px);' +
             'display: flex;' +
             'flex-direction: column;' +
-            'border: 1px solid #d8e2ec;' +
+            'border: 1px solid #e2e8f0;' +
             'border-radius: 10px;' +
-            'background: linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);' +
+            'background: #fff;' +
             'overflow: hidden;' +
             'font-size: 12px;' +
             'color: #1e293b;' +
-            'box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);' +
+            'box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);' +
             'box-sizing: border-box;' +
             'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;' +
-            'transition: width 0.2s ease, height 0.2s ease, left 0.2s ease, top 0.2s ease, border-radius 0.2s ease, box-shadow 0.2s ease;' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-hidden {' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-hidden,' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-collapsed {' +
             'display: none !important;' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed {' +
+            '#' + PLAN_DOCK_ID + ' {' +
+            'position: fixed;' +
             'left: 0;' +
-            'top: 38%;' +
-            'width: 32px;' +
-            'max-height: none;' +
-            'height: auto;' +
-            'min-height: 96px;' +
-            'border-radius: 0 12px 12px 0;' +
-            'border-left: none;' +
-            'background: radial-gradient(circle at 30% 24%, #ecfdf5 0%, #86efac 48%, #22c55e 100%);' +
-            'box-shadow: 4px 0 14px rgba(22, 163, 74, 0.28), inset -6px 0 10px rgba(21, 128, 61, 0.16);' +
+            'top: 36%;' +
+            'z-index: 1000000;' +
+            'display: flex;' +
+            'flex-direction: column;' +
+            'gap: 4px;' +
+            '}' +
+            '#' + PLAN_DOCK_ID + '.tm-8868-plan-hidden,' +
+            '#' + PLAN_DOCK_ID + '.is-panel-open {' +
+            'display: none !important;' +
+            '}' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab {' +
+            'width: 22px;' +
+            'min-height: 64px;' +
+            'padding: 8px 0;' +
+            'border: none;' +
+            'border-radius: 0 8px 8px 0;' +
+            'writing-mode: vertical-rl;' +
+            'letter-spacing: 1px;' +
+            'font-size: 11px;' +
+            'font-weight: 600;' +
+            'line-height: 22px;' +
             'cursor: pointer;' +
+            'color: #fff;' +
+            'font-family: inherit;' +
+            'box-shadow: 2px 2px 8px rgba(15, 23, 42, 0.14);' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed:hover {' +
-            'width: 36px;' +
-            'box-shadow: 6px 0 16px rgba(22, 163, 74, 0.38), inset -6px 0 10px rgba(21, 128, 61, 0.16);' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-green {' +
+            'background: #16a34a;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-head {' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-gold {' +
+            'background: #d97706;' +
+            '}' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-green:hover,' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-green.is-active {' +
+            'width: 24px;' +
+            'background: #15803d;' +
+            '}' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-gold:hover,' +
+            '#' + PLAN_DOCK_ID + ' .tm-8868-plan-tab.is-theme-gold.is-active {' +
+            'width: 24px;' +
+            'background: #b45309;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-head {' +
             'display: flex;' +
             'align-items: center;' +
             'justify-content: space-between;' +
             'gap: 8px;' +
-            'padding: 8px 10px;' +
-            'background: #e8eef5;' +
-            'border-bottom: 1px solid #d8e2ec;' +
-            'font-weight: 600;' +
-            'font-size: 12px;' +
-            'color: #475569;' +
+            'padding: 8px 8px 8px 10px;' +
+            'background: #fff;' +
+            'border-bottom: 1px solid #eef2f7;' +
             'user-select: none;' +
             'flex-shrink: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed .tm-8868-plan-head {' +
-            'flex: 1;' +
-            'padding: 10px 0;' +
-            'background: transparent;' +
-            'border-bottom: none;' +
-            'justify-content: center;' +
-            'writing-mode: vertical-rl;' +
-            'letter-spacing: 2px;' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch {' +
+            'position: relative;' +
+            'z-index: 2;' +
+            'flex: 1 1 auto;' +
+            'min-width: 0;' +
+            'display: flex;' +
+            'padding: 2px;' +
+            'border-radius: 7px;' +
+            'background: #f1f5f9;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-title {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button {' +
+            'flex: 1 1 0;' +
+            'min-width: 0;' +
+            'height: 26px;' +
+            'border: none;' +
+            'border-radius: 5px;' +
+            'background: transparent;' +
+            'font-size: 12px;' +
+            'font-weight: 600;' +
+            'cursor: pointer;' +
+            'font-family: inherit;' +
+            'pointer-events: auto;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button.is-theme-green {' +
+            'color: #16a34a;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button.is-theme-gold {' +
+            'color: #d97706;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button.is-on {' +
+            'color: #fff;' +
+            'box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button.is-theme-green.is-on {' +
+            'background: #16a34a;' +
+            'color: #fff;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-switch button.is-theme-gold.is-on {' +
+            'background: #d97706;' +
+            'color: #fff;' +
+            '}' +
+            '.tm-8868-plan-panel.is-theme-green' + ' {' +
+            'border-top: 2px solid #22c55e;' +
+            '}' +
+            '.tm-8868-plan-panel.is-theme-gold' + ' {' +
+            'border-top: 2px solid #f59e0b;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-title {' +
             'flex: 1 1 auto;' +
             'display: inline-flex;' +
             'align-items: baseline;' +
             'gap: 6px;' +
             'min-width: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-ver {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-ver {' +
             'font-size: 10px;' +
             'font-weight: 500;' +
             'color: #94a3b8;' +
             'letter-spacing: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-head-actions {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-head-actions {' +
             'display: inline-flex;' +
             'align-items: center;' +
             'gap: 2px;' +
             'flex-shrink: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-icon-btn {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-icon-btn {' +
             'display: inline-flex;' +
             'align-items: center;' +
             'justify-content: center;' +
@@ -1898,19 +2159,19 @@
             'cursor: pointer;' +
             'border-radius: 4px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-icon-btn:hover {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-icon-btn:hover {' +
             'background: rgba(148, 163, 184, 0.22);' +
             'color: #334155;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-ball-label {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-ball-label {' +
             'display: none;' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed .tm-8868-plan-title,' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed .tm-8868-plan-head-actions,' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed .tm-8868-plan-body {' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-collapsed .tm-8868-plan-title,' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-collapsed .tm-8868-plan-head-actions,' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-collapsed .tm-8868-plan-body {' +
             'display: none;' +
             '}' +
-            '#' + PLAN_PANEL_ID + '.tm-8868-plan-collapsed .tm-8868-plan-ball-label {' +
+            '.tm-8868-plan-panel' + '.tm-8868-plan-collapsed .tm-8868-plan-ball-label {' +
             'display: block;' +
             'font-size: 13px;' +
             'font-weight: 700;' +
@@ -1918,53 +2179,66 @@
             'color: #14532d;' +
             'text-shadow: 0 1px 0 rgba(255,255,255,0.45);' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-body {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-body {' +
             'padding: 8px 8px 10px;' +
             'overflow-y: auto;' +
             'flex: 1 1 auto;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-status {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-status {' +
             'margin: 0 2px 8px;' +
             'font-size: 11px;' +
             'color: #64748b;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-dates {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-dates {' +
             'display: flex;' +
-            'align-items: stretch;' +
+            'align-items: center;' +
             'gap: 4px;' +
             'margin: 0 0 8px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-fields {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-chip {' +
+            'position: relative;' +
             'flex: 1 1 auto;' +
             'min-width: 0;' +
-            'display: flex;' +
-            'flex-direction: column;' +
-            'gap: 4px;' +
-            '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-dates input[type="date"] {' +
-            'display: block;' +
-            'width: 100%;' +
-            'box-sizing: border-box;' +
             'height: 26px;' +
-            'border: 1px solid #d8e2ec;' +
-            'border-radius: 5px;' +
-            'padding: 0 6px;' +
-            'font-size: 12px;' +
-            'color: #0f172a;' +
-            'background: #fff;' +
-            'font-family: inherit;' +
-            '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-dates input[type="date"]::-webkit-calendar-picker-indicator {' +
-            'margin-left: 4px;' +
+            'display: flex;' +
+            'align-items: center;' +
+            'justify-content: center;' +
+            'border: 1px solid #e2e8f0;' +
+            'border-radius: 6px;' +
+            'background: #f8fafc;' +
+            'overflow: hidden;' +
             'cursor: pointer;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-shift,' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-today {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-text {' +
+            'font-size: 12px;' +
+            'font-variant-numeric: tabular-nums;' +
+            'color: #0f172a;' +
+            'pointer-events: none;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-sep {' +
+            'flex: 0 0 auto;' +
+            'color: #94a3b8;' +
+            'font-size: 12px;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-chip input[type="date"] {' +
+            'position: absolute;' +
+            'left: 0;' +
+            'top: 0;' +
+            'width: 100%;' +
+            'height: 100%;' +
+            'opacity: 0;' +
+            'cursor: pointer;' +
+            'border: none;' +
+            'background: transparent;' +
+            '}' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-shift,' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-today {' +
             'flex: 0 0 auto;' +
             'width: 22px;' +
+            'height: 26px;' +
             'padding: 0;' +
-            'border: 1px solid #d8e2ec;' +
-            'border-radius: 5px;' +
+            'border: 1px solid #e2e8f0;' +
+            'border-radius: 6px;' +
             'background: #fff;' +
             'color: #334155;' +
             'cursor: pointer;' +
@@ -1972,19 +2246,19 @@
             'line-height: 1;' +
             'font-family: inherit;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-shift:hover,' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-today:hover {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-shift:hover,' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-today:hover {' +
             'background: #f1f5f9;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-date-today {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-date-today {' +
             'width: 26px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter {' +
             'margin: 0 0 8px;' +
             'position: relative;' +
             'z-index: 8;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter-input {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter-input {' +
             'display: block;' +
             'width: 100%;' +
             'box-sizing: border-box;' +
@@ -1998,14 +2272,14 @@
             'outline: none;' +
             'font-family: inherit;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter-input:focus {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter-input:focus {' +
             'border-color: #94a3b8;' +
             'box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.25);' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter-input::placeholder {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter-input::placeholder {' +
             'color: #94a3b8;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter-history {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter-history {' +
             'display: none;' +
             'position: absolute;' +
             'left: 0;' +
@@ -2019,21 +2293,21 @@
             'background: #fff;' +
             'box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-filter-history.is-open {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-filter-history.is-open {' +
             'display: block;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-empty {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-empty {' +
             'padding: 8px 10px;' +
             'font-size: 12px;' +
             'color: #94a3b8;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-item {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-item {' +
             'display: flex;' +
             'align-items: center;' +
             'gap: 6px;' +
             'padding: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-use {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-use {' +
             'flex: 1 1 auto;' +
             'min-width: 0;' +
             'border: none;' +
@@ -2048,10 +2322,10 @@
             'text-overflow: ellipsis;' +
             'white-space: nowrap;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-use:hover {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-use:hover {' +
             'background: #f1f5f9;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-del {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-del {' +
             'flex: 0 0 auto;' +
             'width: 22px;' +
             'height: 22px;' +
@@ -2064,27 +2338,27 @@
             'font-size: 13px;' +
             'line-height: 1;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-history-del:hover {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-history-del:hover {' +
             'background: #fee2e2;' +
             'color: #b91c1c;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-status[data-kind="err"] {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-status[data-kind="err"] {' +
             'color: #b91c1c;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group {' +
             'border: 1px solid #dbe3ee;' +
             'border-radius: 8px;' +
             'margin-bottom: 8px;' +
             'background: rgba(255,255,255,0.78);' +
             'overflow: hidden;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group[data-group="live"] {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group[data-group="live"] {' +
             'border-color: #bbf7d0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group[data-group="ended"] {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group[data-group="ended"] {' +
             'opacity: 0.88;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group-head {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group-head {' +
             'display: flex;' +
             'align-items: center;' +
             'justify-content: space-between;' +
@@ -2096,33 +2370,33 @@
             'user-select: none;' +
             'background: #f8fafc;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group[data-group="live"] .tm-8868-plan-group-head {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group[data-group="live"] .tm-8868-plan-group-head {' +
             'color: #166534;' +
             'background: #f0fdf4;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group[data-group="ended"] .tm-8868-plan-group-head {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group[data-group="ended"] .tm-8868-plan-group-head {' +
             'color: #64748b;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group-count {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group-count {' +
             'font-weight: 600;' +
             'color: inherit;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group-arrow {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group-arrow {' +
             'color: #94a3b8;' +
             'font-size: 12px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group-list {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group-list {' +
             'padding: 2px 4px 6px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-group[data-collapsed="1"] .tm-8868-plan-group-list {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-group[data-collapsed="1"] .tm-8868-plan-group-list {' +
             'display: none;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-empty {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-empty {' +
             'padding: 6px 8px;' +
             'color: #94a3b8;' +
             'font-size: 11px;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item {' +
             'display: flex;' +
             'align-items: flex-start;' +
             'gap: 6px;' +
@@ -2132,17 +2406,17 @@
             'color: inherit;' +
             'line-height: 1.35;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item:hover {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item:hover {' +
             'background: #eff6ff;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item.is-current {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item.is-current {' +
             'background: #dbeafe;' +
             'box-shadow: inset 3px 0 0 #2563eb;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item.is-ended {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item.is-ended {' +
             'color: #64748b;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-dot {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-dot {' +
             'flex: 0 0 auto;' +
             'width: 7px;' +
             'height: 7px;' +
@@ -2150,25 +2424,25 @@
             'border-radius: 50%;' +
             'background: #94a3b8;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item.is-live .tm-8868-plan-dot {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item.is-live .tm-8868-plan-dot {' +
             'background: #22c55e;' +
             'box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-main {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-main {' +
             'flex: 1 1 auto;' +
             'min-width: 0;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-time {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-time {' +
             'font-weight: 600;' +
             'color: #0f172a;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-kind {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-kind {' +
             'margin-left: 6px;' +
             'font-weight: 500;' +
             'font-size: 11px;' +
             'color: #64748b;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-vs {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-vs {' +
             'display: block;' +
             'margin-top: 1px;' +
             'font-weight: 600;' +
@@ -2176,7 +2450,7 @@
             'color: #0f172a;' +
             'line-height: 1.35;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-tour {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-tour {' +
             'display: inline-block;' +
             'margin-right: 6px;' +
             'padding: 0 5px;' +
@@ -2186,12 +2460,12 @@
             'font-size: 11px;' +
             'font-weight: 600;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item.is-ended .tm-8868-plan-item-time,' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item.is-ended .tm-8868-plan-item-vs {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item.is-ended .tm-8868-plan-item-time,' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item.is-ended .tm-8868-plan-item-vs {' +
             'color: #64748b;' +
             'font-weight: 500;' +
             '}' +
-            '#' + PLAN_PANEL_ID + ' .tm-8868-plan-item-elapsed {' +
+            '.tm-8868-plan-panel' + ' .tm-8868-plan-item-elapsed {' +
             'margin-left: 6px;' +
             'color: #16a34a;' +
             'font-weight: 600;' +
@@ -2200,17 +2474,21 @@
     }
 
     function setPlanPanelCollapsed(panel, collapsed) {
-        planCollapsed = !!collapsed;
-        panel.classList.toggle('tm-8868-plan-collapsed', planCollapsed);
-        var toggle = panel.querySelector('.tm-8868-plan-toggle');
-        if (toggle) toggle.textContent = planCollapsed ? '›' : '‹';
-        var head = panel.querySelector('.tm-8868-plan-head');
-        if (head) head.title = planCollapsed ? '点击展开比赛列表' : '点击收起到左侧';
+        S.collapsed = !!collapsed;
+        if (!S.collapsed) collapseOtherPlanBoards(S);
+        var shell = getPlanShell() || panel;
+        var open = currentOpenBoard();
+        if (shell) {
+            shell.classList.toggle('tm-8868-plan-collapsed', !open);
+            shell.classList.toggle('is-theme-green', !!(open && open.theme === 'green'));
+            shell.classList.toggle('is-theme-gold', !!(open && open.theme === 'gold'));
+        }
+        updatePlanDock();
     }
 
     function planRenderKey() {
         var currentId = getCurrentMatchId();
-        var rows = planMatches.map(function (item) {
+        var rows = S.matches.map(function (item) {
             return [
                 item.matchId || '',
                 item.kickoffTime || '',
@@ -2222,17 +2500,18 @@
             ].join(':');
         }).join(';');
         return [
-            planStatus,
-            planError,
+            S.panelId,
+            S.status,
+            S.error,
             currentId,
             String(Math.floor(Date.now() / 60000)),
-            planCollapsed ? '1' : '0',
-            planGroupCollapsed.live ? '1' : '0',
-            planGroupCollapsed.upcoming ? '1' : '0',
-            planGroupCollapsed.ended ? '1' : '0',
-            normalizePlanFilter(planFilterQuery),
-            planDateBegin,
-            planDateEnd,
+            S.collapsed ? '1' : '0',
+            S.groupCollapsed.live ? '1' : '0',
+            S.groupCollapsed.upcoming ? '1' : '0',
+            S.groupCollapsed.ended ? '1' : '0',
+            normalizePlanFilter(S.filterQuery),
+            S.dateBegin,
+            S.dateEnd,
             rows
         ].join('|');
     }
@@ -2282,13 +2561,14 @@
     }
 
     function renderPlanList() {
-        var panel = document.getElementById(PLAN_PANEL_ID);
+        if (!S || currentOpenBoard() !== S) return;
+        var panel = getPlanShell();
         if (!panel) return;
 
         var key = planRenderKey();
-        if (key === lastPlanRenderKey) return;
+        if (key === S.lastRenderKey) return;
 
-        setPlanPanelCollapsed(panel, planCollapsed);
+        panel.classList.remove('tm-8868-plan-collapsed');
 
         var statusEl = panel.querySelector('.tm-8868-plan-status');
         var groups = groupedPlanMatches();
@@ -2297,27 +2577,27 @@
         var endedCount = groups.ended.length;
 
         if (statusEl) {
-            if (planStatus === 'loading' && !planMatches.length) {
+            if (S.status === 'loading' && !S.matches.length) {
                 statusEl.textContent = '加载中…';
                 statusEl.dataset.kind = 'info';
-            } else if (planStatus === 'err' && !planMatches.length) {
-                statusEl.textContent = planError || '加载失败';
+            } else if (S.status === 'err' && !S.matches.length) {
+                statusEl.textContent = S.error || '加载失败';
                 statusEl.dataset.kind = 'err';
             } else {
                 var parts = [];
                 var shown = liveCount + upcomingCount + endedCount;
                 if (planFilterTokens().length) {
-                    parts.push(shown + '/' + planMatches.length + ' 场');
+                    parts.push(shown + '/' + S.matches.length + ' 场');
                     parts.push('已筛选');
                 } else {
-                    parts.push(planMatches.length + ' 场');
+                    parts.push(S.matches.length + ' 场');
                 }
                 if (liveCount) parts.push(liveCount + ' 进行中');
                 if (upcomingCount) parts.push(upcomingCount + ' 未开始');
                 if (endedCount) parts.push(endedCount + ' 已结束');
-                if (planStatus === 'err') parts.push('刷新失败');
+                if (S.status === 'err') parts.push('刷新失败');
                 statusEl.textContent = parts.join(' · ');
-                statusEl.dataset.kind = planStatus === 'err' ? 'err' : 'info';
+                statusEl.dataset.kind = S.status === 'err' ? 'err' : 'info';
             }
         }
 
@@ -2331,7 +2611,7 @@
             if (!section) return;
             var rows = groups[g.key] || [];
             var filtering = planFilterTokens().length > 0;
-            var collapsed = filtering ? (rows.length === 0) : !!planGroupCollapsed[g.key];
+            var collapsed = filtering ? (rows.length === 0) : !!S.groupCollapsed[g.key];
             section.dataset.collapsed = collapsed ? '1' : '0';
             var countEl = section.querySelector('.tm-8868-plan-group-count');
             var arrowEl = section.querySelector('.tm-8868-plan-group-arrow');
@@ -2357,17 +2637,18 @@
                 }).join('');
             }
         });
-        lastPlanRenderKey = key;
+        S.lastRenderKey = key;
     }
 
     function fetchPlanMatches(silent) {
-        if (silent && planFetchInFlight) return;
-        var seq = ++planFetchSeq;
-        planFetchInFlight = true;
+        var board = S;
+        if (silent && S.fetchInFlight) return;
+        var seq = ++S.fetchSeq;
+        S.fetchInFlight = true;
         if (!silent) {
-            planStatus = 'loading';
-            planError = '';
-            lastPlanRenderKey = '';
+            S.status = 'loading';
+            S.error = '';
+            S.lastRenderKey = '';
             renderPlanList();
         }
 
@@ -2376,43 +2657,56 @@
             url: buildPlanListUrl(),
             timeout: TIMEOUT,
             onload: function (res) {
-                if (seq !== planFetchSeq) return;
-                planFetchInFlight = false;
-                try {
-                    var json = JSON.parse(res.responseText || '{}');
-                    if (String(json.code) !== '200') {
-                        throw new Error(json.msg || '接口返回错误');
+                withBoard(board, function () {
+                    if (seq !== S.fetchSeq) return;
+                    S.fetchInFlight = false;
+                    try {
+                        var json = JSON.parse(res.responseText || '{}');
+                        if (String(json.code) !== '200') {
+                            throw new Error(json.msg || '接口返回错误');
+                        }
+                        var list = Array.isArray(json.data) ? json.data : [];
+                        if (S.excludePlanId) {
+                            list = list.filter(function (item) {
+                                return String((item && (item.planId || item.plan_id)) || '') !==
+                                    String(S.excludePlanId);
+                            });
+                        }
+                        S.matches = dedupePlanMatches(list);
+                        S.status = 'ok';
+                        S.error = '';
+                        S.lastRenderKey = '';
+                        renderPlanList();
+                        enrichPlanMatchNames();
+                        return;
+                    } catch (e) {
+                        if (!S.matches.length) S.status = 'err';
+                        else S.status = 'ok';
+                        S.error = (e && e.message) ? e.message : '解析失败';
                     }
-                    planMatches = dedupePlanMatches(Array.isArray(json.data) ? json.data : []);
-                    planStatus = 'ok';
-                    planError = '';
-                    lastPlanRenderKey = '';
+                    S.lastRenderKey = '';
                     renderPlanList();
-                    enrichPlanMatchNames();
-                    return;
-                } catch (e) {
-                    if (!planMatches.length) planStatus = 'err';
-                    else planStatus = 'ok';
-                    planError = (e && e.message) ? e.message : '解析失败';
-                }
-                lastPlanRenderKey = '';
-                renderPlanList();
+                });
             },
             onerror: function () {
-                if (seq !== planFetchSeq) return;
-                planFetchInFlight = false;
-                if (!planMatches.length) planStatus = 'err';
-                planError = '网络错误';
-                lastPlanRenderKey = '';
-                renderPlanList();
+                withBoard(board, function () {
+                    if (seq !== S.fetchSeq) return;
+                    S.fetchInFlight = false;
+                    if (!S.matches.length) S.status = 'err';
+                    S.error = '网络错误';
+                    S.lastRenderKey = '';
+                    renderPlanList();
+                });
             },
             ontimeout: function () {
-                if (seq !== planFetchSeq) return;
-                planFetchInFlight = false;
-                if (!planMatches.length) planStatus = 'err';
-                planError = '请求超时';
-                lastPlanRenderKey = '';
-                renderPlanList();
+                withBoard(board, function () {
+                    if (seq !== S.fetchSeq) return;
+                    S.fetchInFlight = false;
+                    if (!S.matches.length) S.status = 'err';
+                    S.error = '请求超时';
+                    S.lastRenderKey = '';
+                    renderPlanList();
+                });
             }
         });
     }
@@ -2425,16 +2719,21 @@
     }
 
     function startPlanListPoll() {
-        if (!planPollTimer) {
-            planPollTimer = setInterval(function () {
+        var board = S;
+        if (!S.pollTimer) {
+            S.pollTimer = setInterval(function () {
                 if (!isSportEventsPage() || isHistoryPage()) return;
-                fetchPlanMatches(true);
+                withBoard(board, function () {
+                    fetchPlanMatches(true);
+                });
             }, PLAN_POLL_MS);
         }
-        if (!planTickTimer) {
-            planTickTimer = setInterval(function () {
+        if (!S.tickTimer) {
+            S.tickTimer = setInterval(function () {
                 if (!isSportEventsPage() || isHistoryPage()) return;
-                renderPlanList();
+                withBoard(board, function () {
+                    renderPlanList();
+                });
             }, 15000);
         }
     }
@@ -2446,7 +2745,7 @@
 
     function loadPlanFilterHistory() {
         try {
-            var raw = localStorage.getItem(PLAN_FILTER_HISTORY_KEY);
+            var raw = localStorage.getItem(S.filterHistoryKey);
             var list = raw ? JSON.parse(raw) : [];
             if (!Array.isArray(list)) return [];
             return list.map(function (x) {
@@ -2460,7 +2759,7 @@
     function savePlanFilterHistory(list) {
         try {
             localStorage.setItem(
-                PLAN_FILTER_HISTORY_KEY,
+                S.filterHistoryKey,
                 JSON.stringify((list || []).slice(0, PLAN_FILTER_HISTORY_MAX))
             );
         } catch (e) { /* ignore quota */ }
@@ -2514,11 +2813,11 @@
 
     function applyPlanFilter(panel, query) {
         var filterInput = panel && panel.querySelector('.tm-8868-plan-filter-input');
-        planFilterQuery = String(query || '');
-        if (filterInput) filterInput.value = planFilterQuery;
-        rememberPlanFilter(planFilterQuery);
+        S.filterQuery = String(query || '');
+        if (filterInput) filterInput.value = S.filterQuery;
+        rememberPlanFilter(S.filterQuery);
         closePlanFilterHistory(panel);
-        lastPlanRenderKey = '';
+        S.lastRenderKey = '';
         renderPlanList();
     }
 
@@ -2526,8 +2825,9 @@
         var wrap = panel.querySelector('.tm-8868-plan-filter');
         var filterInput = panel.querySelector('.tm-8868-plan-filter-input');
         if (!wrap || !filterInput) return;
-        if (planFilterQuery && filterInput.value !== planFilterQuery) {
-            filterInput.value = planFilterQuery;
+        var open = currentOpenBoard() || S;
+        if (open && open.filterQuery && filterInput.value !== open.filterQuery) {
+            filterInput.value = open.filterQuery;
         }
         if (wrap.getAttribute('data-bound')) return;
         wrap.setAttribute('data-bound', '1');
@@ -2536,22 +2836,24 @@
 
         wrap.addEventListener('click', function (e) {
             e.stopPropagation();
-            var target = eventElement(e);
-            if (!target || !target.closest) return;
-            var del = target.closest('.tm-8868-plan-history-del');
-            if (del) {
-                var item = del.closest('.tm-8868-plan-history-item');
-                var useBtn = item && item.querySelector('.tm-8868-plan-history-use');
-                removePlanFilterHistory(useBtn ? useBtn.textContent : '');
-                openPlanFilterHistory(panel);
-                filterInput.focus();
-                return;
-            }
-            var use = target.closest('.tm-8868-plan-history-use');
-            if (use) {
-                applyPlanFilter(panel, use.textContent);
-                filterInput.focus();
-            }
+            withOpenBoard(function () {
+                var target = eventElement(e);
+                if (!target || !target.closest) return;
+                var del = target.closest('.tm-8868-plan-history-del');
+                if (del) {
+                    var item = del.closest('.tm-8868-plan-history-item');
+                    var useBtn = item && item.querySelector('.tm-8868-plan-history-use');
+                    removePlanFilterHistory(useBtn ? useBtn.textContent : '');
+                    openPlanFilterHistory(panel);
+                    filterInput.focus();
+                    return;
+                }
+                var use = target.closest('.tm-8868-plan-history-use');
+                if (use) {
+                    applyPlanFilter(panel, use.textContent);
+                    filterInput.focus();
+                }
+            });
         });
         wrap.addEventListener('mousedown', function (e) {
             var target = eventElement(e);
@@ -2561,50 +2863,62 @@
         });
         filterInput.addEventListener('click', function (e) {
             e.stopPropagation();
-            openPlanFilterHistory(panel);
+            withOpenBoard(function () {
+                openPlanFilterHistory(panel);
+            });
         });
         filterInput.addEventListener('focus', function () {
             if (hideTimer) {
                 clearTimeout(hideTimer);
                 hideTimer = null;
             }
-            openPlanFilterHistory(panel);
+            withOpenBoard(function () {
+                openPlanFilterHistory(panel);
+            });
         });
         filterInput.addEventListener('blur', function () {
-            rememberPlanFilter(filterInput.value);
+            withOpenBoard(function () {
+                rememberPlanFilter(filterInput.value);
+            });
             hideTimer = setTimeout(function () {
                 closePlanFilterHistory(panel);
             }, 180);
         });
         filterInput.addEventListener('keydown', function (e) {
             e.stopPropagation();
-            var box = wrap.querySelector('.tm-8868-plan-filter-history');
-            if (e.key === 'Escape') {
-                if (box && box.classList.contains('is-open')) {
-                    closePlanFilterHistory(panel);
+            withOpenBoard(function () {
+                var box = wrap.querySelector('.tm-8868-plan-filter-history');
+                if (e.key === 'Escape') {
+                    if (box && box.classList.contains('is-open')) {
+                        closePlanFilterHistory(panel);
+                        return;
+                    }
+                    filterInput.value = '';
+                    S.filterQuery = '';
+                    S.lastRenderKey = '';
+                    renderPlanList();
                     return;
                 }
-                filterInput.value = '';
-                planFilterQuery = '';
-                lastPlanRenderKey = '';
-                renderPlanList();
-                return;
-            }
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                rememberPlanFilter(filterInput.value);
-                closePlanFilterHistory(panel);
-            }
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    rememberPlanFilter(filterInput.value);
+                    closePlanFilterHistory(panel);
+                }
+            });
         });
         filterInput.addEventListener('input', function () {
-            planFilterQuery = String(filterInput.value || '');
-            lastPlanRenderKey = '';
-            renderPlanList();
-            if (rememberTimer) clearTimeout(rememberTimer);
-            rememberTimer = setTimeout(function () {
-                rememberPlanFilter(filterInput.value);
-                if (document.activeElement === filterInput) openPlanFilterHistory(panel);
-            }, 500);
+            withOpenBoard(function () {
+                S.filterQuery = String(filterInput.value || '');
+                S.lastRenderKey = '';
+                renderPlanList();
+                if (rememberTimer) clearTimeout(rememberTimer);
+                rememberTimer = setTimeout(function () {
+                    withOpenBoard(function () {
+                        rememberPlanFilter(filterInput.value);
+                        if (document.activeElement === filterInput) openPlanFilterHistory(panel);
+                    });
+                }, 500);
+            });
         });
     }
 
@@ -2630,23 +2944,37 @@
         bindPlanFilterEvents(panel);
     }
 
+    function formatPlanDateShort(ymd) {
+        var m = String(ymd || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+        return m ? m[1] + '-' + m[2] : String(ymd || '');
+    }
+
     function planDatesInnerHtml() {
         return '<button type="button" class="tm-8868-plan-date-shift" data-shift="-1" title="向前一天">‹</button>' +
-            '<div class="tm-8868-plan-date-fields">' +
-            '<input type="date" class="tm-8868-plan-date-begin" title="开始日期">' +
-            '<input type="date" class="tm-8868-plan-date-end" title="结束日期">' +
-            '</div>' +
+            '<label class="tm-8868-plan-date-chip" title="开始日期">' +
+            '<span class="tm-8868-plan-date-text tm-8868-plan-date-begin-text"></span>' +
+            '<input type="date" class="tm-8868-plan-date-begin">' +
+            '</label>' +
+            '<span class="tm-8868-plan-date-sep">~</span>' +
+            '<label class="tm-8868-plan-date-chip" title="结束日期">' +
+            '<span class="tm-8868-plan-date-text tm-8868-plan-date-end-text"></span>' +
+            '<input type="date" class="tm-8868-plan-date-end">' +
+            '</label>' +
             '<button type="button" class="tm-8868-plan-date-shift" data-shift="1" title="向后一天">›</button>' +
             '<button type="button" class="tm-8868-plan-date-today" title="默认范围（前天～明天）">今</button>';
     }
 
     function syncPlanDateInputs(panel) {
-        panel = panel || document.getElementById(PLAN_PANEL_ID);
+        panel = panel || getPlanShell();
         if (!panel) return;
         var beginEl = panel.querySelector('.tm-8868-plan-date-begin');
         var endEl = panel.querySelector('.tm-8868-plan-date-end');
-        if (beginEl) beginEl.value = planDateBegin;
-        if (endEl) endEl.value = planDateEnd;
+        if (beginEl) beginEl.value = S.dateBegin;
+        if (endEl) endEl.value = S.dateEnd;
+        var beginText = panel.querySelector('.tm-8868-plan-date-begin-text');
+        var endText = panel.querySelector('.tm-8868-plan-date-end-text');
+        if (beginText) beginText.textContent = formatPlanDateShort(S.dateBegin);
+        if (endText) endText.textContent = formatPlanDateShort(S.dateEnd);
     }
 
     function applyPlanDateRange(beginText, endText) {
@@ -2655,25 +2983,25 @@
             syncPlanDateInputs();
             return;
         }
-        if (next.begin === planDateBegin && next.end === planDateEnd) {
+        if (next.begin === S.dateBegin && next.end === S.dateEnd) {
             syncPlanDateInputs();
             return;
         }
-        planDateBegin = next.begin;
-        planDateEnd = next.end;
+        S.dateBegin = next.begin;
+        S.dateEnd = next.end;
         savePlanDates();
         syncPlanDateInputs();
-        planMatches = [];
+        S.matches = [];
         fetchPlanMatches(false);
     }
 
     function shiftPlanDateRange(deltaDays) {
-        var begin = parsePlanYmd(planDateBegin);
-        var end = parsePlanYmd(planDateEnd);
+        var begin = parsePlanYmd(S.dateBegin);
+        var end = parsePlanYmd(S.dateEnd);
         if (!begin || !end) {
             loadPlanDates();
-            begin = parsePlanYmd(planDateBegin);
-            end = parsePlanYmd(planDateEnd);
+            begin = parsePlanYmd(S.dateBegin);
+            end = parsePlanYmd(S.dateEnd);
         }
         if (!begin || !end) return;
         applyPlanDateRange(
@@ -2683,6 +3011,7 @@
     }
 
     function bindPlanDateEvents(panel) {
+        var board = S;
         var wrap = panel.querySelector('.tm-8868-plan-dates');
         if (!wrap) return;
         syncPlanDateInputs(panel);
@@ -2691,35 +3020,39 @@
 
         wrap.addEventListener('click', function (e) {
             e.stopPropagation();
-            var target = eventElement(e);
-            if (!target || !target.closest) return;
-            var todayBtn = target.closest('.tm-8868-plan-date-today');
-            if (todayBtn) {
-                var def = defaultPlanDates();
-                applyPlanDateRange(def.begin, def.end);
-                return;
-            }
-            var shiftBtn = target.closest('.tm-8868-plan-date-shift');
-            if (shiftBtn) {
-                shiftPlanDateRange(Number(shiftBtn.getAttribute('data-shift') || 0));
-            }
+            withOpenBoard(function () {
+                var target = eventElement(e);
+                if (!target || !target.closest) return;
+                var todayBtn = target.closest('.tm-8868-plan-date-today');
+                if (todayBtn) {
+                    var def = defaultPlanDates();
+                    applyPlanDateRange(def.begin, def.end);
+                    return;
+                }
+                var shiftBtn = target.closest('.tm-8868-plan-date-shift');
+                if (shiftBtn) {
+                    shiftPlanDateRange(Number(shiftBtn.getAttribute('data-shift') || 0));
+                }
+            });
         });
         wrap.addEventListener('change', function (e) {
-            var target = eventElement(e);
-            if (!target) return;
-            if (target.classList && (target.classList.contains('tm-8868-plan-date-begin') ||
-                target.classList.contains('tm-8868-plan-date-end'))) {
-                applyPlanDateRange(
-                    wrap.querySelector('.tm-8868-plan-date-begin').value,
-                    wrap.querySelector('.tm-8868-plan-date-end').value
-                );
-            }
+            withOpenBoard(function () {
+                var target = eventElement(e);
+                if (!target) return;
+                if (target.classList && (target.classList.contains('tm-8868-plan-date-begin') ||
+                    target.classList.contains('tm-8868-plan-date-end'))) {
+                    applyPlanDateRange(
+                        wrap.querySelector('.tm-8868-plan-date-begin').value,
+                        wrap.querySelector('.tm-8868-plan-date-end').value
+                    );
+                }
+            });
         });
     }
 
     function ensurePlanDates(panel) {
         if (!panel) return;
-        if (!planDateBegin || !planDateEnd) loadPlanDates();
+        if (!S.dateBegin || !S.dateEnd) loadPlanDates();
         var body = panel.querySelector('.tm-8868-plan-body');
         if (!body) return;
         var wrap = panel.querySelector('.tm-8868-plan-dates');
@@ -2730,7 +3063,7 @@
             var filter = panel.querySelector('.tm-8868-plan-filter');
             if (filter && filter.nextSibling) body.insertBefore(wrap, filter.nextSibling);
             else body.insertBefore(wrap, body.firstChild);
-        } else if (!wrap.querySelector('.tm-8868-plan-date-fields')) {
+        } else if (!wrap.querySelector('.tm-8868-plan-date-chip')) {
             wrap.innerHTML = planDatesInnerHtml();
             wrap.removeAttribute('data-bound');
         }
@@ -2747,10 +3080,25 @@
         if (head) {
             head.addEventListener('click', function (e) {
                 var target = eventElement(e);
-                if (target && target.closest && target.closest('.tm-8868-plan-refresh')) return;
-                setPlanPanelCollapsed(panel, !planCollapsed);
-                lastPlanRenderKey = '';
-                renderPlanList();
+                if (!target || !target.closest) return;
+                if (target.closest('.tm-8868-plan-refresh')) return;
+                var switchRoot = target.closest('.tm-8868-plan-switch');
+                if (switchRoot) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var switchBtn = target.tagName === 'BUTTON' ? target : target.closest('button');
+                    if (!switchBtn || !switchRoot.contains(switchBtn)) return;
+                    var nextId = switchBtn.getAttribute('data-board');
+                    var open = currentOpenBoard();
+                    if (nextId && (!open || nextId !== open.panelId)) switchPlanBoard(nextId);
+                    return;
+                }
+                if (!target.closest('.tm-8868-plan-toggle')) return;
+                withOpenBoard(function () {
+                    setPlanPanelCollapsed(panel, true);
+                    S.lastRenderKey = '';
+                    renderPlanList();
+                });
             });
         }
 
@@ -2758,30 +3106,44 @@
         if (refreshBtn) {
             refreshBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                fetchPlanMatches(false);
+                withOpenBoard(function () {
+                    fetchPlanMatches(false);
+                });
             });
         }
 
         panel.addEventListener('click', function (e) {
-            var target = eventElement(e);
-            if (!target || !target.closest) return;
-            var groupHead = target.closest('.tm-8868-plan-group-head');
-            if (groupHead) {
-                var section = groupHead.closest('.tm-8868-plan-group');
-                if (!section) return;
-                var key = section.getAttribute('data-group');
-                if (!key) return;
-                planGroupCollapsed[key] = !planGroupCollapsed[key];
-                lastPlanRenderKey = '';
-                renderPlanList();
-            }
+            withOpenBoard(function () {
+                var target = eventElement(e);
+                if (!target || !target.closest) return;
+                var groupHead = target.closest('.tm-8868-plan-group-head');
+                if (groupHead) {
+                    var section = groupHead.closest('.tm-8868-plan-group');
+                    if (!section) return;
+                    var key = section.getAttribute('data-group');
+                    if (!key) return;
+                    S.groupCollapsed[key] = !S.groupCollapsed[key];
+                    S.lastRenderKey = '';
+                    renderPlanList();
+                }
+            });
         });
     }
 
     function createPlanListPanel() {
         injectPlanListStyle();
-        var panel = document.getElementById(PLAN_PANEL_ID);
+        var leftover = document.getElementById('tm-8868-plan-other');
+        var panel = getPlanShell() || document.getElementById('tm-8868-plan-list');
+        if (leftover && leftover !== panel && leftover.parentNode) leftover.parentNode.removeChild(leftover);
         if (panel) {
+            panel.id = PLAN_SHELL_ID;
+            panel.classList.add('tm-8868-plan-panel');
+            var head = panel.querySelector('.tm-8868-plan-head');
+            if (head && !head.querySelector('.tm-8868-plan-switch')) {
+                head.innerHTML = planHeadInnerHtml();
+                panel.removeAttribute('data-bound');
+            }
+            syncPlanSwitchers();
             ensurePlanFilter(panel);
             ensurePlanDates(panel);
             bindPlanListEvents(panel);
@@ -2789,16 +3151,11 @@
         }
 
         panel = document.createElement('div');
-        panel.id = PLAN_PANEL_ID;
+        panel.id = PLAN_SHELL_ID;
+        panel.className = 'tm-8868-plan-panel';
         panel.innerHTML =
-            '<div class="tm-8868-plan-head" title="点击收起到左侧">' +
-            '<span class="tm-8868-plan-title">计划比赛<span class="tm-8868-plan-ver">v' +
-            escapeHtml(getPlanScriptVersion()) + '</span></span>' +
-            '<span class="tm-8868-plan-ball-label">比赛</span>' +
-            '<span class="tm-8868-plan-head-actions">' +
-            '<button type="button" class="tm-8868-plan-icon-btn tm-8868-plan-refresh" title="刷新">↻</button>' +
-            '<button type="button" class="tm-8868-plan-icon-btn tm-8868-plan-toggle" title="收起到左侧">‹</button>' +
-            '</span>' +
+            '<div class="tm-8868-plan-head">' +
+            planHeadInnerHtml() +
             '</div>' +
             '<div class="tm-8868-plan-body">' +
             '<div class="tm-8868-plan-filter">' +
@@ -2809,11 +3166,11 @@
             '</div>' +
             '<div class="tm-8868-plan-status">加载中…</div>' +
             PLAN_GROUPS.map(function (g) {
-                var collapsed = planGroupCollapsed[g.key] ? '1' : '0';
+                var collapsed = S.groupCollapsed[g.key] ? '1' : '0';
                 return '<div class="tm-8868-plan-group" data-group="' + g.key + '" data-collapsed="' + collapsed + '">' +
                     '<div class="tm-8868-plan-group-head">' +
                     '<span class="tm-8868-plan-group-count">' + g.label + ' (0)</span>' +
-                    '<span class="tm-8868-plan-group-arrow">' + (planGroupCollapsed[g.key] ? '▸' : '▾') + '</span>' +
+                    '<span class="tm-8868-plan-group-arrow">' + (S.groupCollapsed[g.key] ? '▸' : '▾') + '</span>' +
                     '</div>' +
                     '<div class="tm-8868-plan-group-list"><div class="tm-8868-plan-empty">暂无</div></div>' +
                     '</div>';
@@ -2822,31 +3179,39 @@
 
         (document.body || document.documentElement).appendChild(panel);
         bindPlanListEvents(panel);
-        setPlanPanelCollapsed(panel, planCollapsed);
+        setPlanPanelCollapsed(panel, !currentOpenBoard());
         return panel;
     }
 
     function applyPlanListRoute() {
-        var panel = document.getElementById(PLAN_PANEL_ID);
         var show = isSportEventsPage() && !isHistoryPage();
+        var path = window.location.pathname;
+        injectPlanListStyle();
+        ensurePlanDock(show);
         if (!show) {
-            if (panel) panel.classList.add('tm-8868-plan-hidden');
-            lastPlanListPath = window.location.pathname;
+            var hidden = getPlanShell();
+            if (hidden) hidden.classList.add('tm-8868-plan-hidden');
+            lastPlanRoutePath = path;
             return;
         }
-
-        panel = createPlanListPanel();
-        panel.classList.remove('tm-8868-plan-hidden');
-        startPlanListPoll();
-
-        var path = window.location.pathname;
-        if (planStatus === 'idle') {
-            fetchPlanMatches(false);
-        } else if (path !== lastPlanListPath) {
-            lastPlanRenderKey = '';
-            renderPlanList();
+        var panel = null;
+        planBoards.forEach(function (board) {
+            withBoard(board, function () {
+                panel = createPlanListPanel();
+                startPlanListPoll();
+                if (S.status === 'idle') fetchPlanMatches(false);
+            });
+        });
+        if (panel) panel.classList.remove('tm-8868-plan-hidden');
+        var open = currentOpenBoard();
+        if (open) {
+            withBoard(open, function () {
+                if (path !== lastPlanRoutePath) S.lastRenderKey = '';
+                applyOpenBoardChrome(panel);
+                renderPlanList();
+            });
         }
-        lastPlanListPath = path;
+        lastPlanRoutePath = path;
     }
 
     function initPanel() {
