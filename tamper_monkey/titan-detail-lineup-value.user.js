@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.3
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发球员标注默认身价，点击在身价/年龄/身高间循环。
+// @version      1.8.7
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；收起为小方块；进球换人图标移到头像旁。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -15,6 +15,7 @@
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
+  const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const METRIC_MODES = [
     { key: 'value', label: '身价' },
     { key: 'age', label: '年龄' },
@@ -28,6 +29,7 @@
   let panelCollapsed = false;
   let refreshTimer = null;
   let metricModeIndex = 0;
+  let valueWithAge = false;
 
   function playBlob(playEl) {
     const ul = playEl.querySelector('ul');
@@ -111,16 +113,38 @@
     return METRIC_MODES[(metricModeIndex + 1) % METRIC_MODES.length];
   }
 
+  function loadValueWithAge() {
+    try {
+      return localStorage.getItem(VALUE_AGE_STORAGE_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveValueWithAge() {
+    try {
+      localStorage.setItem(VALUE_AGE_STORAGE_KEY, valueWithAge ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function formatAgeText(playEl) {
+    const age = calcAge(parseBirthday(playEl), matchAsOfDate());
+    return Number.isFinite(age) ? age + '岁' : '-';
+  }
+
   function formatPlayerMetric(playEl, modeKey, unit) {
+    const money = formatMoney(parseValueWan(playEl), unit);
     if (modeKey === 'age') {
-      const age = calcAge(parseBirthday(playEl), matchAsOfDate());
-      return Number.isFinite(age) ? age + '岁' : '-';
+      return formatAgeText(playEl);
     }
     if (modeKey === 'height') {
       const h = parseHeightCm(playEl);
       return Number.isFinite(h) ? Math.round(h) + 'cm' : '-';
     }
-    return formatMoney(parseValueWan(playEl), unit);
+    if (valueWithAge) {
+      return money + '/' + formatAgeText(playEl);
+    }
+    return money;
   }
 
   function playerId(playEl) {
@@ -707,6 +731,8 @@
     if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
     const head = panel.querySelector('.tm-lv-head');
     if (head) head.title = collapsed ? '点击展开' : '点击收起';
+    const title = panel.querySelector('.tm-lv-title');
+    if (title) title.textContent = collapsed ? '身价' : '阵容身价对比';
   }
 
   function bindPanelToggle(panel) {
@@ -729,29 +755,96 @@
     });
   }
 
+  function currentModeChipLabel() {
+    const mode = currentMetricMode();
+    if (mode.key === 'value' && valueWithAge) return '身价/年龄';
+    return mode.label;
+  }
+
   function metricClickTitle() {
     const mode = currentMetricMode();
     const next = nextMetricMode();
-    return '当前' + mode.label + '，点击切换' + next.label + '（身价 → 年龄 → 身高）';
+    if (mode.key === 'value') {
+      return valueWithAge
+        ? '当前身价/年龄，点击切换' + next.label + '，右击切回身价，双击回到身价'
+        : '当前身价，点击切换' + next.label + '，右击显示身价/年龄，双击回到身价';
+    }
+    return (
+      '当前' +
+      mode.label +
+      '，点击切换' +
+      next.label +
+      '，双击回到身价（身价 → 年龄 → 身高）'
+    );
   }
 
   function updatePanelModeChip() {
     const chip = document.querySelector('#' + PANEL_ID + ' .tm-lv-mode');
     if (!chip) return;
-    const mode = currentMetricMode();
-    chip.textContent = mode.label;
+    chip.textContent = currentModeChipLabel();
     chip.setAttribute('title', metricClickTitle());
+  }
+
+  let metricClickTimer = null;
+  const METRIC_CLICK_DELAY = 260;
+
+  function stopMetricClickTimer() {
+    if (!metricClickTimer) return;
+    window.clearTimeout(metricClickTimer);
+    metricClickTimer = null;
+  }
+
+  function onMetricPointerClick(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (metricClickTimer) {
+      stopMetricClickTimer();
+      return;
+    }
+    metricClickTimer = window.setTimeout(function () {
+      metricClickTimer = null;
+      cycleMetricMode();
+    }, METRIC_CLICK_DELAY);
+  }
+
+  function onMetricPointerDblClick(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    stopMetricClickTimer();
+    valueWithAge = false;
+    saveValueWithAge();
+    if (currentMetricMode().key === 'value') {
+      lastMetricSig = '';
+      renderStarterMetrics();
+      return;
+    }
+    setMetricModeByKey('value');
+  }
+
+  function onMetricContextMenu(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    stopMetricClickTimer();
+    if (currentMetricMode().key !== 'value') return;
+    valueWithAge = !valueWithAge;
+    saveValueWithAge();
+    lastMetricSig = '';
+    renderStarterMetrics();
   }
 
   function bindPanelModeChip(panel) {
     const chip = panel.querySelector('.tm-lv-mode');
     if (!chip || chip.getAttribute('data-tm-bound')) return;
     chip.setAttribute('data-tm-bound', '1');
-    chip.addEventListener('click', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      cycleMetricMode();
-    });
+    chip.addEventListener('click', onMetricPointerClick);
+    chip.addEventListener('dblclick', onMetricPointerDblClick);
+    chip.addEventListener('contextmenu', onMetricContextMenu);
     chip.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
@@ -769,9 +862,25 @@
       function (e) {
         const badge = e.target.closest && e.target.closest('.tm-lv-metric');
         if (!badge || !box.contains(badge)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        cycleMetricMode();
+        onMetricPointerClick(e);
+      },
+      true
+    );
+    box.addEventListener(
+      'dblclick',
+      function (e) {
+        const badge = e.target.closest && e.target.closest('.tm-lv-metric');
+        if (!badge || !box.contains(badge)) return;
+        onMetricPointerDblClick(e);
+      },
+      true
+    );
+    box.addEventListener(
+      'contextmenu',
+      function (e) {
+        const badge = e.target.closest && e.target.closest('.tm-lv-metric');
+        if (!badge || !box.contains(badge)) return;
+        onMetricContextMenu(e);
       },
       true
     );
@@ -784,12 +893,51 @@
     lastMetricSig = '';
   }
 
-  function starterMetricSignature(plays, modeKey, unit) {
-    const parts = [modeKey];
-    plays.querySelectorAll('.play').forEach(function (playEl) {
-      parts.push(
-        (playerId(playEl) || '') + ':' + formatPlayerMetric(playEl, modeKey, unit)
-      );
+  function lineupMetricRoots(box) {
+    if (!box) return [];
+    return [
+      box.querySelector('.plays'),
+      box.querySelector('.backupPlay2'),
+      box.querySelector('.hurtPlay'),
+    ].filter(Boolean);
+  }
+
+  function ensureMetricBadge(playEl, inline) {
+    const nameEl = playEl.querySelector('.name');
+    if (!nameEl) return null;
+    let badge = null;
+    for (let i = 0; i < playEl.children.length; i++) {
+      const c = playEl.children[i];
+      if (c.classList && c.classList.contains('tm-lv-metric')) {
+        badge = c;
+        break;
+      }
+    }
+    if (!badge && nameEl.nextElementSibling &&
+        nameEl.nextElementSibling.classList &&
+        nameEl.nextElementSibling.classList.contains('tm-lv-metric')) {
+      badge = nameEl.nextElementSibling;
+    }
+    if (!badge) badge = playEl.querySelector('.tm-lv-metric');
+    if (!badge) {
+      badge = document.createElement('b');
+      badge.className = 'tm-lv-metric';
+      nameEl.insertAdjacentElement('afterend', badge);
+    }
+    badge.classList.toggle('tm-lv-metric-inline', !!inline);
+    return badge;
+  }
+
+  function starterMetricSignature(box, modeKey, unit) {
+    const parts = [modeKey, valueWithAge ? '1' : '0'];
+    lineupMetricRoots(box).forEach(function (root) {
+      root.querySelectorAll('.play').forEach(function (playEl) {
+        parts.push(
+          (playerId(playEl) || '') +
+            ':' +
+            formatPlayerMetric(playEl, modeKey, unit)
+        );
+      });
     });
     return parts.join('|');
   }
@@ -816,16 +964,16 @@
       clearStarterMetrics();
       return;
     }
-    const plays = box.querySelector('.plays');
-    if (!plays) {
+    const roots = lineupMetricRoots(box);
+    if (!roots.length) {
       clearStarterMetrics();
       return;
     }
 
     const unit = detectUnit(box);
     const mode = currentMetricMode();
-    const sig = starterMetricSignature(plays, mode.key, unit);
-    if (sig === lastMetricSig && plays.querySelector('.tm-lv-metric')) {
+    const sig = starterMetricSignature(box, mode.key, unit);
+    if (sig === lastMetricSig && box.querySelector('.tm-lv-metric')) {
       updatePanelModeChip();
       bindMetricClick(box);
       return;
@@ -835,18 +983,18 @@
     const prevRefreshing = refreshing;
     refreshing = true;
     try {
-      plays.querySelectorAll('.play').forEach(function (playEl) {
-        const nameEl = playEl.querySelector('.name');
-        if (!nameEl) return;
-        let badge = playEl.querySelector('.tm-lv-metric');
-        if (!badge) {
-          badge = document.createElement('b');
-          badge.className = 'tm-lv-metric';
-          nameEl.insertAdjacentElement('afterend', badge);
-        }
-        badge.textContent = formatPlayerMetric(playEl, mode.key, unit);
-        badge.setAttribute('title', title);
-        badge.setAttribute('data-tm-mode', mode.key);
+      const playsRoot = box.querySelector('.plays');
+      roots.forEach(function (root) {
+        const inline = root !== playsRoot;
+        root.querySelectorAll('.play').forEach(function (playEl) {
+          const text = formatPlayerMetric(playEl, mode.key, unit);
+          if (!text || text === '-' || text === '-/-') return;
+          const badge = ensureMetricBadge(playEl, inline);
+          if (!badge) return;
+          badge.textContent = text;
+          badge.setAttribute('title', title);
+          badge.setAttribute('data-tm-mode', mode.key);
+        });
       });
       lastMetricSig = sig;
     } finally {
@@ -854,6 +1002,17 @@
     }
     updatePanelModeChip();
     bindMetricClick(box);
+  }
+
+  function setMetricModeByKey(key) {
+    const i = METRIC_MODES.findIndex(function (m) {
+      return m.key === key;
+    });
+    if (i < 0) return;
+    if (i === metricModeIndex) return;
+    metricModeIndex = i;
+    saveMetricModeIndex();
+    renderStarterMetrics();
   }
 
   function cycleMetricMode() {
@@ -887,6 +1046,13 @@
       '}' +
       '#' +
       PANEL_ID +
+      '.tm-lv-collapsed {' +
+      'width: auto;' +
+      'min-width: 0;' +
+      'max-width: none;' +
+      '}' +
+      '#' +
+      PANEL_ID +
       ' .tm-lv-head {' +
       'display: flex;' +
       'align-items: center;' +
@@ -905,6 +1071,9 @@
       PANEL_ID +
       '.tm-lv-collapsed .tm-lv-head {' +
       'border-bottom: none;' +
+      'padding: 6px 10px;' +
+      'gap: 4px;' +
+      'justify-content: center;' +
       '}' +
       '#' +
       PANEL_ID +
@@ -913,6 +1082,14 @@
       'align-items: center;' +
       'gap: 8px;' +
       'flex-shrink: 0;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-collapsed .tm-lv-mode,' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-collapsed .tm-lv-unit {' +
+      'display: none;' +
       '}' +
       '#' +
       PANEL_ID +
@@ -932,6 +1109,12 @@
       'overflow: hidden;' +
       'text-overflow: ellipsis;' +
       'white-space: nowrap;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-collapsed .tm-lv-title {' +
+      'flex: none;' +
+      'max-width: none;' +
       '}' +
       '#' +
       PANEL_ID +
@@ -1314,12 +1497,46 @@
       '#matchBox2 .plays .playBox .play {' +
       'height: auto;' +
       'min-height: 80px;' +
+      'position: relative;' +
+      'overflow: visible;' +
+      '}' +
+      '#matchBox2 .plays .playBox .play [id^="playerTech_"] {' +
+      'position: absolute !important;' +
+      'top: 2px !important;' +
+      'left: calc(50% + 26px) !important;' +
+      'right: auto !important;' +
+      'bottom: auto !important;' +
+      'width: auto !important;' +
+      'max-width: 42px;' +
+      'height: auto !important;' +
+      'min-height: 0 !important;' +
+      'line-height: 0 !important;' +
+      'margin: 0 !important;' +
+      'padding: 0 !important;' +
+      'display: flex !important;' +
+      'flex-direction: column;' +
+      'align-items: flex-start;' +
+      'gap: 1px;' +
+      'z-index: 6;' +
+      'pointer-events: none;' +
+      '}' +
+      '#matchBox2 .plays .guest .playBox .play [id^="playerTech_"] {' +
+      'left: auto !important;' +
+      'right: calc(50% + 26px) !important;' +
+      'align-items: flex-end;' +
+      '}' +
+      '#matchBox2 .plays .playBox .play [id^="playerTech_"] img {' +
+      'display: block !important;' +
+      'width: 14px !important;' +
+      'height: 14px !important;' +
+      'margin: 0 !important;' +
+      'float: none !important;' +
       '}' +
       '#matchBox2 .plays .playBox .play .tm-lv-metric {' +
       'display: table;' +
       'box-sizing: border-box;' +
       'position: relative;' +
-      'z-index: 10000;' +
+      'z-index: 5;' +
       'margin: 1px auto 0;' +
       'padding: 0 3px;' +
       'width: auto;' +
@@ -1344,6 +1561,65 @@
       'user-select: none;' +
       '}' +
       '#matchBox2 .plays .guest .playBox .play .tm-lv-metric {' +
+      'color: #0369a1;' +
+      '}' +
+      '#matchBox2 .backupPlay .play,' +
+      '#matchBox2 .hurtPlay .play {' +
+      'display: flex !important;' +
+      'flex-wrap: wrap;' +
+      'align-items: center;' +
+      'gap: 4px 6px;' +
+      '}' +
+      '#matchBox2 .backupPlay .play .name,' +
+      '#matchBox2 .hurtPlay .play .name {' +
+      'display: inline-flex !important;' +
+      'align-items: center;' +
+      'width: auto !important;' +
+      'max-width: 58%;' +
+      'float: none !important;' +
+      'vertical-align: middle;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .play > span {' +
+      'display: flex;' +
+      'flex-wrap: wrap;' +
+      'align-items: center;' +
+      'gap: 2px 6px;' +
+      'height: auto !important;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .play > span .name {' +
+      'display: inline-block !important;' +
+      'width: auto !important;' +
+      'max-width: 120px;' +
+      'margin: 0;' +
+      '}' +
+      '#matchBox2 .backupPlay .play .tm-lv-metric,' +
+      '#matchBox2 .hurtPlay .play .tm-lv-metric,' +
+      '#matchBox2 .tm-lv-metric-inline {' +
+      'display: inline-block;' +
+      'box-sizing: border-box;' +
+      'position: relative;' +
+      'z-index: 5;' +
+      'margin: 0;' +
+      'padding: 0 4px;' +
+      'width: auto;' +
+      'max-width: none;' +
+      'min-height: 0;' +
+      'height: 16px;' +
+      'line-height: 16px;' +
+      'font-size: 11px;' +
+      'font-weight: 700;' +
+      'font-style: normal;' +
+      'text-align: center;' +
+      'white-space: nowrap;' +
+      'vertical-align: middle;' +
+      'color: #15803d;' +
+      'background: rgba(255,255,255,0.55);' +
+      'border-radius: 3px;' +
+      'cursor: pointer;' +
+      'user-select: none;' +
+      '}' +
+      '#matchBox2 .backupPlay .guest .play .tm-lv-metric,' +
+      '#matchBox2 .hurtPlay .guest .play .tm-lv-metric {' +
       'color: #0369a1;' +
       '}' +
       '#matchBox2 .plays .playBox .play span ul {' +
@@ -1469,6 +1745,7 @@
 
   function init() {
     metricModeIndex = loadMetricModeIndex();
+    valueWithAge = loadValueWithAge();
     injectStyle();
     const legacy = document.getElementById('tm-lineup-value-inline');
     if (legacy) legacy.remove();
