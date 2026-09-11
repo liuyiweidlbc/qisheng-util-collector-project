@@ -1,12 +1,18 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.88
+// @version      1.9.89
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时；腾讯云人机校验页自动勾选「确认你是真人」
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
+// @match        https://turing.captcha.qcloud.com/*
+// @match        https://ca.turing.captcha.qcloud.com/*
+// @match        https://*.captcha.qcloud.com/*
+// @match        https://t.captcha.qq.com/*
+// @match        https://ssl.captcha.qq.com/*
+// @match        https://captcha.gtimg.com/*
 // @include      /^https?:\/\/(www\.)?odds\.500\.com\/fenxi(\/|$|\?|#)/
 // @grant        none
 // ==/UserScript==
@@ -35,6 +41,139 @@
 
     function isShujuFenxiPage() {
         return /\/fenxi\/shuju-\d+\.shtml$/i.test(location.pathname);
+    }
+
+    function isTencentCaptchaFrameHost() {
+        return /(^|\.)((ca\.)?turing\.captcha\.qcloud\.com|captcha\.qcloud\.com|captcha\.qq\.com|ssl\.captcha\.qq\.com|t\.captcha\.qq\.com|captcha\.gtimg\.com)$/i
+            .test(location.hostname);
+    }
+
+    function getPagePlainText() {
+        const parts = [
+            document.title || '',
+            (document.body && document.body.innerText) || '',
+            (document.documentElement && document.documentElement.innerText) || ''
+        ];
+        return parts.join('\n');
+    }
+
+    function isTencentHumanVerifyPage() {
+        if (isTencentCaptchaFrameHost()) return true;
+        const t = getPagePlainText();
+        if (/确认你是真人/.test(t)) return true;
+        if (/正在验证连接安全性/.test(t)) return true;
+        if (/Tencent Cloud Captcha/i.test(t)) return true;
+        if (document.querySelector(
+            'iframe[src*="captcha.qcloud.com"],iframe[src*="captcha.qq.com"],iframe[src*="turing.captcha"],iframe[src*="captcha.gtimg.com"]'
+        )) return true;
+        return false;
+    }
+
+    function clickLikeUser(el) {
+        if (!el || el.nodeType !== 1) return;
+        try {
+            const r = el.getBoundingClientRect();
+            const x = r.left + Math.max(r.width / 2, 8);
+            const y = r.top + Math.max(r.height / 2, 8);
+            const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, buttons: 1 };
+            ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(type) {
+                try {
+                    el.dispatchEvent(new MouseEvent(type, opts));
+                } catch (eEv) {}
+            });
+            if (typeof el.click === 'function') el.click();
+            if (el.tagName === 'INPUT' && el.type === 'checkbox' && !el.checked) {
+                el.checked = true;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } catch (eClick) {}
+    }
+
+    function collectTencentHumanCheckTargets(root) {
+        const doc = root || document;
+        const out = [];
+        const seen = [];
+        function add(el) {
+            if (!el || el.nodeType !== 1) return;
+            if (seen.indexOf(el) >= 0) return;
+            seen.push(el);
+            out.push(el);
+        }
+        let i;
+        const boxes = doc.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+        for (i = 0; i < boxes.length; i++) add(boxes[i]);
+        const nodes = doc.querySelectorAll('label, span, div, a, button, p, i, em, strong, b, td, li');
+        for (i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            const t = (el.textContent || '').replace(/\s+/g, '');
+            if (t.indexOf('确认你是真人') === -1) continue;
+            if (t.length > 40) continue;
+            add(el);
+            if (el.parentElement) add(el.parentElement);
+            const inner = el.querySelector('input[type="checkbox"], [role="checkbox"]');
+            if (inner) add(inner);
+            if (el.htmlFor) {
+                const linked = doc.getElementById(el.htmlFor);
+                if (linked) add(linked);
+            }
+        }
+        const extra = doc.querySelectorAll(
+            '#tlgc-check-box, #tcaptcha_transform_dy, .tlgc-checkbox, .tcaptcha-checkbox, .tc-checkbox,' +
+            '[class*="tcaptcha"][class*="check"], [id*="tcaptcha"][id*="check"]'
+        );
+        for (i = 0; i < extra.length; i++) add(extra[i]);
+        return out;
+    }
+
+    function tryClickTencentHumanCheckbox(root) {
+        const doc = root || document;
+        const targets = collectTencentHumanCheckTargets(doc);
+        let i;
+        let n = 0;
+        for (i = 0; i < targets.length; i++) {
+            const el = targets[i];
+            if (el.disabled) continue;
+            if (el.tagName === 'INPUT' && el.type === 'checkbox' && el.checked) continue;
+            clickLikeUser(el);
+            n++;
+        }
+        const iframes = doc.querySelectorAll('iframe');
+        for (i = 0; i < iframes.length; i++) {
+            try {
+                const idoc = iframes[i].contentDocument;
+                if (idoc) n += tryClickTencentHumanCheckbox(idoc);
+            } catch (eFrame) {}
+        }
+        return n;
+    }
+
+    function startTencentHumanVerifyAutoCheck() {
+        if (document.documentElement.dataset.tm500TencentCaptchaInit === '1') return;
+        const inCaptchaHost = isTencentCaptchaFrameHost();
+        const onVerifyPage = isTencentHumanVerifyPage();
+        if (!inCaptchaHost && !onVerifyPage) return;
+        document.documentElement.dataset.tm500TencentCaptchaInit = '1';
+
+        let tries = 0;
+        const maxTries = 40;
+        const tick = function() {
+            tries++;
+            tryClickTencentHumanCheckbox(document);
+            if (tries >= maxTries) {
+                clearInterval(timer);
+                return;
+            }
+        };
+        tick();
+        const timer = setInterval(tick, 400);
+        try {
+            const mo = new MutationObserver(function() {
+                tryClickTencentHumanCheckbox(document);
+            });
+            mo.observe(document.documentElement, { childList: true, subtree: true });
+            setTimeout(function() { try { mo.disconnect(); } catch (eMo) {} }, 20000);
+        } catch (eObs) {}
     }
 
     function debounce(fn, ms) {
@@ -5738,7 +5877,8 @@
         removeFloatLayer();
     }
 
-    if (isShujuFenxiPage()) {
+    startTencentHumanVerifyAutoCheck();
+    if (isShujuFenxiPage() && !isTencentHumanVerifyPage()) {
         hookJiaozhanTableRefresh();
         startJiaozhanQuickFiltersPolling();
         startJiaozhanSaiguoStripPolling();
