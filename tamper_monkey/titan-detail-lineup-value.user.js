@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.7
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；收起为小方块；进球换人图标移到头像旁。
+// @version      1.8.12
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块；进球换人图标移到头像旁。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -130,6 +130,65 @@
   function formatAgeText(playEl) {
     const age = calcAge(parseBirthday(playEl), matchAsOfDate());
     return Number.isFinite(age) ? age + '岁' : '-';
+  }
+
+  function findBirthdayLi(playEl) {
+    const ul = playEl && playEl.querySelector('ul');
+    if (!ul) return null;
+    const lis = ul.querySelectorAll('li');
+    for (let i = 0; i < lis.length; i++) {
+      if (/生日[：:]/.test((lis[i].textContent || '').replace(/\u00a0/g, ' '))) {
+        return lis[i];
+      }
+    }
+    return null;
+  }
+
+  function annotateHoverAge(playEl) {
+    const li = findBirthdayLi(playEl);
+    if (!li) return;
+    const age = calcAge(parseBirthday(playEl), matchAsOfDate());
+    if (!Number.isFinite(age)) return;
+    const text = '（' + age + '岁）';
+    li.classList.add('tm-lv-bday');
+    let span = li.querySelector('.tm-lv-hover-age');
+    if (!span) {
+      span = document.createElement('span');
+      span.className = 'tm-lv-hover-age';
+      li.appendChild(span);
+    }
+    if (span.textContent !== text) span.textContent = text;
+  }
+
+  function widenHoverCard(playEl) {
+    const ul = playEl && playEl.querySelector('ul');
+    if (!ul) return;
+    ul.style.setProperty('width', '250px', 'important');
+    ul.style.setProperty('min-width', '250px', 'important');
+    const lis = ul.children;
+    for (let i = 0; i < lis.length; i++) {
+      const li = lis[i];
+      if (!li || li.tagName !== 'LI') continue;
+      if (li.classList && li.classList.contains('icon')) continue;
+      li.style.setProperty('width', '160px', 'important');
+      li.style.setProperty('max-width', 'none', 'important');
+      li.style.setProperty('overflow', 'visible', 'important');
+      li.style.setProperty('text-overflow', 'clip', 'important');
+    }
+  }
+
+  function annotateAllHoverAges(box) {
+    if (!box) return;
+    const prevRefreshing = refreshing;
+    refreshing = true;
+    try {
+      box.querySelectorAll('.play').forEach(function (playEl) {
+        widenHoverCard(playEl);
+        annotateHoverAge(playEl);
+      });
+    } finally {
+      refreshing = prevRefreshing;
+    }
   }
 
   function formatPlayerMetric(playEl, modeKey, unit) {
@@ -942,17 +1001,27 @@
     return parts.join('|');
   }
 
+  function isScriptNode(n) {
+    if (!n || !n.classList) return false;
+    return (
+      n.classList.contains('tm-lv-metric') ||
+      n.classList.contains('tm-lv-hover-age') ||
+      n.classList.contains('tm-lv-bday')
+    );
+  }
+
   function isMetricMutation(record) {
     const t = record.target;
-    if (t && t.classList && t.classList.contains('tm-lv-metric')) return true;
-    if (t && t.closest && t.closest('.tm-lv-metric')) return true;
+    if (isScriptNode(t)) return true;
+    if (t && t.closest && (t.closest('.tm-lv-metric') || t.closest('.tm-lv-hover-age'))) {
+      return true;
+    }
     const lists = [record.addedNodes, record.removedNodes];
     for (let i = 0; i < lists.length; i++) {
       const nodes = lists[i];
       if (!nodes || !nodes.length) continue;
       for (let j = 0; j < nodes.length; j++) {
-        const n = nodes[j];
-        if (n && n.classList && n.classList.contains('tm-lv-metric')) return true;
+        if (isScriptNode(nodes[j])) return true;
       }
     }
     return false;
@@ -1622,13 +1691,37 @@
       '#matchBox2 .hurtPlay .guest .play .tm-lv-metric {' +
       'color: #0369a1;' +
       '}' +
+      '#matchBox2 .plays .playBox .play span ul,' +
+      '#matchBox2 .backupPlay2 .play span ul {' +
+      'width: 250px !important;' +
+      'min-width: 250px !important;' +
+      'box-sizing: content-box !important;' +
+      '}' +
       '#matchBox2 .plays .playBox .play span ul {' +
       'pointer-events: none;' +
       '}' +
+      '#matchBox2 .plays .playBox .play span ul li,' +
+      '#matchBox2 .backupPlay2 .play span ul li {' +
+      'width: 160px !important;' +
+      'max-width: none !important;' +
+      'overflow: visible !important;' +
+      'text-overflow: clip !important;' +
+      '}' +
+      '#matchBox2 .plays .playBox .play span ul li.icon,' +
+      '#matchBox2 .backupPlay2 .play span ul li.icon {' +
+      'width: 75px !important;' +
+      'overflow: hidden !important;' +
+      '}' +
       '#matchBox2 .plays .playBox .play .tm-lv-metric:hover ~ ul {' +
       'display: none !important;' +
+      '}' +
+      '#matchBox2 .play ul li.tm-lv-bday .tm-lv-hover-age {' +
+      'display: inline;' +
+      'margin-left: 4px;' +
+      'font-weight: 600;' +
+      'white-space: nowrap;' +
       '}';
-    (document.head || document.documentElement).appendChild(style);
+    (document.body || document.head || document.documentElement).appendChild(style);
   }
 
   function mountPanel(stats) {
@@ -1722,6 +1815,7 @@
 
       mountPanel(stats);
       renderStarterMetrics();
+      annotateAllHoverAges(document.getElementById('matchBox2'));
       bindLineupObserver(document.getElementById('matchBox2'));
     } catch (err) {
       console.warn('[Titan007 阵容身价统计]', err);

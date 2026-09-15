@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-09-03.6
+// @version 2026-09-15.2
 // @description 投注记录上传；sportEvents / inplay 左侧计划比赛列表
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
@@ -1417,6 +1417,7 @@
     var planMatchMetaCache = {};
     var S = null;
     var lastPlanRoutePath = null;
+    var userKeepPlanOpen = false;
 
     function makePlanBoard(opts) {
         return {
@@ -1432,6 +1433,7 @@
             status: 'idle',
             error: '',
             collapsed: !!opts.defaultCollapsed,
+            autoCollapsedEmpty: false,
             groupCollapsed: { live: false, upcoming: false, ended: true },
             pollTimer: null,
             tickTimer: null,
@@ -1446,21 +1448,21 @@
 
     var planBoards = [
         makePlanBoard({
-            panelId: 'tm-8868-plan-list',
-            title: '竞彩优势',
-            magnetLabel: '竞彩优势',
-            theme: 'green',
-            planId: '4',
-            storageKey: 'tm-8868-plan',
-            defaultCollapsed: false
-        }),
-        makePlanBoard({
             panelId: 'tm-8868-plan-other',
             title: '滚球大小',
             magnetLabel: '滚球大小',
             theme: 'gold',
             excludePlanId: '4',
             storageKey: 'tm-8868-plan-other',
+            defaultCollapsed: false
+        }),
+        makePlanBoard({
+            panelId: 'tm-8868-plan-list',
+            title: '竞彩优势',
+            magnetLabel: '竞彩优势',
+            theme: 'green',
+            planId: '4',
+            storageKey: 'tm-8868-plan',
             defaultCollapsed: true
         })
     ];
@@ -1506,6 +1508,53 @@
         });
     }
 
+    function boardHasMatchData(board) {
+        return !!(board && board.matches && board.matches.length);
+    }
+
+    function planBoardsFetchSettled() {
+        return planBoards.every(function (board) {
+            return board.status === 'ok' || board.status === 'err';
+        });
+    }
+
+    function clearAutoCollapsedEmpty() {
+        planBoards.forEach(function (board) {
+            board.autoCollapsedEmpty = false;
+        });
+    }
+
+    function maybeAutoCollapseEmptyBoards() {
+        if (!planBoardsFetchSettled()) return false;
+        var hasData = planBoards.some(boardHasMatchData);
+        if (!hasData) {
+            if (userKeepPlanOpen) return false;
+            var open = currentOpenBoard();
+            if (!open) return true;
+            withBoard(open, function () {
+                S.autoCollapsedEmpty = true;
+                setPlanPanelCollapsed(getPlanShell(), true);
+                S.lastRenderKey = '';
+            });
+            return true;
+        }
+        var shouldRestore = planBoards.some(function (board) {
+            return board.autoCollapsedEmpty;
+        });
+        clearAutoCollapsedEmpty();
+        if (!shouldRestore || currentOpenBoard()) return false;
+        var preferred = null;
+        for (var i = 0; i < planBoards.length; i++) {
+            if (boardHasMatchData(planBoards[i])) {
+                preferred = planBoards[i];
+                break;
+            }
+        }
+        if (!preferred) return false;
+        switchPlanBoard(preferred.panelId);
+        return true;
+    }
+
     function updatePlanDock() {
         var dock = document.getElementById(PLAN_DOCK_ID);
         if (!dock) return;
@@ -1545,16 +1594,20 @@
         syncPlanSwitchers();
     }
 
-    function switchPlanBoard(panelId) {
+    function switchPlanBoard(panelId, fromUser) {
         var board = findPlanBoard(panelId);
         if (!board) return;
+        if (fromUser) {
+            userKeepPlanOpen = true;
+            clearAutoCollapsedEmpty();
+        }
         withBoard(board, function () {
             var panel = createPlanListPanel();
             setPlanPanelCollapsed(panel, false);
             applyOpenBoardChrome(panel);
             S.lastRenderKey = '';
             renderPlanList();
-            if (S.status === 'idle') fetchPlanMatches(false);
+            fetchPlanMatches(false);
         });
     }
 
@@ -1617,7 +1670,7 @@
                     }
                 }
                 if (!board) return;
-                switchPlanBoard(board.panelId);
+                switchPlanBoard(board.panelId, true);
             });
         }
         dock.classList.remove('tm-8868-plan-hidden');
@@ -1630,7 +1683,7 @@
                 return String(GM_info.script.version);
             }
         } catch (e) { /* ignore */ }
-        return '2026-09-03.5';
+        return '2026-09-15.2';
     }
 
     function pad2(n) {
@@ -2641,6 +2694,12 @@
         S.lastRenderKey = key;
     }
 
+    function afterPlanMatchesLoaded() {
+        S.lastRenderKey = '';
+        if (maybeAutoCollapseEmptyBoards()) return;
+        renderPlanList();
+    }
+
     function fetchPlanMatches(silent) {
         var board = S;
         if (silent && S.fetchInFlight) return;
@@ -2676,8 +2735,7 @@
                         S.matches = dedupePlanMatches(list);
                         S.status = 'ok';
                         S.error = '';
-                        S.lastRenderKey = '';
-                        renderPlanList();
+                        afterPlanMatchesLoaded();
                         enrichPlanMatchNames();
                         return;
                     } catch (e) {
@@ -2685,8 +2743,7 @@
                         else S.status = 'ok';
                         S.error = (e && e.message) ? e.message : '解析失败';
                     }
-                    S.lastRenderKey = '';
-                    renderPlanList();
+                    afterPlanMatchesLoaded();
                 });
             },
             onerror: function () {
@@ -2695,8 +2752,7 @@
                     S.fetchInFlight = false;
                     if (!S.matches.length) S.status = 'err';
                     S.error = '网络错误';
-                    S.lastRenderKey = '';
-                    renderPlanList();
+                    afterPlanMatchesLoaded();
                 });
             },
             ontimeout: function () {
@@ -2705,8 +2761,7 @@
                     S.fetchInFlight = false;
                     if (!S.matches.length) S.status = 'err';
                     S.error = '请求超时';
-                    S.lastRenderKey = '';
-                    renderPlanList();
+                    afterPlanMatchesLoaded();
                 });
             }
         });
@@ -3091,11 +3146,13 @@
                     if (!switchBtn || !switchRoot.contains(switchBtn)) return;
                     var nextId = switchBtn.getAttribute('data-board');
                     var open = currentOpenBoard();
-                    if (nextId && (!open || nextId !== open.panelId)) switchPlanBoard(nextId);
+                    if (nextId && (!open || nextId !== open.panelId)) switchPlanBoard(nextId, true);
                     return;
                 }
                 if (!target.closest('.tm-8868-plan-toggle')) return;
                 withOpenBoard(function () {
+                    userKeepPlanOpen = false;
+                    clearAutoCollapsedEmpty();
                     setPlanPanelCollapsed(panel, true);
                     S.lastRenderKey = '';
                     renderPlanList();
