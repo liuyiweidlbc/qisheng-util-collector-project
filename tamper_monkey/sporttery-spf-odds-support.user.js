@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         竞彩 赔率×支持率 返还率
 // @namespace    https://www.sporttery.cn/
-// @version      1.10.5
-// @description  胜平负：返还率=赔率×支持率；止售后恢复赔率可点与单关标识；登录弹窗出现即关闭；允许同场 HAD+HHAD 及再选其他场；右击打开单场方案计算器（含复制出票）；目标含平均/保体/亏/盈分组；左击选中与目标 localStorage 持久化，无该场则清除
+// @version      1.11.0
+// @description  胜平负：返还率=赔率×支持率；止售后恢复赔率可点与单关标识；登录弹窗出现即关闭；允许同场 HAD+HHAD 及再选其他场；右击打开单场方案计算器（含复制出票）；目标含平均/保体/亏/盈分组；左击选中与目标 localStorage 持久化，无该场则清除；磁吸刷新调接口更新；仅显示单关/奖金变化勾选记忆并有效过滤
 // @match        https://www.sporttery.cn/jc/jsq/zqspf/*
 // @match        http://www.sporttery.cn/jc/jsq/zqspf/*
 // @match        https://www.sporttery.cn/jc/jsq/zqspf
@@ -97,8 +97,12 @@
     blockLoginPopup();
 
     const STYLE_ID = 'tm-spf-odds-support-style';
+    const CHROME_STYLE_ID = 'tm-spf-chrome-style';
     const RETURN_HEADER_ID = 'tm-return-header';
     const RETURN_TD_CLASS = 'tm-returnTd';
+    const TOOL_PREF_KEY = 'tm-sporttery-jsq-tool-prefs-v1';
+    const FAB_POS_KEY = 'tm-sporttery-jsq-refresh-fab-pos-v2';
+    const FAB_ID = 'tm-spf-refresh-fab';
     const RETURN_LITE_MIN = 1.0;
     const RETURN_LITE_MAX = 1.03;
     const RETURN_STRONG_MIN = 1.03;
@@ -187,6 +191,74 @@
             '}',
         ].join('\n');
         document.head.appendChild(style);
+    }
+
+    function injectChromeStyle() {
+        if (document.getElementById(CHROME_STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = CHROME_STYLE_ID;
+        style.textContent = [
+            '@keyframes tm-spf-fab-spin {',
+            '  from { transform: rotate(0deg); }',
+            '  to { transform: rotate(360deg); }',
+            '}',
+            '#' + FAB_ID + ' {',
+            '  position: fixed;',
+            '  right: 0;',
+            '  left: auto;',
+            '  z-index: 2147483000;',
+            '  width: 40px;',
+            '  min-height: 72px;',
+            '  padding: 10px 4px 8px;',
+            '  border: 1px solid #8dc6e3;',
+            '  border-right: 0;',
+            '  border-radius: 10px 0 0 10px;',
+            '  background: #d4eefc;',
+            '  color: #1f6f9f;',
+            '  box-shadow: -2px 2px 6px rgba(31, 111, 159, 0.12);',
+            '  cursor: grab;',
+            '  user-select: none;',
+            '  -webkit-user-select: none;',
+            '  display: flex;',
+            '  flex-direction: column;',
+            '  align-items: center;',
+            '  justify-content: center;',
+            '  font-size: 12px;',
+            '  line-height: 1.15;',
+            '  letter-spacing: 0;',
+            '  touch-action: none;',
+            '}',
+            '#' + FAB_ID + ':hover {',
+            '  background: #c5e6f7;',
+            '}',
+            '#' + FAB_ID + '.tm-dragging {',
+            '  cursor: grabbing;',
+            '  transition: none !important;',
+            '}',
+            '#' + FAB_ID + ':not(.tm-dragging) {',
+            '  transition: top 0.18s ease;',
+            '}',
+            '#' + FAB_ID + ' .tm-fab-icon {',
+            '  font-size: 20px;',
+            '  font-weight: bold;',
+            '  line-height: 1;',
+            '  display: block;',
+            '}',
+            '#' + FAB_ID + '.tm-loading .tm-fab-icon {',
+            '  animation: tm-spf-fab-spin 0.8s linear infinite;',
+            '}',
+            '#' + FAB_ID + ' .tm-fab-text {',
+            '  margin-top: 2px;',
+            '  font-size: 12px;',
+            '}',
+            '#' + FAB_ID + ' .tm-fab-time {',
+            '  display: none;',
+            '}',
+            '#' + FAB_ID + '.tm-loading {',
+            '  opacity: 0.92;',
+            '}',
+        ].join('\n');
+        (document.head || document.documentElement).appendChild(style);
     }
 
     function parseOdds(text) {
@@ -523,6 +595,12 @@
         XMLHttpRequest.prototype.send = function () {
             if (/getMatchCalculatorV1\.qry/i.test(this.__tmSpfUrl || '')) {
                 const xhr = this;
+                setRefreshFabLoading(true);
+                xhr.addEventListener('loadend', function () {
+                    setRefreshFabLoading(false);
+                    restoreToolPrefCheckboxes();
+                    scheduleProcess();
+                });
                 xhr.addEventListener('readystatechange', function () {
                     if (xhr.readyState !== 4 || xhr.__tmSpfPatched) return;
                     try {
@@ -752,6 +830,10 @@
 
     function processAll() {
         restoreClosedSaleUi();
+        bindToolPrefCheckboxes();
+        restoreToolPrefCheckboxes();
+        applySinglePassFilter();
+        syncRefreshFabTime();
         if (PAGE.enableReturnRate) {
             unwrapBrokenOddsLayout();
             ensureReturnHeader();
@@ -843,9 +925,322 @@
         btn.__tmSpfBound = true;
     }
 
+    function loadToolPrefs() {
+        try {
+            const raw = localStorage.getItem(TOOL_PREF_KEY);
+            const obj = raw ? JSON.parse(raw) : {};
+            return {
+                singlePass: !!obj.singlePass,
+                floatCkb: !!obj.floatCkb,
+            };
+        } catch (e) {
+            return { singlePass: false, floatCkb: false };
+        }
+    }
+
+    function saveToolPrefs(partial) {
+        const next = Object.assign(loadToolPrefs(), partial || {});
+        try {
+            localStorage.setItem(TOOL_PREF_KEY, JSON.stringify(next));
+        } catch (e) {}
+        return next;
+    }
+
+    function restoreToolPrefCheckboxes() {
+        const prefs = loadToolPrefs();
+        const single = document.getElementById('singlePass');
+        if (single) single.checked = !!prefs.singlePass;
+        const floatCkb = document.getElementById('floatCkb');
+        if (floatCkb) floatCkb.checked = !!prefs.floatCkb;
+        try {
+            window.isShowOddsChg = !!prefs.floatCkb;
+        } catch (e) {}
+    }
+
+    function isRowSingleMatch(tr) {
+        if (!tr) return false;
+        const attr = tr.getAttribute('singleIndex') || tr.getAttribute('singleindex');
+        if (attr === '1') return true;
+        const matchId = String(tr.id || '').replace(/^list_/, '');
+        const data = window.curData;
+        if (!matchId || !Array.isArray(data)) return false;
+        for (let i = 0; i < data.length; i++) {
+            const day = data[i];
+            if (!Array.isArray(day)) continue;
+            for (let j = 0; j < day.length; j++) {
+                const match = day[j];
+                if (!match || String(match.id) !== matchId) continue;
+                return isPoolSingle(match.had) || isPoolSingle(match.hhad) ||
+                    isPoolSingle(match.ttg) || isPoolSingle(match.hafu);
+            }
+        }
+        return false;
+    }
+
+    function applySinglePassFilter() {
+        const cb = document.getElementById('singlePass');
+        if (!cb || !cb.checked) return;
+        const rows = document.querySelectorAll('#mainTbl tr.listTr');
+        if (!rows.length) return;
+
+        const $ = window.jQuery;
+        let hideCount = 0;
+        rows.forEach(function (tr) {
+            const isSingle = isRowSingleMatch(tr);
+            tr.setAttribute('singleIndex', isSingle ? '1' : '0');
+            if ($) {
+                $(tr).toggle(isSingle);
+            } else {
+                tr.style.display = isSingle ? '' : 'none';
+            }
+            if (!isSingle) hideCount++;
+        });
+
+        const hc = document.getElementById('hideCount');
+        if (hc) hc.textContent = String(hideCount);
+
+        if ($) {
+            $('.bDateHide').hide();
+            $('#mFilterBtn').addClass('grey');
+        } else {
+            document.querySelectorAll('.bDateHide').forEach(function (el) {
+                el.style.display = 'none';
+            });
+            const filterBtn = document.getElementById('mFilterBtn');
+            if (filterBtn) filterBtn.classList.add('grey');
+        }
+        const rq = document.getElementById('rqList');
+        if (rq) rq.value = '全部';
+
+        document.querySelectorAll('#mainTbl td.bDateTd').forEach(function (td) {
+            const bIndex = td.getAttribute('bIndex');
+            const headerTr = td.parentElement;
+            if (!headerTr) return;
+            const anyVisible = Array.prototype.some.call(rows, function (row) {
+                return row.getAttribute('bIndex') === bIndex &&
+                    (row.style.display !== 'none' && window.getComputedStyle(row).display !== 'none');
+            });
+            if ($) $(headerTr).toggle(anyVisible);
+            else headerTr.style.display = anyVisible ? '' : 'none';
+        });
+
+        if (window.lotFunc && typeof window.lotFunc.scrollFunc === 'function') {
+            try { window.lotFunc.scrollFunc(); } catch (e) {}
+        }
+    }
+
+    function restoreSinglePassDateHeaders() {
+        const $ = window.jQuery;
+        if ($) {
+            $('#mainTbl td.bDateTd').parent().show();
+            $('.bDateHide').show();
+            $('#mFilterBtn').removeClass('grey');
+            return;
+        }
+        document.querySelectorAll('#mainTbl td.bDateTd').forEach(function (td) {
+            if (td.parentElement) td.parentElement.style.display = '';
+        });
+        document.querySelectorAll('.bDateHide').forEach(function (el) {
+            el.style.display = '';
+        });
+        const filterBtn = document.getElementById('mFilterBtn');
+        if (filterBtn) filterBtn.classList.remove('grey');
+    }
+
+    function bindToolPrefCheckboxes() {
+        const single = document.getElementById('singlePass');
+        if (single && !single.__tmPrefBound) {
+            single.__tmPrefBound = true;
+            single.addEventListener('click', function () {
+                saveToolPrefs({ singlePass: !!this.checked });
+                if (this.checked) {
+                    setTimeout(applySinglePassFilter, 0);
+                } else {
+                    restoreSinglePassDateHeaders();
+                }
+            });
+        }
+        const floatCkb = document.getElementById('floatCkb');
+        if (floatCkb && !floatCkb.__tmPrefBound) {
+            floatCkb.__tmPrefBound = true;
+            floatCkb.addEventListener('click', function () {
+                saveToolPrefs({ floatCkb: !!this.checked });
+                try { window.isShowOddsChg = !!this.checked; } catch (e) {}
+            });
+        }
+    }
+
+    function hookWindowInit() {
+        let tries = 0;
+        function tryHook() {
+            const original = window.init;
+            if (typeof original === 'function' && !original.__tmSpfPrefWrapped) {
+                function wrapped() {
+                    original.apply(this, arguments);
+                    restoreToolPrefCheckboxes();
+                }
+                wrapped.__tmSpfPrefWrapped = true;
+                window.init = wrapped;
+            }
+            if (++tries < 80) setTimeout(tryHook, 100);
+        }
+        tryHook();
+    }
+
+    function hookGetInterface() {
+        let tries = 0;
+        function tryHook() {
+            if (window.lotFunc && typeof window.lotFunc.getInterface === 'function' &&
+                !window.lotFunc.getInterface.__tmSpfWrapped) {
+                const original = window.lotFunc.getInterface;
+                function wrapped() {
+                    setRefreshFabLoading(true);
+                    original.apply(this, arguments);
+                    restoreToolPrefCheckboxes();
+                }
+                wrapped.__tmSpfWrapped = true;
+                window.lotFunc.getInterface = wrapped;
+            }
+            if (++tries < 80) setTimeout(tryHook, 100);
+        }
+        tryHook();
+    }
+
+    function loadFabPos() {
+        try {
+            const raw = localStorage.getItem(FAB_POS_KEY);
+            const obj = raw ? JSON.parse(raw) : null;
+            if (obj && Number.isFinite(obj.top)) {
+                return { top: obj.top };
+            }
+        } catch (e) {}
+        return { top: 380 };
+    }
+
+    function saveFabPos(pos) {
+        try {
+            localStorage.setItem(FAB_POS_KEY, JSON.stringify({ top: pos.top }));
+        } catch (e) {}
+    }
+
+    function applyFabPos(el, pos) {
+        if (!el || !pos) return;
+        const maxTop = Math.max(8, window.innerHeight - el.offsetHeight - 8);
+        const top = Math.min(maxTop, Math.max(8, pos.top));
+        el.style.top = top + 'px';
+        el.style.bottom = 'auto';
+        el.style.right = '0';
+        el.style.left = 'auto';
+    }
+
+    function setRefreshFabLoading(loading) {
+        const el = document.getElementById(FAB_ID);
+        if (!el) return;
+        el.classList.toggle('tm-loading', !!loading);
+        const text = el.querySelector('.tm-fab-text');
+        if (text) text.textContent = loading ? '更新中' : '刷新';
+        el.title = loading ? '正在更新奖金数据…' : '点击刷新奖金数据（无需整页刷新）';
+    }
+
+    function syncRefreshFabTime() {
+        const el = document.getElementById(FAB_ID);
+        if (!el) return;
+        const timeEl = document.getElementById('updateTime');
+        const time = timeEl ? String(timeEl.textContent || '').trim() : '';
+        if (time) {
+            el.title = '点击刷新奖金数据（无需整页刷新）\n更新时间：' + time;
+        }
+    }
+
+    function triggerOddsRefresh() {
+        if (window.lotFunc && typeof window.lotFunc.getInterface === 'function') {
+            window.lotFunc.getInterface();
+            return;
+        }
+        const btn = document.getElementById('updateBtn');
+        if (btn) btn.click();
+    }
+
+    function initMagneticRefreshFab() {
+        injectChromeStyle();
+        if (document.getElementById(FAB_ID)) return;
+        const host = document.body || document.documentElement;
+        if (!host) return;
+
+        const el = document.createElement('button');
+        el.id = FAB_ID;
+        el.type = 'button';
+        el.innerHTML = '<span class="tm-fab-icon">↻</span><span class="tm-fab-text">刷新</span>';
+        el.title = '点击刷新奖金数据（无需整页刷新）';
+        host.appendChild(el);
+
+        const pos = loadFabPos();
+        applyFabPos(el, pos);
+        syncRefreshFabTime();
+
+        let dragging = false;
+        let moved = false;
+        let startY = 0;
+        let startTop = 0;
+
+        function onPointerMove(ev) {
+            if (!dragging) return;
+            const dy = ev.clientY - startY;
+            if (!moved && Math.abs(dy) > 5) {
+                moved = true;
+                el.classList.add('tm-dragging');
+            }
+            if (!moved) return;
+            ev.preventDefault();
+            const maxTop = Math.max(8, window.innerHeight - el.offsetHeight - 8);
+            const top = Math.min(maxTop, Math.max(8, startTop + dy));
+            el.style.top = top + 'px';
+            el.style.right = '0';
+            el.style.left = 'auto';
+        }
+
+        function onPointerUp(ev) {
+            if (!dragging) return;
+            dragging = false;
+            try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
+            document.removeEventListener('pointermove', onPointerMove, true);
+            document.removeEventListener('pointerup', onPointerUp, true);
+            document.removeEventListener('pointercancel', onPointerUp, true);
+            el.classList.remove('tm-dragging');
+            if (!moved) {
+                if (!el.classList.contains('tm-loading')) triggerOddsRefresh();
+                return;
+            }
+            saveFabPos({ top: el.getBoundingClientRect().top });
+            applyFabPos(el, { top: el.getBoundingClientRect().top });
+        }
+
+        el.addEventListener('pointerdown', function (ev) {
+            if (ev.button != null && ev.button !== 0) return;
+            dragging = true;
+            moved = false;
+            startY = ev.clientY;
+            startTop = el.getBoundingClientRect().top;
+            try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+            document.addEventListener('pointermove', onPointerMove, true);
+            document.addEventListener('pointerup', onPointerUp, true);
+            document.addEventListener('pointercancel', onPointerUp, true);
+        });
+
+        window.addEventListener('resize', function () {
+            applyFabPos(el, loadFabPos());
+        });
+    }
+
     function init() {
         hookInitData();
         hookPoolListData();
+        hookWindowInit();
+        hookGetInterface();
+        injectChromeStyle();
+        initMagneticRefreshFab();
+        bindToolPrefCheckboxes();
+        restoreToolPrefCheckboxes();
         if (PAGE.enableReturnRate) {
             injectStyle();
             expandPageLayout();
@@ -863,12 +1258,15 @@
     allowHadHhadSameMatch();
     hookCalculatorApiResponse();
     hookPoolListData();
+    hookWindowInit();
+    hookGetInterface();
+    injectChromeStyle();
 
     /* ========== 胜平负页：单场方案计算器 + 选中持久化 ========== */
     const SPF_CALC_STYLE_ID = 'tm-spf-plan-calc-style';
     const SPF_CALC_MODAL_ID = 'tm-spf-plan-calc-modal';
     const SPF_SEL_STORAGE_KEY = 'tm-sporttery-spf-sels-v1';
-    const SCRIPT_VERSION = '1.10.5';
+    const SCRIPT_VERSION = '1.11.0';
     const UNIT_YUAN = 2; // 竞彩：1倍 = 2元
     const ROLE_AVG = 'avg';
     const ROLE_BE = 'breakeven';
