@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 球队全员球员页
 // @namespace    https://titan007.com/
-// @version      2.1.0
+// @version      2.1.1
 // @description  info.titan007.com 球队全员球员页：排序增强、身价统计面板、位置筛选、国家队俱乐部列、身价集中度分析。
 // @match        https://info.titan007.com/cn/team/Lineup/*
 // @match        http://info.titan007.com/cn/team/Lineup/*
@@ -486,10 +486,19 @@
   }
 
   function isNationalTeamPage() {
-    const sel = document.querySelector('select');
+    const flag = window.isNational;
+    if (flag != null && String(flag).trim() !== '') {
+      return /^true$/i.test(String(flag).trim());
+    }
+    const addr = Array.isArray(window.teamDetail) ? String(window.teamDetail[15] || '').trim() : '';
+    if (/^(欧洲|亚洲|非洲|北美洲|南美洲|大洋洲|中北美洲|中美洲)$/.test(addr)) return true;
+    const sel = document.querySelector('#selectTeam, select');
     if (sel && sel.options.length >= 80) return true;
-    const info = document.querySelectorAll('table')[0]?.textContent || '';
-    return /欧洲市值|亚洲市值|非洲市值|北美市值|南美市值|大洋洲市值/.test(info);
+    const info = (document.querySelectorAll('table')[0]?.textContent || '').replace(/\s+/g, '');
+    return (
+      /欧洲市值|亚洲市值|非洲市值|北美市值|南美市值|大洋洲市值/.test(info) ||
+      /联系地址[：:].{0,8}(欧洲|亚洲|非洲|北美洲|南美洲|大洋洲)/.test(info)
+    );
   }
 
   function readClubCache() {
