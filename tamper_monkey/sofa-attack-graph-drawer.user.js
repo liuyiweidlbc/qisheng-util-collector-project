@@ -24,7 +24,7 @@
   const GRAPH_W = 920;
   const CENTER_Y = 54;
   const MENU_FALLBACK_HEIGHT = 73;
-  const DRAWER_EXTRA_HEIGHT = 68;
+  const DRAWER_EXTRA_HEIGHT = 132;
   const BIG_CHANCE_XG = 0.35;
 
   const SVG = {
@@ -541,14 +541,11 @@
         x,
         y: shotY(shot, size),
         size,
-        viewBox: '0 0 16 16',
+        viewBox: off ? '0 0 512 512' : '0 0 16 16',
         opacity: 1,
         off,
         paths: off
-          ? [
-            { tag: 'circle', cx: 8, cy: 8, r: 6.6, fill: '#767676', paint: 'off' },
-            { d: 'M5.15 5.15 10.85 10.85 M10.85 5.15 5.15 10.85', fill: 'none', stroke: '#fff', strokeWidth: 1.55, paint: 'off-x' },
-          ]
+          ? [{ d: SHOT_OFF_PATH, fill: 'rgba(0,0,0,0.5)', paint: 'off', fillRule: 'evenodd' }]
           : [
             { d: SHOT_CIRCLE, fill: 'rgb(255,110,64)', paint: 'on' },
             { d: 'M4.35 8.05 6.85 10.55 11.95 5.05', fill: 'none', stroke: '#fff', strokeWidth: 1.65, paint: 'mark' },
@@ -737,18 +734,21 @@
         if (path.tag === 'circle') {
           return `<circle data-paint="${path.paint || ''}" cx="${path.cx}" cy="${path.cy}" r="${path.r}" fill="${fill}" style="${style}"></circle>`;
         }
-        return `<path d="${path.d}" data-paint="${path.paint || ''}" fill="${fill}" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" style="${style}"></path>`;
+        const rule = path.fillRule ? ` fill-rule="${path.fillRule}"` : '';
+        return `<path d="${path.d}"${rule} data-paint="${path.paint || ''}" fill="${fill}" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" style="${style}"></path>`;
       }).join('');
-      const left = (icon.x / GRAPH_W) * 100;
+      const left = ((icon.x / GRAPH_W) * 100).toFixed(3);
       let top = `top:${(((icon.y + 40) / 196) * 100).toFixed(3)}%`;
       if (icon.kind === 'shot' && icon.side === 'home') {
         const goalTop = ((-4 + 40) / 196) * 100;
-        top = `top:calc(${goalTop.toFixed(3)}% - ${icon.size + 3}px)`;
+        const gap = icon.off ? 16 : 0;
+        top = `top:calc(${goalTop.toFixed(3)}% - ${icon.size + 3 + gap}px)`;
       } else if (icon.kind === 'shot' && icon.side === 'away') {
         const goalTop = ((104 + 40) / 196) * 100;
-        top = `top:calc(${goalTop.toFixed(3)}% + 19px)`;
+        const gap = icon.off ? 16 : 0;
+        top = `top:calc(${goalTop.toFixed(3)}% + ${19 + gap}px)`;
       }
-      return `<svg class="sofa-atk-icon is-${icon.kind}${icon.off ? ' is-off' : ''}" data-tip="${icon.tip}" viewBox="${icon.viewBox}" style="left:${left.toFixed(3)}%;${top}" width="${icon.size}" height="${icon.size}" opacity="${icon.opacity}">${paths}</svg>`;
+      return `<svg class="sofa-atk-icon is-${icon.kind}${icon.off ? ' is-off' : ''}" data-tip="${icon.tip}" viewBox="${icon.viewBox}" style="left:${left}%;${top}" width="${icon.size}" height="${icon.size}" opacity="${icon.opacity}">${paths}</svg>`;
     };
     const first = (side) => model.firstGoal === side
       ? `<svg class="sofa-atk-first is-${side}" viewBox="0 0 16 16"><path d="${SVG.regular}"></path></svg>`
@@ -854,7 +854,7 @@
       }
       .sofa-atk-team { display: flex; align-items: center; gap: 4px; height: 18px; }
       .sofa-atk-score-btn {
-        position: absolute; left: 1px; bottom: 1px; z-index: 4;
+        position: absolute; left: 1px; bottom: calc(48 / 196 * 100% + 1px); z-index: 4;
         display: inline-flex; align-items: center; justify-content: center; gap: 3px;
         padding: 1px 4px 1px 3px; border: 0; border-radius: 9px;
         background: rgba(255,255,255,.88); box-shadow: 0 0 0 1px rgba(34,34,38,.14);
@@ -936,8 +936,7 @@
       .sofa-atk-svg rect { shape-rendering: crispedges; }
       .sofa-atk-icons { position: absolute; inset: 0; pointer-events: none; }
       .sofa-atk-icons .sofa-atk-icon { position: absolute; pointer-events: auto; overflow: visible; z-index: 1; }
-      #sofa-atk-drawer .sofa-atk-icon.is-off circle { fill: #767676 !important; stroke: none !important; }
-      #sofa-atk-drawer .sofa-atk-icon.is-off path { fill: none !important; stroke: #fff !important; }
+      #sofa-atk-drawer .sofa-atk-icon.is-off path { fill: rgba(0,0,0,0.5) !important; stroke: none !important; }
       #sofa-atk-drawer .sofa-atk-icon path[data-paint="on"] { fill: rgb(255,110,64) !important; stroke: none !important; }
       #sofa-atk-drawer .sofa-atk-icon path[data-paint="mark"] { fill: none !important; stroke: #fff !important; }
       .sofa-atk-icons .sofa-atk-icon.is-incident { z-index: 2; }
