@@ -439,6 +439,8 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     let targetOption = null;
     let placing = false;
     let autoBetInFlight = false;
+    /** placeTestBet 全程 +1，防止 await 扫盘期间 placing 还没置位就被切场 */
+    let betSessionLock = 0;
     let pollTimer = null;
     let pollCount = 0;
     let started = false;
@@ -858,6 +860,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
             return true;
         }
         if (!canPerformPageNavigation(reason)) return false;
+        if (isAutoLeaveBlockedDuringBet(reason)) return false;
         const now = Date.now();
         const log = pushNavBreakerLog(now);
         if (log.length >= NAV_BREAKER_MAX) {
@@ -891,6 +894,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         const cur = String(window.location.href || '').split('#')[0];
         if (dest === cur) return true;
         if (!canPerformPageNavigation(reason)) return false;
+        if (isAutoLeaveBlockedDuringBet(reason)) return false;
         const now = Date.now();
         const log = pushNavBreakerLog(now);
         if (log.length >= NAV_BREAKER_MAX) {
@@ -926,13 +930,73 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         return Date.now() - lastInplayNavAt < MATCH_NAV_STICK_MS;
     }
 
+    function beginBetSessionLock() {
+        betSessionLock += 1;
+    }
+
+    function endBetSessionLock() {
+        if (betSessionLock > 0) betSessionLock -= 1;
+    }
+
+    /** 下单会话、投注单、已提交抽屉都算「正在投注」，禁止自动切场 */
+    function isBetSessionLocked() {
+        if (betSessionLock > 0 || placing || autoBetInFlight || betResult === 'placing') return true;
+        try {
+            if (typeof isCartOpen === 'function' && isCartOpen()) return true;
+            if (typeof isBetSubmittedDrawerVisible === 'function' && isBetSubmittedDrawerVisible()) return true;
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+
+    function currentMatchHasRuleMeetSignal() {
+        if (!matchId) return false;
+        if (countPendingRuleMeetForNav(strategyList) > 0) return true;
+        const cached = matchRuleMeetCache[String(matchId)];
+        return !!(cached && cached.meetCount > 0);
+    }
+
+    /**
+     * 本场已达标且还能下：先留在本场扫盘/下完，再考虑另一场。
+     * 盘口还没扫到时不要因为「其它场也达标」立刻跳走。
+     */
+    function shouldStayForCurrentQualifiedBet() {
+        if (!matchId || isCurrentMatchEnded()) return false;
+        if (isBetSessionLocked()) return true;
+        if (targetOption) return true;
+        if (strategyStates.some(function (st) { return st.actionable; })) return true;
+        if (strategyStates.some(function (st) {
+            return st.execStatus === 'pending' && st.hit && !st.dedupBlocked;
+        })) return true;
+        const inflight = typeof getBetInFlight === 'function' ? getBetInFlight() : null;
+        if (inflight && inflight.phase !== 'prepare') return true;
+        if (!currentMatchHasRuleMeetSignal()) return false;
+        if (!lastMatchScanAt) return true;
+        if (lastScanButtonCount === 0 && Date.now() - lastMatchScanAt < 20000) return true;
+        return false;
+    }
+
     function canLeaveCurrentMatchForAutoSwitch() {
         // 总览/列表页没有当前比赛，不应被「未扫描策略」卡住
         if (!matchId) return true;
         if (isCurrentMatchEnded()) return true;
-        // 其它场已 ruleMeet：允许尽快离开，不被 90s 粘滞钉死
+        if (shouldStayForCurrentQualifiedBet()) return false;
+        // 其它场已 ruleMeet：仅在本场确认不能马上下单后才放行，不被 90s 粘滞钉死
         if (isMatchNavStickActive() && !hasOtherRuleMeetMatchThanCurrent()) return false;
         if (!strategyList.length && !lastMatchScanAt) return false;
+        return true;
+    }
+
+    /** 自动切场硬门：正在下单，或本场达标还没扫完/没下完，一律留下。用户手选和本场结束除外。 */
+    function isAutoLeaveBlockedDuringBet(reason) {
+        if (isUserManualMatchPickReason(reason)) return false;
+        const r = String(reason || '');
+        if (r.indexOf('赛事已结束') >= 0 || r.indexOf('已结束赛事') >= 0) return false;
+        if (isCurrentMatchEnded()) return false;
+        try {
+            if (typeof isMatchEndedModalVisible === 'function' && isMatchEndedModalVisible()) return false;
+        } catch (e) { /* ignore */ }
+        if (!isBetSessionLocked() && !shouldStayForCurrentQualifiedBet()) return false;
+        console.log('[hty-inplay] 本场投注未完成，拦截切场', reason || '');
         return true;
     }
 
@@ -999,6 +1063,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     /** 本场有可下/正在投注时钉住；其它场已有 ruleMeet 时不因本场未下完而钉死 */
     function shouldHoldCurrentMatch() {
         if (isCurrentMatchEnded()) return false;
+        if (shouldStayForCurrentQualifiedBet()) return true;
         if (placing) return true;
         if (targetOption) return true;
         if (strategyStates.some(function (st) { return st.actionable; })) return true;
@@ -1044,9 +1109,10 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     }
 
     function isScriptDedupInflight(option, recHash) {
-        // 进行中/超时未确认：不论防重开关都拦截，避免重复下单
+        // 仅「已点投注」的锁才算防重。打开投注单之前的 prepare 锁不是已下单。
         const inflight = getBetInFlight();
         if (!inflight || !recHash) return false;
+        if (inflight.phase === 'prepare') return false;
         return inflight.recHash === recHash;
     }
 
@@ -1098,15 +1164,23 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
     function isBetAttemptBlocked(recHash) {
         if (!recHash) return false;
-        return !!getBetAttempt(recHash);
+        const attempt = getBetAttempt(recHash);
+        if (!attempt) return false;
+        // 未点投注就跳走留下的 prepare 锁：没有订单，不能当成重复单
+        if (attempt.phase === 'prepare') {
+            if (betSessionLock === 0 && !placing) clearBetAttempt(recHash);
+            return false;
+        }
+        return true;
     }
 
-    function markBetAttempt(recHash, option, stake) {
+    function markBetAttempt(recHash, option, stake, phase) {
         // 点击投注后的 attempt 锁：不论防重开关都写入，超时不确定时才能拦住自动重下
         if (!recHash) return;
         const store = pruneBetAttemptStore(loadBetAttemptStore());
         store[recHash] = {
             at: Date.now(),
+            phase: phase || 'submitted',
             testid: option && option.testid ? String(option.testid) : '',
             stake: stake != null ? String(stake) : '',
             matchId: String(matchId || ''),
@@ -1151,7 +1225,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
     function getPendingBetDedupMeta() {
         const inflight = getBetInFlight();
-        if (inflight && inflight.recHash) {
+        if (inflight && inflight.recHash && inflight.phase !== 'prepare') {
             return {
                 recHash: String(inflight.recHash),
                 at: Number(inflight.at || 0) || Date.now(),
@@ -1163,7 +1237,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         let best = null;
         for (let i = 0; i < keys.length; i++) {
             const entry = store[keys[i]];
-            if (!entry) continue;
+            if (!entry || entry.phase === 'prepare') continue;
             const at = Number(entry.at || 0) || 0;
             if (!best || at > best.at) {
                 best = { recHash: String(keys[i]), at: at, source: 'attempt' };
@@ -5032,16 +5106,17 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     }
 
     async function maybeNavigateToRuleMeetMatch() {
-        if (placing || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
+        if (isBetSessionLocked() || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
         // 本场已有立即可下的盘口时先下完；仅 ruleMeet 未可下时允许切到其它达标场
-        if (targetOption || strategyStates.some(function (st) { return st.actionable; })) {
-            return false;
-        }
+        if (shouldStayForCurrentQualifiedBet()) return false;
         if (!canLeaveCurrentMatchForAutoSwitch()) return false;
         if (!shouldAllowAutoNavigation('ruleMeet')) return false;
         if (getNavigableInPlayMatches().length < 2) return false;
 
         await scanAllMatchesRuleMeet(false);
+        // 扫盘期间可能已经开始下单，必须再判一次，否则会把正在投注的场次跳走
+        if (isBetSessionLocked() || shouldStayForCurrentQualifiedBet()) return false;
+        if (!canLeaveCurrentMatchForAutoSwitch()) return false;
         const targetId = pickRuleMeetNavigableMatch(matchId);
         if (!targetId || String(targetId) === String(matchId)) return false;
 
@@ -5153,7 +5228,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
     async function maybeAutoNavigateToInplay() {
         // 仍受 isAutoPageNavAllowed 约束：仅策略性切场放行，不恢复保活/列表乱跳
-        if (placing || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
+        if (isBetSessionLocked() || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
         if (isUserManualMatchLockActive()) return false;
         if (!canLeaveCurrentMatchForAutoSwitch()) return false;
         if (shouldHoldCurrentMatch()) return false;
@@ -5164,6 +5239,10 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         }
 
         await scanAllMatchesRuleMeet(false);
+        if (!isCurrentMatchEnded() && !isMatchEndedModalVisible() &&
+            (isBetSessionLocked() || !canLeaveCurrentMatchForAutoSwitch() || shouldHoldCurrentMatch())) {
+            return false;
+        }
 
         const endedModal = isMatchEndedModalVisible();
         const excludeId = (endedModal || isCurrentMatchEnded()) ? matchId : '';
@@ -5340,7 +5419,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                         if (getSortedInPlayMatches().length > 0) {
                             await scanAllMatchesRuleMeet(false);
                             renderActiveMatches(document.getElementById(PANEL_ID));
-                            if (!placing && !targetOption && hasNavigableInPlayMatches() &&
+                            if (!isBetSessionLocked() && !targetOption && hasNavigableInPlayMatches() &&
                                 await maybeNavigateToRuleMeetMatch()) {
                                 return true;
                             }
@@ -7198,8 +7277,26 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
     function markBetAttemptStarted(option, recHash, stakeInput) {
         if (!recHash) return;
-        markBetAttempt(recHash, option, stakeInput);
+        // prepare：还没点投注。中途被打断不能当成已下单，否则会误报防重。
+        markBetAttempt(recHash, option, stakeInput, 'prepare');
         markBetInFlight(recHash, {
+            phase: 'prepare',
+            testid: option && option.testid,
+            stake: stakeInput != null ? String(stakeInput) : '',
+            bttsSubstitute: !!(option && option.bttsSubstitute),
+            substitutedFrom: option && option.substitutedFrom ? option.substitutedFrom : null,
+            market: option && option.market ? String(option.market) : '',
+            side: option && option.side ? String(option.side) : '',
+            label: option && option.label ? String(option.label) : '',
+        });
+    }
+
+    function markBetSubmitted(option, recHash, stakeInput) {
+        if (!recHash) return;
+        markBetAttempt(recHash, option, stakeInput, 'submitted');
+        markBetInFlight(recHash, {
+            phase: 'submitted',
+            at: Date.now(),
             testid: option && option.testid,
             stake: stakeInput != null ? String(stakeInput) : '',
             bttsSubstitute: !!(option && option.bttsSubstitute),
@@ -7224,6 +7321,12 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 clearBetInFlight(id);
                 return null;
             }
+            // 没点到投注就离开页面：prepare 锁不是重复单，下次进来直接清掉
+            if (data.phase === 'prepare' && betSessionLock === 0 && !placing) {
+                clearBetInFlight(id);
+                if (data.recHash) clearBetAttempt(data.recHash);
+                return null;
+            }
             return data;
         } catch (e) {
             return null;
@@ -7234,6 +7337,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         try {
             sessionStorage.setItem(betInFlightStorageKey(), JSON.stringify({
                 recHash: recHash || '',
+                phase: meta && meta.phase ? String(meta.phase) : 'submitted',
                 testid: meta && meta.testid ? String(meta.testid) : '',
                 stake: meta && meta.stake != null ? String(meta.stake) : '',
                 at: meta && meta.at ? Number(meta.at) : Date.now(),
@@ -10036,9 +10140,11 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     }
 
     async function placeTestBet(option, fromAutoBet) {
-        if (!option || placing) return false;
+        if (!option || placing || betSessionLock > 0) return false;
         if (!option.strategy || !passesStrategyStatusGate(option.strategy)) return false;
 
+        beginBetSessionLock();
+        try {
         const recHash = option.strategy.recHash;
 
         if (isScriptDedupStored(option, recHash)) {
@@ -10189,6 +10295,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
             await humanDelay(300, 700);
 
             betAttemptAt = Date.now();
+            markBetSubmitted(option, recHash, stakeInput);
             setBetStep('等待下注结果（接口或成功抽屉）…');
             const betWaitHandle = createBetWaitHandle();
             await ensureBetCartVisible();
@@ -10314,6 +10421,9 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         } finally {
             placing = false;
             restorePanelAfterBet();
+        }
+        } finally {
+            endBetSessionLock();
         }
     }
 
@@ -10828,7 +10938,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
             '<div class="tm-hty-row"><span class="tm-hty-label">链接</span><span class="tm-hty-value">' +
             '<a class="tm-hty-link tm-hty-link-hty" href="#">HTY比赛页</a>' +
             '<span class="tm-hty-link-sep">·</span>' +
-            '<a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">走势追踪</a>' +
+            '<a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">MatchTrace</a>' +
             '</span></div>' +
             '<div class="tm-hty-strategy tm-hty-matches">' +
             '<div class="tm-hty-strategy-head">' +

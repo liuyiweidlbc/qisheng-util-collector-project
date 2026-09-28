@@ -785,6 +785,7 @@
     let targetOption = null;
     let placing = false;
     let autoBetInFlight = false;
+    let betSessionLock = 0;
     let pollTimer = null;
     let pollCount = 0;
     let started = false;
@@ -1160,6 +1161,7 @@
         return true;
       }
       if (!canPerformPageNavigation(reason)) return false;
+      if (isAutoLeaveBlockedDuringBet(reason)) return false;
       const now = Date.now();
       const log = pushNavBreakerLog(now);
       if (log.length >= NAV_BREAKER_MAX2) {
@@ -1198,6 +1200,7 @@
       const cur = String(window.location.href || "").split("#")[0];
       if (dest === cur) return true;
       if (!canPerformPageNavigation(reason)) return false;
+      if (isAutoLeaveBlockedDuringBet(reason)) return false;
       const now = Date.now();
       const log = pushNavBreakerLog(now);
       if (log.length >= NAV_BREAKER_MAX2) {
@@ -1236,11 +1239,63 @@
       if (String(getPersistedInplayNavMatchId()) !== String(matchId)) return false;
       return Date.now() - lastInplayNavAt < MATCH_NAV_STICK_MS;
     }
+    function beginBetSessionLock() {
+      betSessionLock += 1;
+    }
+    function endBetSessionLock() {
+      if (betSessionLock > 0) betSessionLock -= 1;
+    }
+    function isBetSessionLocked() {
+      if (betSessionLock > 0 || placing || autoBetInFlight || betResult === "placing") return true;
+      try {
+        if (typeof isCartOpen === "function" && isCartOpen()) return true;
+        if (typeof isBetSubmittedDrawerVisible === "function" && isBetSubmittedDrawerVisible()) return true;
+      } catch (e) {
+      }
+      return false;
+    }
+    function currentMatchHasRuleMeetSignal() {
+      if (!matchId) return false;
+      if (countPendingRuleMeetForNav(strategyList) > 0) return true;
+      const cached = matchRuleMeetCache[String(matchId)];
+      return !!(cached && cached.meetCount > 0);
+    }
+    function shouldStayForCurrentQualifiedBet() {
+      if (!matchId || isCurrentMatchEnded()) return false;
+      if (isBetSessionLocked()) return true;
+      if (targetOption) return true;
+      if (strategyStates.some(function(st) {
+        return st.actionable;
+      })) return true;
+      if (strategyStates.some(function(st) {
+        return st.execStatus === "pending" && st.hit && !st.dedupBlocked;
+      })) return true;
+      const inflight = typeof getBetInFlight === "function" ? getBetInFlight() : null;
+      if (inflight && inflight.phase !== "prepare") return true;
+      if (!currentMatchHasRuleMeetSignal()) return false;
+      if (!lastMatchScanAt) return true;
+      if (lastScanButtonCount === 0 && Date.now() - lastMatchScanAt < 2e4) return true;
+      return false;
+    }
     function canLeaveCurrentMatchForAutoSwitch() {
       if (!matchId) return true;
       if (isCurrentMatchEnded()) return true;
+      if (shouldStayForCurrentQualifiedBet()) return false;
       if (isMatchNavStickActive() && !hasOtherRuleMeetMatchThanCurrent()) return false;
       if (!strategyList.length && !lastMatchScanAt) return false;
+      return true;
+    }
+    function isAutoLeaveBlockedDuringBet(reason) {
+      if (isUserManualMatchPickReason(reason)) return false;
+      const r = String(reason || "");
+      if (r.indexOf("\u8D5B\u4E8B\u5DF2\u7ED3\u675F") >= 0 || r.indexOf("\u5DF2\u7ED3\u675F\u8D5B\u4E8B") >= 0) return false;
+      if (isCurrentMatchEnded()) return false;
+      try {
+        if (typeof isMatchEndedModalVisible === "function" && isMatchEndedModalVisible()) return false;
+      } catch (e) {
+      }
+      if (!isBetSessionLocked() && !shouldStayForCurrentQualifiedBet()) return false;
+      console.log("[hty-inplay] \u672C\u573A\u6295\u6CE8\u672A\u5B8C\u6210\uFF0C\u62E6\u622A\u5207\u573A", reason || "");
       return true;
     }
     function isHubSportEventsPage() {
@@ -1295,6 +1350,7 @@
     }
     function shouldHoldCurrentMatch() {
       if (isCurrentMatchEnded()) return false;
+      if (shouldStayForCurrentQualifiedBet()) return true;
       if (placing) return true;
       if (targetOption) return true;
       if (strategyStates.some(function(st) {
@@ -1337,6 +1393,7 @@
     function isScriptDedupInflight(option, recHash) {
       const inflight = getBetInFlight();
       if (!inflight || !recHash) return false;
+      if (inflight.phase === "prepare") return false;
       return inflight.recHash === recHash;
     }
     function releaseStaleBetInflight() {
@@ -1382,13 +1439,20 @@
     }
     function isBetAttemptBlocked(recHash) {
       if (!recHash) return false;
-      return !!getBetAttempt(recHash);
+      const attempt = getBetAttempt(recHash);
+      if (!attempt) return false;
+      if (attempt.phase === "prepare") {
+        if (betSessionLock === 0 && !placing) clearBetAttempt(recHash);
+        return false;
+      }
+      return true;
     }
-    function markBetAttempt(recHash, option, stake) {
+    function markBetAttempt(recHash, option, stake, phase) {
       if (!recHash) return;
       const store = pruneBetAttemptStore(loadBetAttemptStore());
       store[recHash] = {
         at: Date.now(),
+        phase: phase || "submitted",
         testid: option && option.testid ? String(option.testid) : "",
         stake: stake != null ? String(stake) : "",
         matchId: String(matchId || ""),
@@ -1424,7 +1488,7 @@
     }
     function getPendingBetDedupMeta() {
       const inflight = getBetInFlight();
-      if (inflight && inflight.recHash) {
+      if (inflight && inflight.recHash && inflight.phase !== "prepare") {
         return {
           recHash: String(inflight.recHash),
           at: Number(inflight.at || 0) || Date.now(),
@@ -1436,7 +1500,7 @@
       let best = null;
       for (let i = 0; i < keys.length; i++) {
         const entry = store[keys[i]];
-        if (!entry) continue;
+        if (!entry || entry.phase === "prepare") continue;
         const at = Number(entry.at || 0) || 0;
         if (!best || at > best.at) {
           best = { recHash: String(keys[i]), at, source: "attempt" };
@@ -4933,16 +4997,14 @@
       }
     }
     async function maybeNavigateToRuleMeetMatch() {
-      if (placing || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
-      if (targetOption || strategyStates.some(function(st) {
-        return st.actionable;
-      })) {
-        return false;
-      }
+      if (isBetSessionLocked() || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
+      if (shouldStayForCurrentQualifiedBet()) return false;
       if (!canLeaveCurrentMatchForAutoSwitch()) return false;
       if (!shouldAllowAutoNavigation("ruleMeet")) return false;
       if (getNavigableInPlayMatches().length < 2) return false;
       await scanAllMatchesRuleMeet(false);
+      if (isBetSessionLocked() || shouldStayForCurrentQualifiedBet()) return false;
+      if (!canLeaveCurrentMatchForAutoSwitch()) return false;
       const targetId = pickRuleMeetNavigableMatch(matchId);
       if (!targetId || String(targetId) === String(matchId)) return false;
       const navGap = Date.now() - lastInplayNavAt;
@@ -5049,7 +5111,7 @@
       return openInplayMatchPage(targetId, reason || "\u8DF3\u8F6C\u6EDA\u7403\u9875");
     }
     async function maybeAutoNavigateToInplay() {
-      if (placing || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
+      if (isBetSessionLocked() || matchEndedHandling || shouldBlockMatchAutoNav()) return false;
       if (isUserManualMatchLockActive()) return false;
       if (!canLeaveCurrentMatchForAutoSwitch()) return false;
       if (shouldHoldCurrentMatch()) return false;
@@ -5059,6 +5121,9 @@
         return false;
       }
       await scanAllMatchesRuleMeet(false);
+      if (!isCurrentMatchEnded() && !isMatchEndedModalVisible() && (isBetSessionLocked() || !canLeaveCurrentMatchForAutoSwitch() || shouldHoldCurrentMatch())) {
+        return false;
+      }
       const endedModal = isMatchEndedModalVisible();
       const excludeId = endedModal || isCurrentMatchEnded() ? matchId : "";
       const targetId = pickPreferredNavigableMatch(excludeId, matchId);
@@ -5226,7 +5291,7 @@
               if (getSortedInPlayMatches().length > 0) {
                 await scanAllMatchesRuleMeet(false);
                 renderActiveMatches(document.getElementById(PANEL_ID));
-                if (!placing && !targetOption && hasNavigableInPlayMatches() && await maybeNavigateToRuleMeetMatch()) {
+                if (!isBetSessionLocked() && !targetOption && hasNavigableInPlayMatches() && await maybeNavigateToRuleMeetMatch()) {
                   return true;
                 }
               }
@@ -6895,8 +6960,24 @@
     }
     function markBetAttemptStarted(option, recHash, stakeInput) {
       if (!recHash) return;
-      markBetAttempt(recHash, option, stakeInput);
+      markBetAttempt(recHash, option, stakeInput, "prepare");
       markBetInFlight(recHash, {
+        phase: "prepare",
+        testid: option && option.testid,
+        stake: stakeInput != null ? String(stakeInput) : "",
+        bttsSubstitute: !!(option && option.bttsSubstitute),
+        substitutedFrom: option && option.substitutedFrom ? option.substitutedFrom : null,
+        market: option && option.market ? String(option.market) : "",
+        side: option && option.side ? String(option.side) : "",
+        label: option && option.label ? String(option.label) : ""
+      });
+    }
+    function markBetSubmitted(option, recHash, stakeInput) {
+      if (!recHash) return;
+      markBetAttempt(recHash, option, stakeInput, "submitted");
+      markBetInFlight(recHash, {
+        phase: "submitted",
+        at: Date.now(),
         testid: option && option.testid,
         stake: stakeInput != null ? String(stakeInput) : "",
         bttsSubstitute: !!(option && option.bttsSubstitute),
@@ -6919,6 +7000,11 @@
           clearBetInFlight(id);
           return null;
         }
+        if (data.phase === "prepare" && betSessionLock === 0 && !placing) {
+          clearBetInFlight(id);
+          if (data.recHash) clearBetAttempt(data.recHash);
+          return null;
+        }
         return data;
       } catch (e) {
         return null;
@@ -6928,6 +7014,7 @@
       try {
         sessionStorage.setItem(betInFlightStorageKey(), JSON.stringify({
           recHash: recHash || "",
+          phase: meta && meta.phase ? String(meta.phase) : "submitted",
           testid: meta && meta.testid ? String(meta.testid) : "",
           stake: meta && meta.stake != null ? String(meta.stake) : "",
           at: meta && meta.at ? Number(meta.at) : Date.now(),
@@ -9393,263 +9480,269 @@
       schedulePoll();
     }
     async function placeTestBet(option, fromAutoBet) {
-      if (!option || placing) return false;
+      if (!option || placing || betSessionLock > 0) return false;
       if (!option.strategy || !passesStrategyStatusGate(option.strategy)) return false;
-      const recHash = option.strategy.recHash;
-      if (isScriptDedupStored(option, recHash)) {
-        const local = recHash ? getLocalExecutedStrategy(recHash) : null;
-        console.warn("[hty-inplay] \u811A\u672C\u9632\u91CD\uFF1A\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash, option.testid);
-        setBetResult("skipped", "\u811A\u672C\u9632\u91CD" + (local && local.orderno ? " \u5355\u53F7" + local.orderno : ""));
-        targetOption = null;
-        renderPanel(true);
-        triggerAutoUploadMatchHistory("dedup-already-placed", { updateStep: false }).catch(function(e) {
-          console.warn("[hty-inplay] \u9632\u91CD\u62E6\u622A\u540E\u4E0A\u4F20", e);
-        });
-        schedulePoll();
-        return false;
-      }
-      if (recHash && isBetAttemptBlocked(recHash)) {
-        const attempt = getBetAttempt(recHash);
-        let recovered = null;
-        if (isBetSubmittedDrawerVisible()) {
-          setBetStep("\u68C0\u6D4B\u5230\u672A\u5B8C\u6210\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
+      beginBetSessionLock();
+      try {
+        const recHash = option.strategy.recHash;
+        if (isScriptDedupStored(option, recHash)) {
+          const local = recHash ? getLocalExecutedStrategy(recHash) : null;
+          console.warn("[hty-inplay] \u811A\u672C\u9632\u91CD\uFF1A\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash, option.testid);
+          setBetResult("skipped", "\u811A\u672C\u9632\u91CD" + (local && local.orderno ? " \u5355\u53F7" + local.orderno : ""));
+          targetOption = null;
           renderPanel(true);
-          recovered = await tryRecoverSuccessfulBet(option, attempt && attempt.at, { quick: true });
-        } else if (canQueryOrdersReport() || getCachedOrdersReportText(matchId)) {
-          setBetStep("\u68C0\u6D4B\u5230\u672A\u5B8C\u6210\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
-          renderPanel(true);
-          recovered = await tryRecoverSuccessfulBet(option, attempt && attempt.at, { quick: true });
+          triggerAutoUploadMatchHistory("dedup-already-placed", { updateStep: false }).catch(function(e) {
+            console.warn("[hty-inplay] \u9632\u91CD\u62E6\u622A\u540E\u4E0A\u4F20", e);
+          });
+          schedulePoll();
+          return false;
         }
-        if (recovered) {
-          lastStrategyBetRecord = recovered;
-          placing = true;
-          await finalizeBetSuccess(option, recovered, !!fromAutoBet, "\u540E\u53F0\u786E\u8BA4\u5DF2\u6709\u8BA2\u5355\uFF08\u9632\u91CD\u62E6\u622A\uFF09");
-          placing = false;
-          return true;
-        }
-        if (!isBetSubmittedDrawerVisible()) {
-          const age = attempt ? Date.now() - Number(attempt.at || 0) : 0;
-          if (age < BET_DEDUP_VERIFY_MISS_MS) {
-            console.warn("[hty-inplay] \u9632\u91CD\u62E6\u622A\uFF1A\u8FD1\u671F\u5C1D\u8BD5\u672A\u786E\u8BA4\uFF0C\u6682\u505C\u91CD\u590D\u4E0B\u5355", recHash);
+        if (recHash && isBetAttemptBlocked(recHash)) {
+          const attempt = getBetAttempt(recHash);
+          let recovered = null;
+          if (isBetSubmittedDrawerVisible()) {
+            setBetStep("\u68C0\u6D4B\u5230\u672A\u5B8C\u6210\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
+            renderPanel(true);
+            recovered = await tryRecoverSuccessfulBet(option, attempt && attempt.at, { quick: true });
+          } else if (canQueryOrdersReport() || getCachedOrdersReportText(matchId)) {
+            setBetStep("\u68C0\u6D4B\u5230\u672A\u5B8C\u6210\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
+            renderPanel(true);
+            recovered = await tryRecoverSuccessfulBet(option, attempt && attempt.at, { quick: true });
+          }
+          if (recovered) {
+            lastStrategyBetRecord = recovered;
+            placing = true;
+            await finalizeBetSuccess(option, recovered, !!fromAutoBet, "\u540E\u53F0\u786E\u8BA4\u5DF2\u6709\u8BA2\u5355\uFF08\u9632\u91CD\u62E6\u622A\uFF09");
+            placing = false;
+            return true;
+          }
+          if (!isBetSubmittedDrawerVisible()) {
+            const age = attempt ? Date.now() - Number(attempt.at || 0) : 0;
+            if (age < BET_DEDUP_VERIFY_MISS_MS) {
+              console.warn("[hty-inplay] \u9632\u91CD\u62E6\u622A\uFF1A\u8FD1\u671F\u5C1D\u8BD5\u672A\u786E\u8BA4\uFF0C\u6682\u505C\u91CD\u590D\u4E0B\u5355", recHash);
+              setBetResult("pending", "\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF0C\u7B49\u5F85\u786E\u8BA4");
+              setBetStep("\u9632\u91CD\u67E5\u5355\u4E2D\uFF08" + Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - age) / 1e3)) + "s \u65E0\u5355\u53EF\u91CD\u8BD5\uFF09\u2026");
+              renderPanel(true);
+              schedulePoll();
+              return false;
+            }
+            console.log("[hty-inplay] \u4E0A\u6B21\u4E0B\u6CE8\u672A\u6210\u529F\uFF0C\u6E05\u9664\u9632\u91CD\u6807\u8BB0\u5E76\u91CD\u8BD5", recHash);
+            clearPendingBetDedup(recHash, "attempt \u8D85\u65F6\u65E0\u5355\uFF0C\u5141\u8BB8\u91CD\u8BD5");
+            betResult = "pending";
+            setBetStep("\u4E0A\u6B21\u4E0B\u6CE8\u5931\u8D25\uFF0C\u6761\u4EF6\u6EE1\u8DB3\u5C06\u91CD\u65B0\u5C1D\u8BD5");
+            renderPanel(true);
+          } else {
+            console.warn("[hty-inplay] \u4E0B\u6CE8\u5C1D\u8BD5\u672A\u786E\u8BA4\uFF0C\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash);
             setBetResult("pending", "\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF0C\u7B49\u5F85\u786E\u8BA4");
-            setBetStep("\u9632\u91CD\u67E5\u5355\u4E2D\uFF08" + Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - age) / 1e3)) + "s \u65E0\u5355\u53EF\u91CD\u8BD5\uFF09\u2026");
+            setBetStep("\u7B49\u5F85\u8BA2\u5355\u5165\u5E93\u786E\u8BA4\uFF0C\u8BF7\u52FF\u624B\u52A8\u91CD\u590D\u4E0B\u6CE8");
             renderPanel(true);
             schedulePoll();
             return false;
           }
-          console.log("[hty-inplay] \u4E0A\u6B21\u4E0B\u6CE8\u672A\u6210\u529F\uFF0C\u6E05\u9664\u9632\u91CD\u6807\u8BB0\u5E76\u91CD\u8BD5", recHash);
-          clearPendingBetDedup(recHash, "attempt \u8D85\u65F6\u65E0\u5355\uFF0C\u5141\u8BB8\u91CD\u8BD5");
-          betResult = "pending";
-          setBetStep("\u4E0A\u6B21\u4E0B\u6CE8\u5931\u8D25\uFF0C\u6761\u4EF6\u6EE1\u8DB3\u5C06\u91CD\u65B0\u5C1D\u8BD5");
-          renderPanel(true);
-        } else {
-          console.warn("[hty-inplay] \u4E0B\u6CE8\u5C1D\u8BD5\u672A\u786E\u8BA4\uFF0C\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash);
-          setBetResult("pending", "\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF0C\u7B49\u5F85\u786E\u8BA4");
-          setBetStep("\u7B49\u5F85\u8BA2\u5355\u5165\u5E93\u786E\u8BA4\uFF0C\u8BF7\u52FF\u624B\u52A8\u91CD\u590D\u4E0B\u6CE8");
-          renderPanel(true);
-          schedulePoll();
-          return false;
         }
-      }
-      const inflight = getBetInFlight();
-      if (recHash && inflight && inflight.recHash === recHash) {
-        setBetStep("\u68C0\u6D4B\u5230\u8FDB\u884C\u4E2D\u7684\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
-        const recovered = await tryRecoverSuccessfulBet(option, inflight.at, {
-          retries: 3,
-          gapMs: 2500
-        });
-        if (recovered) {
-          lastStrategyBetRecord = recovered;
-          placing = true;
-          await finalizeBetSuccess(option, recovered, !!fromAutoBet, "\u540E\u53F0\u786E\u8BA4\u5DF2\u6709\u8BA2\u5355\uFF08\u672A\u8D70\u5B8C\u6574\u5F39\u7A97\u6D41\u7A0B\uFF09");
-          placing = false;
-          return true;
-        }
-        const inflightAge = Date.now() - Number(inflight.at || 0);
-        if (inflightAge > BET_DEDUP_VERIFY_MISS_MS && !isBetSubmittedDrawerVisible()) {
-          clearPendingBetDedup(recHash, "inflight \u8D85\u65F6\u65E0\u5355\uFF0C\u5141\u8BB8\u91CD\u8BD5");
-        } else if (inflightAge > BET_RECOVERY_WINDOW_MS) {
-          clearBetInFlight();
-        } else {
-          console.warn("[hty-inplay] \u4E0B\u6CE8\u8FDB\u884C\u4E2D\u4E14\u672A\u786E\u8BA4\uFF0C\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash);
-          setBetResult("pending", "\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF0C\u7B49\u5F85\u786E\u8BA4");
-          setBetStep("\u9632\u91CD\u67E5\u5355\u4E2D\uFF08" + Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - inflightAge) / 1e3)) + "s \u65E0\u5355\u53EF\u91CD\u8BD5\uFF09\u2026");
-          renderPanel(true);
-          schedulePoll();
-          return false;
-        }
-      }
-      placing = true;
-      collapsePanelForBet();
-      setBetResult("placing", "\u51C6\u5907\u70B9\u51FB\u8D54\u7387");
-      let stakeInput = "";
-      try {
-        stakeInput = resolveBetStakeInput(option);
-      } catch (stakeErr) {
-        placing = false;
-        restorePanelAfterBet();
-        const msg = stakeErr && stakeErr.message ? stakeErr.message : "\u6295\u6CE8\u91D1\u989D\u65E0\u6548";
-        setBetResult("failed", msg);
-        renderPanel(true);
-        schedulePoll();
-        return false;
-      }
-      markBetAttemptStarted(option, recHash, stakeInput);
-      let betAttemptAt = 0;
-      try {
-        setBetStep("\u5B9A\u4F4D\u8D54\u7387\u6309\u94AE");
-        const liveBtn = await ensureButtonVisible(option);
-        if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
-        option.button = liveBtn;
-        setBetStep("\u7B49\u5F85\u6295\u6CE8\u5355\u6253\u5F00");
-        let opened = isCartOpen();
-        if (!opened && getSportCartItemCount() > 0) {
-          opened = await openBetDrawer();
-        }
-        if (!opened) {
-          setBetStep("\u6EDA\u52A8\u5230\u8D54\u7387\u6309\u94AE");
-          await humanScrollTo(liveBtn);
-          setBetStep("\u70B9\u51FB " + option.label + " \u8D54\u7387");
-          robustClick(liveBtn);
-          await humanDelay(600, 1100);
-          opened = !!await waitForSettled(isCartOpen, 8e3, 300);
-        }
-        if (!opened) {
-          setBetStep("\u6295\u6CE8\u5355\u672A\u6253\u5F00\uFF0C\u518D\u6B21\u70B9\u51FB\u8D54\u7387");
-          renderPanel(true);
-          robustClick(liveBtn);
-          await humanDelay(700, 1200);
-          opened = !!await waitForSettled(isCartOpen, 8e3, 300);
-        }
-        if (!opened) {
-          opened = await openBetDrawer();
-        }
-        if (!opened) throw new Error("\u6295\u6CE8\u5355\u672A\u6253\u5F00");
-        await ensureBetCartVisible();
-        await humanDelay(400, 800);
-        setBetStep("\u6570\u5B57\u952E\u76D8\u8F93\u5165 " + stakeInput);
-        await enterAmountViaKeypad(stakeInput);
-        await humanDelay(300, 700);
-        betAttemptAt = Date.now();
-        setBetStep("\u7B49\u5F85\u4E0B\u6CE8\u7ED3\u679C\uFF08\u63A5\u53E3\u6216\u6210\u529F\u62BD\u5C49\uFF09\u2026");
-        const betWaitHandle = createBetWaitHandle();
-        await ensureBetCartVisible();
-        await submitBetSlip(stakeInput, function() {
-          betWaitHandle.rearm();
-        });
-        const outcome = await waitForBetOutcomeAfterSubmit(betWaitHandle, option, betAttemptAt);
-        let betRecord;
-        let outcomeHint = "";
-        if (outcome.source === "api" || outcome.source === "api_late") {
-          betRecord = buildStrategyBetRecord(option, outcome.payload, outcome.payload.requestBody);
-        } else if (outcome.source === "order") {
-          betRecord = outcome.record;
-          outcomeHint = "\u8BA2\u5355\u6062\u590D\u786E\u8BA4";
-        } else {
-          betRecord = outcome.record;
-          outcomeHint = "UI\u6210\u529F\u62BD\u5C49\u786E\u8BA4";
-        }
-        lastStrategyBetRecord = betRecord;
-        console.log("[hty-inplay] \u4E0B\u6CE8\u6210\u529F", betRecord.orderno, betRecord.recHash, outcome.source);
-        const doneRecHash = getBetRecHash(option, betRecord);
-        markStrategyExecutedLocally(doneRecHash);
-        rememberExecutedStrategy(doneRecHash, betRecord.orderno, option, {
-          pendingSync: true,
-          betOdds: betRecord.betOdds,
-          betStake: betRecord.betStake,
-          matchId: betRecord.matchId || matchId
-        });
-        placing = false;
-        restorePanelAfterBet();
-        setBetResult("success", (option.label || "") + " \u5DF2\u63D0\u4EA4");
-        renderPanel(true);
-        await finalizeBetSuccess(option, betRecord, !!fromAutoBet, outcomeHint || void 0);
-        return true;
-      } catch (err) {
-        clearBetResultWaiter();
-        let recovered = null;
-        let recoverHint = "";
-        const sinceAt = betAttemptAt > 0 ? betAttemptAt : Date.now() - 6e4;
-        if (betAttemptAt > 0 || isBetSubmittedDrawerVisible()) {
-          setBetStep("\u4E0B\u6CE8\u54CD\u5E94\u5F02\u5E38\uFF0C\u5C1D\u8BD5\u4ECE\u8BA2\u5355\u786E\u8BA4\u2026");
-          renderPanel(true);
-          recovered = await tryRecoverSuccessfulBet(option, sinceAt, {
-            quick: isBetSubmittedDrawerVisible(),
+        const inflight = getBetInFlight();
+        if (recHash && inflight && inflight.recHash === recHash) {
+          setBetStep("\u68C0\u6D4B\u5230\u8FDB\u884C\u4E2D\u7684\u4E0B\u6CE8\uFF0C\u5C1D\u8BD5\u786E\u8BA4\u2026");
+          const recovered = await tryRecoverSuccessfulBet(option, inflight.at, {
             retries: 3,
             gapMs: 2500
           });
-          if (recovered) recoverHint = "\u8BA2\u5355/UI \u6062\u590D\u786E\u8BA4";
-        } else {
-          const captured = consumeLastCapturedBetSuccess(option, Date.now() - 1e4);
-          if (captured) {
-            recovered = buildStrategyBetRecord(option, captured, captured.requestBody);
-            recoverHint = "\u63A5\u53E3\u8FDF\u5230\u7684\u54CD\u5E94";
-          }
-        }
-        if (recovered) {
-          lastStrategyBetRecord = recovered;
-          const hint = err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF";
-          const extra = recoverHint ? recoverHint + "\uFF08" + hint + "\uFF09" : "\u63A5\u53E3\u672A\u6355\u83B7(" + hint + ")";
-          const doneRecHash = getBetRecHash(option, recovered);
-          markStrategyExecutedLocally(doneRecHash);
-          rememberExecutedStrategy(doneRecHash, recovered.orderno, option);
-          await finalizeBetSuccess(option, recovered, !!fromAutoBet, extra);
-          return true;
-        }
-        const msg = err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF";
-        const submittedUi = isBetSubmittedDrawerVisible();
-        const keepAttempt = !isDefinitiveBetFailure(err) && (submittedUi || betAttemptAt > 0 && isUncertainBetFailure(err));
-        if (keepAttempt) {
-          markBetAttempt(recHash, option, stakeInput);
-          markBetInFlight(recHash, {
-            testid: option && option.testid,
-            stake: stakeInput,
-            at: betAttemptAt || Date.now()
-          });
-          if (submittedUi) {
-            const uiRec = buildBetRecordFromUiSuccess(option);
-            const doneRecHash = getBetRecHash(option, uiRec) || recHash;
-            markStrategyExecutedLocally(doneRecHash);
-            rememberExecutedStrategy(doneRecHash, uiRec.orderno, option, {
-              pendingSync: true,
-              betOdds: uiRec.betOdds,
-              betStake: uiRec.betStake,
-              matchId: uiRec.matchId || matchId
-            });
-            setBetResult("success", (option.label || "") + " \u5DF2\u63D0\u4EA4\uFF08\u8D85\u65F6\xB7UI\u786E\u8BA4\uFF09");
-            setBetStep("\u63A5\u53E3\u8D85\u65F6\u4F46\u9875\u9762\u5DF2\u63D0\u4EA4\uFF0C\u5DF2\u9501\u5B9A\u9632\u91CD\u5E76\u540C\u6B65\u72B6\u6001");
-            renderPanel(true);
-            await finalizeBetSuccess(option, uiRec, !!fromAutoBet, "\u8D85\u65F6\xB7UI\u5DF2\u63D0\u4EA4");
+          if (recovered) {
+            lastStrategyBetRecord = recovered;
+            placing = true;
+            await finalizeBetSuccess(option, recovered, !!fromAutoBet, "\u540E\u53F0\u786E\u8BA4\u5DF2\u6709\u8BA2\u5355\uFF08\u672A\u8D70\u5B8C\u6574\u5F39\u7A97\u6D41\u7A0B\uFF09");
+            placing = false;
             return true;
           }
-          const lateCap = consumeLastCapturedBetSuccess(option, sinceAt);
-          const uncertainRec = lateCap ? buildStrategyBetRecord(option, lateCap, lateCap.requestBody) : buildBetRecordFromUiSuccess(option);
-          console.warn(
-            "[hty-inplay] \u4E0B\u6CE8\u7ED3\u679C\u4E0D\u786E\u5B9A\uFF0C\u9501\u5B9A\u5E76\u540C\u6B65\u7B56\u7565\u72B6\u6001",
-            msg,
-            recHash,
-            uncertainRec && uncertainRec.orderno
-          );
-          setBetResult("pending", "\u4E0B\u6CE8\u53EF\u80FD\u5DF2\u6210\u529F\uFF0C\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF08" + msg + "\uFF09");
-          setBetStep("\u8D85\u65F6\u672A\u63A5\u5230\u54CD\u5E94\uFF0C\u5DF2\u9501\u5B9A\u5E76\u540C\u6B65\u7B56\u7565\u4E3A\u5DF2\u6267\u884C");
+          const inflightAge = Date.now() - Number(inflight.at || 0);
+          if (inflightAge > BET_DEDUP_VERIFY_MISS_MS && !isBetSubmittedDrawerVisible()) {
+            clearPendingBetDedup(recHash, "inflight \u8D85\u65F6\u65E0\u5355\uFF0C\u5141\u8BB8\u91CD\u8BD5");
+          } else if (inflightAge > BET_RECOVERY_WINDOW_MS) {
+            clearBetInFlight();
+          } else {
+            console.warn("[hty-inplay] \u4E0B\u6CE8\u8FDB\u884C\u4E2D\u4E14\u672A\u786E\u8BA4\uFF0C\u8DF3\u8FC7\u91CD\u590D\u4E0B\u5355", recHash);
+            setBetResult("pending", "\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF0C\u7B49\u5F85\u786E\u8BA4");
+            setBetStep("\u9632\u91CD\u67E5\u5355\u4E2D\uFF08" + Math.max(1, Math.ceil((BET_DEDUP_VERIFY_MISS_MS - inflightAge) / 1e3)) + "s \u65E0\u5355\u53EF\u91CD\u8BD5\uFF09\u2026");
+            renderPanel(true);
+            schedulePoll();
+            return false;
+          }
+        }
+        placing = true;
+        collapsePanelForBet();
+        setBetResult("placing", "\u51C6\u5907\u70B9\u51FB\u8D54\u7387");
+        let stakeInput = "";
+        try {
+          stakeInput = resolveBetStakeInput(option);
+        } catch (stakeErr) {
+          placing = false;
+          restorePanelAfterBet();
+          const msg = stakeErr && stakeErr.message ? stakeErr.message : "\u6295\u6CE8\u91D1\u989D\u65E0\u6548";
+          setBetResult("failed", msg);
           renderPanel(true);
-          await finalizeBetSuccess(option, uncertainRec, !!fromAutoBet, "\u8D85\u65F6\xB7\u9632\u91CD\u9501\u5B9A");
+          schedulePoll();
           return false;
         }
-        clearBetInFlight();
-        clearBetAttempt(recHash);
-        console.warn("[hty-inplay] \u6295\u6CE8\u5931\u8D25", msg, err);
-        setBetResult("failed", "\u5931\u8D25\uFF1A" + msg);
-        setBetStep("\u4E0B\u6CE8\u5931\u8D25\uFF1A" + msg + "\uFF0C\u6761\u4EF6\u6EE1\u8DB3\u5C06\u91CD\u8BD5");
-        renderPanel(true);
-        schedulePoll();
-        if (betAttemptAt === 0 || !/超时|等待/i.test(msg)) {
-          maybeTriggerAutoBet(false);
+        markBetAttemptStarted(option, recHash, stakeInput);
+        let betAttemptAt = 0;
+        try {
+          setBetStep("\u5B9A\u4F4D\u8D54\u7387\u6309\u94AE");
+          const liveBtn = await ensureButtonVisible(option);
+          if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
+          option.button = liveBtn;
+          setBetStep("\u7B49\u5F85\u6295\u6CE8\u5355\u6253\u5F00");
+          let opened = isCartOpen();
+          if (!opened && getSportCartItemCount() > 0) {
+            opened = await openBetDrawer();
+          }
+          if (!opened) {
+            setBetStep("\u6EDA\u52A8\u5230\u8D54\u7387\u6309\u94AE");
+            await humanScrollTo(liveBtn);
+            setBetStep("\u70B9\u51FB " + option.label + " \u8D54\u7387");
+            robustClick(liveBtn);
+            await humanDelay(600, 1100);
+            opened = !!await waitForSettled(isCartOpen, 8e3, 300);
+          }
+          if (!opened) {
+            setBetStep("\u6295\u6CE8\u5355\u672A\u6253\u5F00\uFF0C\u518D\u6B21\u70B9\u51FB\u8D54\u7387");
+            renderPanel(true);
+            robustClick(liveBtn);
+            await humanDelay(700, 1200);
+            opened = !!await waitForSettled(isCartOpen, 8e3, 300);
+          }
+          if (!opened) {
+            opened = await openBetDrawer();
+          }
+          if (!opened) throw new Error("\u6295\u6CE8\u5355\u672A\u6253\u5F00");
+          await ensureBetCartVisible();
+          await humanDelay(400, 800);
+          setBetStep("\u6570\u5B57\u952E\u76D8\u8F93\u5165 " + stakeInput);
+          await enterAmountViaKeypad(stakeInput);
+          await humanDelay(300, 700);
+          betAttemptAt = Date.now();
+          markBetSubmitted(option, recHash, stakeInput);
+          setBetStep("\u7B49\u5F85\u4E0B\u6CE8\u7ED3\u679C\uFF08\u63A5\u53E3\u6216\u6210\u529F\u62BD\u5C49\uFF09\u2026");
+          const betWaitHandle = createBetWaitHandle();
+          await ensureBetCartVisible();
+          await submitBetSlip(stakeInput, function() {
+            betWaitHandle.rearm();
+          });
+          const outcome = await waitForBetOutcomeAfterSubmit(betWaitHandle, option, betAttemptAt);
+          let betRecord;
+          let outcomeHint = "";
+          if (outcome.source === "api" || outcome.source === "api_late") {
+            betRecord = buildStrategyBetRecord(option, outcome.payload, outcome.payload.requestBody);
+          } else if (outcome.source === "order") {
+            betRecord = outcome.record;
+            outcomeHint = "\u8BA2\u5355\u6062\u590D\u786E\u8BA4";
+          } else {
+            betRecord = outcome.record;
+            outcomeHint = "UI\u6210\u529F\u62BD\u5C49\u786E\u8BA4";
+          }
+          lastStrategyBetRecord = betRecord;
+          console.log("[hty-inplay] \u4E0B\u6CE8\u6210\u529F", betRecord.orderno, betRecord.recHash, outcome.source);
+          const doneRecHash = getBetRecHash(option, betRecord);
+          markStrategyExecutedLocally(doneRecHash);
+          rememberExecutedStrategy(doneRecHash, betRecord.orderno, option, {
+            pendingSync: true,
+            betOdds: betRecord.betOdds,
+            betStake: betRecord.betStake,
+            matchId: betRecord.matchId || matchId
+          });
+          placing = false;
+          restorePanelAfterBet();
+          setBetResult("success", (option.label || "") + " \u5DF2\u63D0\u4EA4");
+          renderPanel(true);
+          await finalizeBetSuccess(option, betRecord, !!fromAutoBet, outcomeHint || void 0);
+          return true;
+        } catch (err) {
+          clearBetResultWaiter();
+          let recovered = null;
+          let recoverHint = "";
+          const sinceAt = betAttemptAt > 0 ? betAttemptAt : Date.now() - 6e4;
+          if (betAttemptAt > 0 || isBetSubmittedDrawerVisible()) {
+            setBetStep("\u4E0B\u6CE8\u54CD\u5E94\u5F02\u5E38\uFF0C\u5C1D\u8BD5\u4ECE\u8BA2\u5355\u786E\u8BA4\u2026");
+            renderPanel(true);
+            recovered = await tryRecoverSuccessfulBet(option, sinceAt, {
+              quick: isBetSubmittedDrawerVisible(),
+              retries: 3,
+              gapMs: 2500
+            });
+            if (recovered) recoverHint = "\u8BA2\u5355/UI \u6062\u590D\u786E\u8BA4";
+          } else {
+            const captured = consumeLastCapturedBetSuccess(option, Date.now() - 1e4);
+            if (captured) {
+              recovered = buildStrategyBetRecord(option, captured, captured.requestBody);
+              recoverHint = "\u63A5\u53E3\u8FDF\u5230\u7684\u54CD\u5E94";
+            }
+          }
+          if (recovered) {
+            lastStrategyBetRecord = recovered;
+            const hint = err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF";
+            const extra = recoverHint ? recoverHint + "\uFF08" + hint + "\uFF09" : "\u63A5\u53E3\u672A\u6355\u83B7(" + hint + ")";
+            const doneRecHash = getBetRecHash(option, recovered);
+            markStrategyExecutedLocally(doneRecHash);
+            rememberExecutedStrategy(doneRecHash, recovered.orderno, option);
+            await finalizeBetSuccess(option, recovered, !!fromAutoBet, extra);
+            return true;
+          }
+          const msg = err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF";
+          const submittedUi = isBetSubmittedDrawerVisible();
+          const keepAttempt = !isDefinitiveBetFailure(err) && (submittedUi || betAttemptAt > 0 && isUncertainBetFailure(err));
+          if (keepAttempt) {
+            markBetAttempt(recHash, option, stakeInput);
+            markBetInFlight(recHash, {
+              testid: option && option.testid,
+              stake: stakeInput,
+              at: betAttemptAt || Date.now()
+            });
+            if (submittedUi) {
+              const uiRec = buildBetRecordFromUiSuccess(option);
+              const doneRecHash = getBetRecHash(option, uiRec) || recHash;
+              markStrategyExecutedLocally(doneRecHash);
+              rememberExecutedStrategy(doneRecHash, uiRec.orderno, option, {
+                pendingSync: true,
+                betOdds: uiRec.betOdds,
+                betStake: uiRec.betStake,
+                matchId: uiRec.matchId || matchId
+              });
+              setBetResult("success", (option.label || "") + " \u5DF2\u63D0\u4EA4\uFF08\u8D85\u65F6\xB7UI\u786E\u8BA4\uFF09");
+              setBetStep("\u63A5\u53E3\u8D85\u65F6\u4F46\u9875\u9762\u5DF2\u63D0\u4EA4\uFF0C\u5DF2\u9501\u5B9A\u9632\u91CD\u5E76\u540C\u6B65\u72B6\u6001");
+              renderPanel(true);
+              await finalizeBetSuccess(option, uiRec, !!fromAutoBet, "\u8D85\u65F6\xB7UI\u5DF2\u63D0\u4EA4");
+              return true;
+            }
+            const lateCap = consumeLastCapturedBetSuccess(option, sinceAt);
+            const uncertainRec = lateCap ? buildStrategyBetRecord(option, lateCap, lateCap.requestBody) : buildBetRecordFromUiSuccess(option);
+            console.warn(
+              "[hty-inplay] \u4E0B\u6CE8\u7ED3\u679C\u4E0D\u786E\u5B9A\uFF0C\u9501\u5B9A\u5E76\u540C\u6B65\u7B56\u7565\u72B6\u6001",
+              msg,
+              recHash,
+              uncertainRec && uncertainRec.orderno
+            );
+            setBetResult("pending", "\u4E0B\u6CE8\u53EF\u80FD\u5DF2\u6210\u529F\uFF0C\u6682\u505C\u91CD\u590D\u4E0B\u5355\uFF08" + msg + "\uFF09");
+            setBetStep("\u8D85\u65F6\u672A\u63A5\u5230\u54CD\u5E94\uFF0C\u5DF2\u9501\u5B9A\u5E76\u540C\u6B65\u7B56\u7565\u4E3A\u5DF2\u6267\u884C");
+            renderPanel(true);
+            await finalizeBetSuccess(option, uncertainRec, !!fromAutoBet, "\u8D85\u65F6\xB7\u9632\u91CD\u9501\u5B9A");
+            return false;
+          }
+          clearBetInFlight();
+          clearBetAttempt(recHash);
+          console.warn("[hty-inplay] \u6295\u6CE8\u5931\u8D25", msg, err);
+          setBetResult("failed", "\u5931\u8D25\uFF1A" + msg);
+          setBetStep("\u4E0B\u6CE8\u5931\u8D25\uFF1A" + msg + "\uFF0C\u6761\u4EF6\u6EE1\u8DB3\u5C06\u91CD\u8BD5");
+          renderPanel(true);
+          schedulePoll();
+          if (betAttemptAt === 0 || !/超时|等待/i.test(msg)) {
+            maybeTriggerAutoBet(false);
+          }
+          return false;
+        } finally {
+          placing = false;
+          restorePanelAfterBet();
         }
-        return false;
       } finally {
-        placing = false;
-        restorePanelAfterBet();
+        endBetSessionLock();
       }
     }
     async function runAutoBet() {
@@ -9976,7 +10069,7 @@
       }
       const panel = document.createElement("div");
       panel.id = PANEL_ID;
-      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-ball-label">\u91CF\u5316</span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">\u8D70\u52BF\u8FFD\u8E2A</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-upcoming-toggle">\u672A\u5F00\u59CB (0) \u25B8</button><div class="tm-hty-matches-upcoming-list" style="display:none"></div></div><div class="tm-hty-matches-watch" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-watch-toggle">\u5173\u6CE8\u533A (0) \u25B8</button><div class="tm-hty-matches-watch-list" style="display:none"></div></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
+      panel.innerHTML = '<div class="tm-hty-head"><span class="tm-hty-title">HTY \u6EDA\u7403\u91CF\u5316<span class="tm-hty-version">v' + SCRIPT_VERSION2 + '</span></span><span class="tm-hty-ball-label">\u91CF\u5316</span><span class="tm-hty-login">\u68C0\u6D4B\u4E2D</span><button type="button" class="tm-hty-collapse" title="\u6298\u53E0/\u5C55\u5F00">\u25BE</button></div><div class="tm-hty-body"><div class="tm-hty-row"><span class="tm-hty-label">\u8D5B\u4E8B</span><span class="tm-hty-value tm-hty-match">\u2014</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u626B\u63CF</span><span class="tm-hty-value tm-hty-scan">\u7B49\u5F85\u626B\u63CF</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u94FE\u63A5</span><span class="tm-hty-value"><a class="tm-hty-link tm-hty-link-hty" href="#">HTY\u6BD4\u8D5B\u9875</a><span class="tm-hty-link-sep">\xB7</span><a class="tm-hty-link tm-hty-link-trace" href="#" target="_blank" rel="noopener">MatchTrace</a></span></div><div class="tm-hty-strategy tm-hty-matches"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u8D5B\u4E8B</span><span><span class="tm-hty-matches-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span> <button type="button" class="tm-hty-refresh" data-action="refresh-strategy" title="\u5237\u65B0">\u5237\u65B0</button></span></div><div class="tm-hty-matches-list"></div><div class="tm-hty-matches-upcoming" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-upcoming-toggle">\u672A\u5F00\u59CB (0) \u25B8</button><div class="tm-hty-matches-upcoming-list" style="display:none"></div></div><div class="tm-hty-matches-watch" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-watch-toggle">\u5173\u6CE8\u533A (0) \u25B8</button><div class="tm-hty-matches-watch-list" style="display:none"></div></div><div class="tm-hty-matches-ended" data-collapsed="1" style="display:none"><button type="button" class="tm-hty-ended-toggle">\u5DF2\u7ED3\u675F (0) \u25B8</button><div class="tm-hty-matches-ended-list" style="display:none"></div></div></div><div class="tm-hty-strategy tm-hty-strategy-rules"><div class="tm-hty-strategy-head"><span class="tm-hty-strategy-title">\u7B56\u7565\u5217\u8868</span><span><span class="tm-hty-strategy-status" data-kind="info">\u52A0\u8F7D\u4E2D\u2026</span></span></div><div class="tm-hty-strategy-list"></div></div><div class="tm-hty-bet-section"><div class="tm-hty-row tm-hty-stake-row"><span class="tm-hty-label">\u6295\u6CE8\u91D1\u989D</span><span class="tm-hty-value"><select class="tm-hty-stake-select" title="\u6295\u6CE8\u91D1\u989D\u89C4\u5219"><option value="strategy">\u7B56\u7565\u5B9E\u9645\u91D1\u989D</option><option value="2.5">2.5</option><option value="1">1</option><option value="0.3">0.3</option></select></span></div><div class="tm-hty-row tm-hty-dedup-row"><span class="tm-hty-label">\u811A\u672C\u9632\u91CD</span><span class="tm-hty-value tm-hty-dedup-wrap"><label class="tm-hty-dedup-label" title="\u7B56\u7565\u72B6\u6001\u4E3A\u672A\u6267\u884C\u65F6\uFF0C\u518D\u68C0\u67E5\u672C\u9875/\u672C\u4F1A\u8BDD\u662F\u5426\u5DF2\u4E0B\u5355"><input type="checkbox" class="tm-hty-dedup-toggle" checked> \u5F00\u542F\uFF08\u9ED8\u8BA4\uFF09</label></span></div><div class="tm-hty-row"><span class="tm-hty-label">\u5373\u5C06\u6295\u6CE8</span><span class="tm-hty-value tm-hty-upcoming">\u7B49\u5F85\u9875\u9762\u52A0\u8F7D</span></div><div class="tm-hty-row"><span class="tm-hty-label">\u6295\u6CE8\u7ED3\u679C</span><span class="tm-hty-value"><span class="tm-hty-result" data-kind="info">\u7B49\u5F85\u76D8\u53E3</span></span></div><div class="tm-hty-step">\u521D\u59CB\u5316\u4E2D</div></div></div><div class="tm-hty-actions"><button type="button" class="tm-hty-action-btn" data-action="open-cart">\u6253\u5F00\u6295\u6CE8\u5355</button><button type="button" class="tm-hty-action-btn" data-action="test-bet">\u6D4B\u8BD5\u4E0B\u6CE8</button><button type="button" class="tm-hty-action-btn" data-action="upload-match-bets">\u4E0A\u4F20\u672C\u573A\u8BB0\u5F55</button></div>';
       panel.querySelector(".tm-hty-head").addEventListener("click", function(e) {
         if (e.target.closest(".tm-hty-collapse") || e.target.closest(".tm-hty-login")) return;
         togglePanelCollapsed();
