@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 两队历史排名快捷入口
 // @namespace    https://titan007.com/
-// @version      1.3.7
-// @description  在 detail 页面增加“两队历史排名”“联赛排名”等快捷按钮，并支持 F1–F4 快捷键；联赛排名链接附带 tm_home/tm_away 等参数，统计 Tab 经独立 Cookie 传递；detail 页 URL 含 tab 参数时自动打开联赛排名并定位对应统计 Tab。
+// @version      1.3.10
+// @description  在 detail 页面增加“两队历史排名”“主教练”“球员身价”“球员数据”“联赛排名”快捷按钮。F1 历史排名、F2 主教练（先客队再主队）、F3 球员身价、F4 球员数据、F5 联赛排名。联赛排名链接附带 tm_home/tm_away 等参数，统计 Tab 经独立 Cookie 传递；detail 页 URL 含 tab 参数时自动打开联赛排名并定位对应统计 Tab。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-idle
@@ -288,6 +288,59 @@
     );
   }
 
+  function coachPageUrl(anchor) {
+    if (!anchor) return '';
+    const href = (anchor.getAttribute('href') || '').trim();
+    if (!/\/team\/coach\/\d+\/\d+\.html/i.test(href)) return '';
+    try {
+      return new URL(href, window.location.href).href;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function firstCoachUrl(selectors) {
+    for (const sel of selectors) {
+      const url = coachPageUrl(document.querySelector(sel));
+      if (url) return url;
+    }
+    return '';
+  }
+
+  /** 先客队再主队，与其它两队入口的打开顺序一致。 */
+  function openCoachPages() {
+    const awayUrl = firstCoachUrl([
+      '.guestN a.coach',
+      '.guest a.coach',
+      '#content .title .guestN a.coach',
+    ]);
+    const homeUrl = firstCoachUrl([
+      '.homeN a.coach',
+      '.home a.coach',
+      '#content .title .homeN a.coach',
+    ]);
+    const urls = [];
+    if (awayUrl) urls.push(awayUrl);
+    if (homeUrl && homeUrl !== awayUrl) urls.push(homeUrl);
+    if (urls.length < 2) {
+      alert('未能识别两队主教练链接，无法打开主教练页面。');
+      return;
+    }
+    urls.forEach((url) => {
+      window.open(url, '_blank');
+    });
+  }
+
+  function actionConfigs() {
+    return [
+      { hotkey: 'F1', label: '历史排名', title: '打开主客队历史排名 (F1)', onClick: openTeamHistoryPages },
+      { hotkey: 'F2', label: '主教练', title: '先打开客队、再打开主队主教练 (F2)', onClick: openCoachPages },
+      { hotkey: 'F3', label: '球员身价', title: '打开主客队球员身价 (F3)', onClick: openTeamLineupPages },
+      { hotkey: 'F4', label: '球员数据', title: '打开主客队球员数据 (F4)', onClick: openTeamPlayerDataPages },
+      { hotkey: 'F5', label: '联赛排名', title: '打开当前赛事联赛排名 (赛程资料统计) (F5)', onClick: () => openLeagueRankingPage() },
+    ];
+  }
+
   function parseSclassIdFromHref(href) {
     const h = String(href || '');
     let m = h.match(/[?&]sclassid=(\d+)/i);
@@ -511,7 +564,17 @@
   }
 
   function injectButton() {
-    if (!document.body || document.getElementById(PANEL_ID)) return;
+    if (!document.body) return;
+
+    const expected = actionConfigs().map((cfg) => cfg.label);
+    const existing = document.getElementById(PANEL_ID);
+    if (existing) {
+      const labels = [...existing.querySelectorAll('.label')].map((el) => (el.textContent || '').trim());
+      const same =
+        labels.length === expected.length && expected.every((label, i) => labels[i] === label);
+      if (same) return;
+      existing.remove();
+    }
 
     if (!document.getElementById(STYLE_ID)) {
       const style = document.createElement('style');
@@ -589,18 +652,12 @@
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
 
-    const buttonConfigs = [
-      { hotkey: 'F1', label: '历史排名', title: '打开主客队历史排名 (F1)', onClick: openTeamHistoryPages },
-      { hotkey: 'F2', label: '球员身价', title: '打开主客队球员身价 (F2)', onClick: openTeamLineupPages },
-      { hotkey: 'F3', label: '球员数据', title: '打开主客队球员数据 (F3)', onClick: openTeamPlayerDataPages },
-      { hotkey: 'F4', label: '联赛排名', title: '打开当前赛事联赛排名 (赛程资料统计) (F4)', onClick: () => openLeagueRankingPage() },
-    ];
-
-    buttonConfigs.forEach((cfg) => {
+    actionConfigs().forEach((cfg) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'tm-btn';
-      button.innerHTML = `<span class="hotkey">${cfg.hotkey}</span><span class="label">${cfg.label}</span>`;
+      const hotkeyHtml = cfg.hotkey ? `<span class="hotkey">${cfg.hotkey}</span>` : '<span class="hotkey"></span>';
+      button.innerHTML = `${hotkeyHtml}<span class="label">${cfg.label}</span>`;
       button.title = cfg.title;
       button.addEventListener('click', cfg.onClick);
       panel.appendChild(button);
@@ -610,26 +667,16 @@
   }
 
   function bindHotkey() {
+    const byKey = new Map(
+      actionConfigs()
+        .filter((cfg) => cfg.hotkey)
+        .map((cfg) => [cfg.hotkey, cfg.onClick])
+    );
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'F1') {
-        event.preventDefault();
-        openTeamHistoryPages();
-        return;
-      }
-      if (event.key === 'F2') {
-        event.preventDefault();
-        openTeamLineupPages();
-        return;
-      }
-      if (event.key === 'F3') {
-        event.preventDefault();
-        openTeamPlayerDataPages();
-        return;
-      }
-      if (event.key === 'F4') {
-        event.preventDefault();
-        openLeagueRankingPage();
-      }
+      const fn = byKey.get(event.key);
+      if (!fn) return;
+      event.preventDefault();
+      fn();
     });
   }
 

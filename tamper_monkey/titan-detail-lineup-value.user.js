@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.12
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块；进球换人图标移到头像旁。
+// @version      1.8.20
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -14,6 +14,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
+  const SCRIPT_VERSION = '1.8.20';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const METRIC_MODES = [
@@ -30,6 +31,8 @@
   let refreshTimer = null;
   let metricModeIndex = 0;
   let valueWithAge = false;
+  let coachNewPageBound = false;
+  let quickCoachOwned = false;
 
   function playBlob(playEl) {
     const ul = playEl.querySelector('ul');
@@ -285,6 +288,183 @@
     return m ? m[1] : '';
   }
 
+  /** 源站主教练链接无 target，点击会离开当前 detail 页。改为新开页面。 */
+  function coachPageUrl(a) {
+    const href = (a.getAttribute('href') || '').trim();
+    if (!href || href === '#' || /^javascript:/i.test(href)) return '';
+    try {
+      return new URL(href, location.href).href;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function stampCoachNewPage(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('a.coach[href]').forEach(function (a) {
+      if (!coachPageUrl(a)) return;
+      if (a.getAttribute('target') !== '_blank') a.setAttribute('target', '_blank');
+      const rel = a.getAttribute('rel') || '';
+      if (!/\bnoopener\b/.test(rel)) {
+        a.setAttribute('rel', (rel + ' noopener noreferrer').trim());
+      }
+    });
+  }
+
+  function bindCoachNewPage() {
+    if (coachNewPageBound) return;
+    coachNewPageBound = true;
+    document.addEventListener(
+      'click',
+      function (e) {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const a = e.target && e.target.closest && e.target.closest('a.coach');
+        if (!a) return;
+        const url = coachPageUrl(a);
+        if (!url) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.open(url, '_blank', 'noopener,noreferrer');
+      },
+      true
+    );
+  }
+
+  const QUICK_PANEL_ID = 'tm-team-quick-panel';
+
+  function firstSideCoachUrl(selectors) {
+    for (let i = 0; i < selectors.length; i++) {
+      const url = coachPageUrl(document.querySelector(selectors[i]));
+      if (url && /\/team\/coach\//i.test(url)) return url;
+    }
+    return '';
+  }
+
+  function openBothCoachPages() {
+    const awayUrl = firstSideCoachUrl([
+      '.guestN a.coach',
+      '.guest a.coach',
+      '#content .title .guestN a.coach',
+    ]);
+    const homeUrl = firstSideCoachUrl([
+      '.homeN a.coach',
+      '.home a.coach',
+      '#content .title .homeN a.coach',
+    ]);
+    const urls = [];
+    if (awayUrl) urls.push(awayUrl);
+    if (homeUrl && homeUrl !== awayUrl) urls.push(homeUrl);
+    if (urls.length < 2) {
+      alert('未能识别两队主教练链接，无法打开主教练页面。');
+      return;
+    }
+    urls.forEach(function (url) {
+      window.open(url, '_blank');
+    });
+  }
+
+  function quickButtonLabel(btn) {
+    const label = btn.querySelector('.label');
+    return label ? (label.textContent || '').replace(/\s+/g, '') : '';
+  }
+
+  /** 右侧快捷栏来自另一支旧脚本时，把主教练插到球员身价上面，并重排 F1–F5。 */
+  function installQuickCoachButton() {
+    const panel = document.getElementById(QUICK_PANEL_ID);
+    if (!panel) return false;
+    if (panel.getAttribute('data-tm-lv-coach') === '1') return true;
+
+    const buttons = panel.querySelectorAll('.tm-btn');
+    if (!buttons.length) return false;
+
+    let hasCoach = false;
+    let valueBtn = null;
+    for (let i = 0; i < buttons.length; i++) {
+      const label = quickButtonLabel(buttons[i]);
+      if (label === '主教练') hasCoach = true;
+      if (label === '球员身价') valueBtn = buttons[i];
+    }
+    if (hasCoach) {
+      panel.setAttribute('data-tm-lv-coach', '1');
+      return true;
+    }
+    if (!valueBtn) return false;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tm-btn';
+    btn.title = '先打开客队、再打开主队主教练 (F2)';
+    btn.innerHTML = '<span class="hotkey">F2</span><span class="label">主教练</span>';
+    btn.addEventListener('click', openBothCoachPages);
+    valueBtn.parentNode.insertBefore(btn, valueBtn);
+
+    const order = ['历史排名', '主教练', '球员身价', '球员数据', '联赛排名'];
+    const byLabel = {};
+    panel.querySelectorAll('.tm-btn').forEach(function (b) {
+      byLabel[quickButtonLabel(b)] = b;
+    });
+    order.forEach(function (label, i) {
+      const b = byLabel[label];
+      if (!b) return;
+      const key = 'F' + (i + 1);
+      const hotkey = b.querySelector('.hotkey');
+      if (hotkey) hotkey.textContent = key;
+      const title = b.getAttribute('title') || '';
+      if (/\(F\d\)/.test(title)) b.title = title.replace(/\(F\d\)/, '(' + key + ')');
+      panel.appendChild(b);
+    });
+
+    panel.setAttribute('data-tm-lv-coach', '1');
+    quickCoachOwned = true;
+    return true;
+  }
+
+  function bindQuickCoachHotkey() {
+    document.addEventListener(
+      'keydown',
+      function (e) {
+        if (!quickCoachOwned) return;
+        if (!/^F[1-5]$/.test(e.key)) return;
+        if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+        const el = e.target;
+        const tag = el && el.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          (el && el.isContentEditable)
+        ) {
+          return;
+        }
+        const panel = document.getElementById(QUICK_PANEL_ID);
+        if (!panel) return;
+        const buttons = panel.querySelectorAll('.tm-btn');
+        let target = null;
+        for (let i = 0; i < buttons.length; i++) {
+          const hotkey = buttons[i].querySelector('.hotkey');
+          if (hotkey && (hotkey.textContent || '').trim() === e.key) {
+            target = buttons[i];
+            break;
+          }
+        }
+        if (!target) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        target.click();
+      },
+      true
+    );
+  }
+
+  function watchQuickCoachButton() {
+    bindQuickCoachHotkey();
+    let tries = 0;
+    const timer = window.setInterval(function () {
+      tries += 1;
+      if (installQuickCoachButton() || tries >= 40) window.clearInterval(timer);
+    }, 300);
+  }
+
   function sidePlayBoxes(sideRoot) {
     if (!sideRoot) return [];
     const out = [];
@@ -392,6 +572,14 @@
 
     const num = Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
     return num + scale;
+  }
+
+  /** 柱顶数字：「亿」单独缩小，其余场合仍用纯文本 */
+  function moneyLabelHtml(n, unit) {
+    const text = formatMoney(n, unit);
+    const m = /^(.+?)(亿)$/.exec(text);
+    if (!m) return escHtml(text);
+    return escHtml(m[1]) + '<span class="tm-lv-unit">亿</span>';
   }
 
   /** 标题栏单位：显示货币（如英镑），而非单独的「万」 */
@@ -518,9 +706,9 @@
 
   const CHART_BAR_MAX_PX = 96;
   const CHART_BAR_WIDTH_PX = 20;
-  const CHART_BAR_GAP_PX = 6;
-  const CHART_GROUP_GAP_PX = 28;
-  const CHART_LABEL_TOP_PX = 14;
+  const CHART_BAR_GAP_PX = 4;
+  const CHART_GROUP_GAP_PX = 8;
+  const CHART_LABEL_TOP_PX = 16;
 
   function barHeightPx(value, max) {
     if (!Number.isFinite(value) || max <= 0) return 0;
@@ -528,22 +716,31 @@
   }
 
   function barItemHtml(val, unit, px, kind, title) {
+    const money = formatMoney(val, unit);
+    const label = moneyLabelHtml(val, unit);
+    const tip = title ? title + ' ' + money : money;
     return (
-      '<div class="tm-lv-item" style="--bh:' +
-      px +
-      'px">' +
+      '<div class="tm-lv-item">' +
+      '<span class="tm-lv-vval-sizer" aria-hidden="true">' +
+      label +
+      '</span>' +
+      '<div class="tm-lv-slot">' +
       '<span class="tm-lv-vval tm-lv-vval-' +
       kind +
+      '" style="--bh:' +
+      px +
+      'px" title="' +
+      escHtml(tip) +
       '">' +
-      escHtml(formatMoney(val, unit)) +
+      label +
       '</span>' +
       '<div class="tm-lv-vbar tm-lv-vbar-' +
       kind +
       '" style="height:' +
       px +
       'px" title="' +
-      escHtml(title) +
-      '"></div></div>'
+      escHtml(tip) +
+      '"></div></div></div>'
     );
   }
 
@@ -770,12 +967,17 @@
 
   function panelShellHtml(unit) {
     return (
-      '<div class="tm-lv-head" role="button" tabindex="0" title="点击收起">' +
+      '<div class="tm-lv-head" role="button" tabindex="0" title="点击收起 (Esc)">' +
       '<span class="tm-lv-title">阵容身价对比</span>' +
       '<div class="tm-lv-head-actions">' +
       '<span class="tm-lv-mode" role="button" tabindex="0">身价</span>' +
       '<span class="tm-lv-unit">单位：' +
       escHtml(formatUnitLabel(unit || '万英镑')) +
+      '</span>' +
+      '<span class="tm-lv-ver" title="阵容身价统计 ' +
+      SCRIPT_VERSION +
+      '">' +
+      SCRIPT_VERSION +
       '</span>' +
       '<span class="tm-lv-toggle" aria-hidden="true">▾</span>' +
       '</div></div>' +
@@ -789,7 +991,7 @@
     const toggle = panel.querySelector('.tm-lv-toggle');
     if (toggle) toggle.textContent = collapsed ? '▸' : '▾';
     const head = panel.querySelector('.tm-lv-head');
-    if (head) head.title = collapsed ? '点击展开' : '点击收起';
+    if (head) head.title = collapsed ? '点击展开 (Esc)' : '点击收起 (Esc)';
     const title = panel.querySelector('.tm-lv-title');
     if (title) title.textContent = collapsed ? '身价' : '阵容身价对比';
   }
@@ -812,6 +1014,37 @@
         toggle();
       }
     });
+  }
+
+  function toggleValuePanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel || panel.style.display === 'none') return false;
+    setPanelCollapsed(panel, !panel.classList.contains('tm-lv-collapsed'));
+    return true;
+  }
+
+  function bindValuePanelHotkey() {
+    document.addEventListener(
+      'keydown',
+      function (e) {
+        if (e.key !== 'Escape' && e.key !== 'Esc') return;
+        if (e.repeat) return;
+        const el = e.target;
+        const tag = el && el.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          (el && el.isContentEditable)
+        ) {
+          return;
+        }
+        if (!toggleValuePanel()) return;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true
+    );
   }
 
   function currentModeChipLabel() {
@@ -1162,6 +1395,15 @@
       '}' +
       '#' +
       PANEL_ID +
+      ' .tm-lv-ver {' +
+      'font-weight: 500;' +
+      'font-size: 10px;' +
+      'line-height: 1;' +
+      'color: #94a3b8;' +
+      'flex-shrink: 0;' +
+      '}' +
+      '#' +
+      PANEL_ID +
       ' .tm-lv-toggle {' +
       'display: inline-flex;' +
       'align-items: center;' +
@@ -1259,9 +1501,7 @@
       'gap: ' +
       CHART_GROUP_GAP_PX +
       'px;' +
-      'padding: ' +
-      CHART_LABEL_TOP_PX +
-      'px 4px 0;' +
+      'padding: 0 4px 0;' +
       '}' +
       '#' +
       PANEL_ID +
@@ -1274,21 +1514,32 @@
       '#' +
       PANEL_ID +
       ' .tm-lv-bars {' +
-      'display: flex;' +
-      'flex-direction: row;' +
-      'align-items: flex-end;' +
+      'display: flex !important;' +
+      'flex-direction: row !important;' +
+      'align-items: flex-end !important;' +
+      'justify-content: center;' +
       'gap: ' +
       CHART_BAR_GAP_PX +
       'px;' +
-      'height: ' +
-      CHART_BAR_MAX_PX +
-      'px;' +
       'border-bottom: 1px solid #cbd5e1;' +
       'box-sizing: border-box;' +
+      'padding-top: ' +
+      CHART_LABEL_TOP_PX +
+      'px;' +
       '}' +
       '#' +
       PANEL_ID +
       ' .tm-lv-item {' +
+      'display: flex !important;' +
+      'flex-direction: column !important;' +
+      'align-items: center !important;' +
+      'justify-content: flex-end !important;' +
+      'gap: 2px;' +
+      'flex: none;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-slot {' +
       'position: relative;' +
       'width: ' +
       CHART_BAR_WIDTH_PX +
@@ -1300,19 +1551,42 @@
       '}' +
       '#' +
       PANEL_ID +
+      ' .tm-lv-vval,' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-vval-sizer {' +
+      'margin: 0;' +
+      'padding: 0;' +
+      'font-size: 11px;' +
+      'font-weight: 700;' +
+      'line-height: 1.15;' +
+      'text-align: center;' +
+      'white-space: nowrap;' +
+      'font-variant-numeric: tabular-nums;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-vval-sizer {' +
+      'display: block;' +
+      'height: 0;' +
+      'overflow: hidden;' +
+      'visibility: hidden;' +
+      'pointer-events: none;' +
+      '}' +
+      '#' +
+      PANEL_ID +
       ' .tm-lv-vval {' +
       'position: absolute;' +
       'left: 50%;' +
+      'bottom: calc(var(--bh, 0px) + 2px);' +
       'transform: translateX(-50%);' +
-      'bottom: calc(var(--bh, 3px) + 2px);' +
-      'margin: 0;' +
-      'padding: 0;' +
+      'z-index: 1;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-unit {' +
       'font-size: 9px;' +
       'font-weight: 600;' +
-      'line-height: 1.1;' +
-      'text-align: center;' +
-      'white-space: nowrap;' +
-      'pointer-events: none;' +
       '}' +
       '#' +
       PANEL_ID +
@@ -1807,6 +2081,7 @@
 
   function refresh() {
     try {
+      stampCoachNewPage(document);
       const stats = computeStats();
       if (!stats) {
         hidePanel();
@@ -1840,6 +2115,10 @@
   function init() {
     metricModeIndex = loadMetricModeIndex();
     valueWithAge = loadValueWithAge();
+    bindCoachNewPage();
+    bindValuePanelHotkey();
+    watchQuickCoachButton();
+    stampCoachNewPage(document);
     injectStyle();
     const legacy = document.getElementById('tm-lineup-value-inline');
     if (legacy) legacy.remove();
