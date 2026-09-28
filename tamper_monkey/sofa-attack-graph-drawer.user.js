@@ -20,10 +20,11 @@
 
   const API = 'https://api.sofascore.com/api/v1';
   const SCALE = 0.58;
+  /** 分钟格之间留约 1px 浅缝，对应源站条间细白线 */
   const GRAPH_W = 920;
   const CENTER_Y = 54;
   const MENU_FALLBACK_HEIGHT = 73;
-  const DRAWER_EXTRA_HEIGHT = 36;
+  const DRAWER_EXTRA_HEIGHT = 68;
   const BIG_CHANCE_XG = 0.35;
 
   const SVG = {
@@ -122,6 +123,25 @@
     return time;
   }
 
+  /** 45/90（及加时末）的 addedTime 是补时；节内时钟超过 90 才是加时 */
+  function periodPhaseLabel(item) {
+    const time = num(item?.time);
+    const added = num(item?.addedTime);
+    const stoppage = added != null && added > 0 && added < 100 && (time === 45 || time === 90 || time === 105 || time === 120);
+    if (time != null && time > 90) return '加时';
+    if (stoppage) return '补时';
+    return '';
+  }
+
+  function formatClockMinute(item) {
+    const time = item?.time;
+    if (time == null || time === '') return '';
+    const added = num(item?.addedTime);
+    const clock = added != null && added > 0 && added < 100 ? `${time}+${added}'` : `${time}'`;
+    const phase = periodPhaseLabel(item);
+    return phase ? `${clock} ${phase}` : clock;
+  }
+
   function hasExtraTime(points) {
     return points.some((point) => {
       const minute = num(point?.minute);
@@ -160,7 +180,8 @@
   function buildBars(points, extra) {
     const slots = slotCount(extra);
     const column = GRAPH_W / slots;
-    const width = column - 1;
+    const gap = 1.4;
+    const width = column - gap;
     const sequential = useSequentialSlots(points, extra);
     const bars = [];
     points.forEach((point, index) => {
@@ -177,7 +198,7 @@
         y = CENTER_Y - height;
         fill = '#0bb32a';
       }
-      const x = 1 + slot * column;
+      const x = slot * column + gap / 2;
       const showMinute = minute != null ? minute : index + 1;
       bars.push({ x, y, width, height, fill, title: `${showMinute}' [press: ${height}]` });
     });
@@ -236,8 +257,13 @@
     return 'low';
   }
 
+  function isOnTargetShot(shot) {
+    const type = String(shot?.shotType || '').toLowerCase();
+    return type === 'goal' || type === 'save';
+  }
+
   function shotHighlight(shot) {
-    if (shot?.shotType === 'miss' || shot?.shotType === 'block') return null;
+    if (!isOnTargetShot(shot)) return null;
     const xg = xgTier(shot?.xg);
     const xgot = shot?.xgot != null && shot?.xgot !== '' ? xgTier(shot.xgot) : 'low';
     const rank = { low: 0, medium: 1, high: 2 };
@@ -252,7 +278,7 @@
   }
 
   function shotY(shot, size) {
-    const off = shot?.shotType === 'miss' || shot?.shotType === 'block';
+    const off = !isOnTargetShot(shot);
     if (shot?.isHome) {
       const anchorBottom = (off ? -28 : -16) + 16;
       return anchorBottom - size;
@@ -415,7 +441,7 @@
     return {
       badge: meta[0],
       title: meta[1],
-      minuteLabel: item.time == null || item.time === '' ? '' : `${item.time}'`,
+      minuteLabel: formatClockMinute(item),
       teamName: item.isHome ? (home.shortName || home.name || '主队') : (away.shortName || away.name || '客队'),
       isHome: !!item.isHome,
       location: shotLocation(shot),
@@ -424,7 +450,7 @@
   }
 
   function shotTip(shot, incidents, home, away) {
-    const onTarget = shot.shotType !== 'miss' && shot.shotType !== 'block';
+    const onTarget = isOnTargetShot(shot);
     const rows = [];
     const name = tipPlayer(shot.player, '', [shot.shirtNumber, shot.jerseyNumber]);
     if (name) rows.push({ label: '球员', value: name, valueTone: 'player-name' });
@@ -442,7 +468,7 @@
       badge: onTarget ? '✓' : '✗',
       title: onTarget ? '射正' : (shot.shotType === 'block' ? '被封堵' : '射偏'),
       titleTone: onTarget ? 'shot-on' : 'shot-off',
-      minuteLabel: shot.time == null || shot.time === '' ? '' : `${shot.time}'`,
+      minuteLabel: formatClockMinute(shot),
       teamName: shot.isHome ? (home.shortName || home.name || '主队') : (away.shortName || away.name || '客队'),
       isHome: !!shot.isHome,
       location: shotLocation(shot),
@@ -508,20 +534,24 @@
       const size = shotSize(highlight);
       const x = iconX(eventMinute(shot), extra, size);
       if (x == null) return;
-      const off = shot.shotType === 'miss' || shot.shotType === 'block';
+      const off = !isOnTargetShot(shot);
       shotIcons.push({
         kind: 'shot',
         side: shot.isHome ? 'home' : 'away',
         x,
         y: shotY(shot, size),
         size,
-        viewBox: off ? '0 0 512 512' : '0 0 16 16',
+        viewBox: '0 0 16 16',
         opacity: 1,
+        off,
         paths: off
-          ? [{ d: SHOT_OFF_PATH, fill: 'rgba(0,0,0,0.5)' }]
+          ? [
+            { tag: 'circle', cx: 8, cy: 8, r: 6.6, fill: '#767676', paint: 'off' },
+            { d: 'M5.15 5.15 10.85 10.85 M10.85 5.15 5.15 10.85', fill: 'none', stroke: '#fff', strokeWidth: 1.55, paint: 'off-x' },
+          ]
           : [
-            { d: SHOT_CIRCLE, fill: 'rgb(255,110,64)' },
-            { d: 'M4.35 8.05 6.85 10.55 11.95 5.05', fill: 'none', stroke: '#fff', strokeWidth: 1.65 },
+            { d: SHOT_CIRCLE, fill: 'rgb(255,110,64)', paint: 'on' },
+            { d: 'M4.35 8.05 6.85 10.55 11.95 5.05', fill: 'none', stroke: '#fff', strokeWidth: 1.65, paint: 'mark' },
           ],
         tip: pushTip(shotTip(shot, incidents, home, away)),
       });
@@ -632,6 +662,7 @@
       return {
         isHome: !!item.isHome,
         minute: minute == null ? '—' : (added > 0 && added < 100 ? `${minute}+${added}′` : `${minute}′`),
+        periodLabel: periodPhaseLabel(item),
         title,
         player: shortenName(playerLabel(item.player, item.playerName)),
         assist: shortenName(playerLabel(item.assist1, item.assist1Name || '')),
@@ -641,7 +672,6 @@
         situation,
         body: enumLabel(shot?.bodyPart, BODY_LABELS),
         location: shotLocation(shot),
-        extra: (matchMinute(item) || 0) > 90,
         repeatIndex,
         repeatTotal: total,
       };
@@ -666,7 +696,7 @@
             ${item.location ? `<span class="goals-popup__location is-${item.location === '禁区内' ? 'inside' : 'outside'}">${item.location}</span>` : ''}
             <span class="goals-popup__facts">
               ${item.title ? `<span>${esc(item.title)}</span>` : ''}
-              ${item.extra ? '<span>加时</span>' : ''}
+              ${item.periodLabel ? `<span>${esc(item.periodLabel)}</span>` : ''}
               ${item.situation ? `<span class="goals-popup__situation">[${esc(item.situation)}]</span>` : ''}
               ${item.body ? `<span>${esc(item.body)}</span>` : ''}
               ${item.xg ? `<span class="goals-popup__xg${item.tier ? ` is-${item.tier}` : ''}">xG ${item.xg}</span>` : ''}
@@ -699,9 +729,16 @@
       `<line x1="${line.x1}" y1="${line.y1}" x2="${line.x2}" y2="${line.y2}" stroke="#fff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="${line.dash}"></line>`
     )).join('');
     const iconSvg = (icon) => {
-      const paths = icon.paths.map((path) => (
-        `<path d="${path.d}" fill="${path.fill || 'none'}" stroke="${path.stroke || 'none'}" stroke-width="${path.strokeWidth || 0}" stroke-linecap="round" stroke-linejoin="round"></path>`
-      )).join('');
+      const paths = icon.paths.map((path) => {
+        const fill = path.fill || 'none';
+        const stroke = path.stroke || 'none';
+        const width = path.strokeWidth || 0;
+        const style = `fill:${fill} !important;stroke:${stroke} !important;stroke-width:${width}`;
+        if (path.tag === 'circle') {
+          return `<circle data-paint="${path.paint || ''}" cx="${path.cx}" cy="${path.cy}" r="${path.r}" fill="${fill}" style="${style}"></circle>`;
+        }
+        return `<path d="${path.d}" data-paint="${path.paint || ''}" fill="${fill}" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" style="${style}"></path>`;
+      }).join('');
       const left = (icon.x / GRAPH_W) * 100;
       let top = `top:${(((icon.y + 40) / 196) * 100).toFixed(3)}%`;
       if (icon.kind === 'shot' && icon.side === 'home') {
@@ -711,7 +748,7 @@
         const goalTop = ((104 + 40) / 196) * 100;
         top = `top:calc(${goalTop.toFixed(3)}% + 19px)`;
       }
-      return `<svg class="sofa-atk-icon is-${icon.kind}" data-tip="${icon.tip}" viewBox="${icon.viewBox}" style="left:${left.toFixed(3)}%;${top}" width="${icon.size}" height="${icon.size}" opacity="${icon.opacity}">${paths}</svg>`;
+      return `<svg class="sofa-atk-icon is-${icon.kind}${icon.off ? ' is-off' : ''}" data-tip="${icon.tip}" viewBox="${icon.viewBox}" style="left:${left.toFixed(3)}%;${top}" width="${icon.size}" height="${icon.size}" opacity="${icon.opacity}">${paths}</svg>`;
     };
     const first = (side) => model.firstGoal === side
       ? `<svg class="sofa-atk-first is-${side}" viewBox="0 0 16 16"><path d="${SVG.regular}"></path></svg>`
@@ -892,13 +929,17 @@
       .sofa-atk-xg { border: 0; background: transparent; padding: 0; font: 600 13px/1 inherit; font-variant-numeric: tabular-nums; color: #222226; }
       .sofa-atk-xg.is-toggle { cursor: pointer; }
       .sofa-atk-plot {
-        position: relative; flex: 0 1 calc(100vw * 7 / 13); width: calc(100vw * 7 / 13);
+        position: relative; flex: 0 1 calc(100vw * 6 / 13); width: calc(100vw * 6 / 13);
         max-width: calc(100vw - 520px); height: 100%; cursor: pointer;
       }
       .sofa-atk-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: hidden; }
       .sofa-atk-svg rect { shape-rendering: crispedges; }
       .sofa-atk-icons { position: absolute; inset: 0; pointer-events: none; }
       .sofa-atk-icons .sofa-atk-icon { position: absolute; pointer-events: auto; overflow: visible; z-index: 1; }
+      #sofa-atk-drawer .sofa-atk-icon.is-off circle { fill: #767676 !important; stroke: none !important; }
+      #sofa-atk-drawer .sofa-atk-icon.is-off path { fill: none !important; stroke: #fff !important; }
+      #sofa-atk-drawer .sofa-atk-icon path[data-paint="on"] { fill: rgb(255,110,64) !important; stroke: none !important; }
+      #sofa-atk-drawer .sofa-atk-icon path[data-paint="mark"] { fill: none !important; stroke: #fff !important; }
       .sofa-atk-icons .sofa-atk-icon.is-incident { z-index: 2; }
       #sofa-atk-modal {
         position: fixed; inset: 0; z-index: 2147483003; display: none;
@@ -1180,7 +1221,7 @@
       <div class="sofa-atk-main">
         <div class="sofa-atk-body"><div class="sofa-atk-msg">加载中…</div></div>
         <div class="sofa-atk-head">
-          <span class="sofa-atk-live-dot" title="进行中，每 20 秒更新"></span>
+          <span class="sofa-atk-live-dot" title="进行中，每 40 秒更新"></span>
           <span class="sofa-atk-status"></span>
           <button type="button" class="sofa-atk-refresh" data-refresh aria-label="刷新" title="刷新">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.6 8A5.6 5.6 0 1 1 12 4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.7 1.8v3.2H10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -1960,7 +2001,7 @@
         id: item.id || `${index}-${minute}`,
         minute,
         displayMinute: displayMinute(item),
-        phase: minute > 90 ? '加时' : '',
+        phase: periodPhaseLabel(item),
         isHome,
         isRegulation: minute <= 90.5,
         player: playerLabel(item.player, item.playerName),
@@ -2013,7 +2054,7 @@
         id: `chance-${shot.id || index}`,
         minute,
         displayMinute: displayMinute(shot),
-        phase: minute > 90 ? '加时' : '',
+        phase: periodPhaseLabel(shot),
         isHome: !!shot.isHome,
         isRegulation: minute <= 90.5,
         kind: 'bigChance',
@@ -2464,7 +2505,7 @@
     if (!state.open || state.model?.statusType !== 'inprogress') return;
     state.pollTimer = setInterval(() => {
       if (state.open) loadGraph(true);
-    }, 20000);
+    }, 40000);
   }
 
   function markGraphs() {
