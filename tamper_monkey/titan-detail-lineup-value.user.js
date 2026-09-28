@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.20
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。
+// @version      1.8.38
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -12,9 +12,11 @@
 (function () {
   'use strict';
 
+  const inFrame = window.top !== window.self;
+
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.20';
+  const SCRIPT_VERSION = '1.8.38';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const METRIC_MODES = [
@@ -1072,9 +1074,14 @@
 
   function updatePanelModeChip() {
     const chip = document.querySelector('#' + PANEL_ID + ' .tm-lv-mode');
-    if (!chip) return;
-    chip.textContent = currentModeChipLabel();
-    chip.setAttribute('title', metricClickTitle());
+    if (chip) {
+      chip.textContent = currentModeChipLabel();
+      chip.setAttribute('title', metricClickTitle());
+    }
+    const modeKey = currentMetricMode().key;
+    document.querySelectorAll('#' + PANEL_ID + ' .tm-lv-chip').forEach(function (el) {
+      el.classList.toggle('tm-lv-chip-on', el.getAttribute('data-tm-mode') === modeKey);
+    });
   }
 
   let metricClickTimer = null;
@@ -1994,11 +2001,347 @@
       'margin-left: 4px;' +
       'font-weight: 600;' +
       'white-space: nowrap;' +
+      '}' +
+      '#matchBox2 .plays {' +
+      'position: relative;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame {' +
+      'position: absolute !important;' +
+      'top: 22px;' +
+      'left: 50% !important;' +
+      'right: auto !important;' +
+      'bottom: auto !important;' +
+      'transform: translateX(-50%);' +
+      'width: auto !important;' +
+      'max-width: none;' +
+      'margin: 0;' +
+      'padding: 6px 8px;' +
+      'display: flex;' +
+      'flex-direction: column;' +
+      'align-items: center;' +
+      'gap: 4px;' +
+      'z-index: 20;' +
+      'border: 1px solid rgba(226, 232, 240, 0.95);' +
+      'border-radius: 6px;' +
+      'background: rgba(255, 255, 255, 0.92);' +
+      'box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);' +
+      'overflow: visible;' +
+      'font-size: 12px;' +
+      'line-height: 1.4;' +
+      'pointer-events: none;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum {' +
+      'display: flex;' +
+      'align-items: baseline;' +
+      'gap: 4px;' +
+      'white-space: nowrap;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum b {' +
+      'font-weight: 600;' +
+      'color: #475569;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-h,' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-a {' +
+      'font-size: 16px;' +
+      'font-weight: 700;' +
+      'line-height: 1.2;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-h {' +
+      'color: #15803d;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-a {' +
+      'color: #0369a1;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-sep {' +
+      'color: #94a3b8;' +
+      'font-size: 12px;' +
+      'font-weight: 600;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-x,' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-x-h,' +
+      '#' +
+      PANEL_ID +
+      '.tm-lv-frame .tm-lv-sum-x-a {' +
+      'color: #dc2626;' +
+      'font-weight: 700;' +
+      '}' +
+      '#tm-lv-corner-h,' +
+      '#tm-lv-corner-a {' +
+      'position: absolute;' +
+      'bottom: 2px;' +
+      'z-index: 6;' +
+      'width: 32%;' +
+      'height: 16px;' +
+      'pointer-events: auto;' +
+      '}' +
+      '#tm-lv-corner-h { left: auto; right: calc(50% + 16px); }' +
+      '#tm-lv-corner-a { left: calc(50% + 16px); right: auto; }' +
+      '#tm-lv-corner-h svg,' +
+      '#tm-lv-corner-a svg {' +
+      'display: block;' +
+      'width: 100%;' +
+      'height: 16px;' +
+      'border-radius: 3px;' +
       '}';
     (document.body || document.head || document.documentElement).appendChild(style);
   }
 
+  function frameRatioMark(home, away) {
+    const ratio = formatRatio(home, away);
+    if (!ratio.side) return { side: '', text: '' };
+    const raw = String(ratio.text).replace(/^[主客]\s*/, '');
+    return { side: ratio.side, text: /倍$/.test(raw) ? raw : raw + '倍' };
+  }
+
+  function frameSumHtml(label, key, stats, names) {
+    const unit = stats.unit;
+    const home = stats.home[key];
+    const away = stats.away[key];
+    const mark = frameRatioMark(home, away);
+    const markHtml = mark.text
+      ? '<span class="tm-lv-sum-x tm-lv-sum-x-' + mark.side + '">' + escHtml(mark.text) + '</span>'
+      : '';
+    return (
+      '<span class="tm-lv-sum" title="' +
+      escHtml(names.home + ' / ' + names.away) +
+      '"><b>' +
+      escHtml(label) +
+      '</b><span class="tm-lv-sum-h" title="' +
+      escHtml(names.home) +
+      '">' +
+      escHtml(formatMoney(home, unit)) +
+      '</span>' +
+      (mark.side === 'h' ? markHtml : '') +
+      '<span class="tm-lv-sum-sep">vs</span><span class="tm-lv-sum-a" title="' +
+      escHtml(names.away) +
+      '">' +
+      escHtml(formatMoney(away, unit)) +
+      '</span>' +
+      (mark.side === 'a' ? markHtml : '') +
+      '</span>'
+    );
+  }
+
+  function frameStripInnerHtml(stats) {
+    const names = teamNames();
+    return frameSumHtml('首发', 'starter', stats, names) + frameSumHtml('上场', 'onField', stats, names);
+  }
+
+  const FRAME_LINES = [
+    { key: 'gk', label: '门将', color: '#3b82f6' },
+    { key: 'def', label: '后卫', color: '#facc15' },
+    { key: 'mid', label: '中场', color: '#22c55e' },
+    { key: 'fw', label: '前锋', color: '#ef4444' },
+  ];
+
+  function frameLineSegs(lines) {
+    return FRAME_LINES.map(function (s) {
+      const cell = (lines && lines[s.key]) || { val: 0, n: 0 };
+      return { label: s.label, color: s.color, val: cell.val || 0, n: cell.n || 0 };
+    }).filter(function (s) {
+      return s.val > 0 || s.n > 0;
+    });
+  }
+
+  function frameLineTotal(lines) {
+    return frameLineSegs(lines).reduce(function (sum, s) {
+      return sum + s.val;
+    }, 0);
+  }
+
+  /** fromRight：客队从右下角向中场排，门将贴右端。长度相对两队较大一方。 */
+  function frameCornerInner(lines, teamName, unit, maxTotal, fromRight) {
+    const segs = frameLineSegs(lines);
+    const total = segs.reduce(function (sum, s) {
+      return sum + s.val;
+    }, 0);
+    if (!(total > 0)) return null;
+    const vbW = 1000;
+    const vbH = 16;
+    const cap = maxTotal > 0 ? maxTotal : total;
+    const barW = Math.max(1, Math.round((total / cap) * vbW));
+    // 内端贴中线：主队色块靠容器右侧，客队色块靠容器左侧。
+    let x = fromRight ? barW : vbW - barW;
+    const titles = [];
+    const rects = segs
+      .map(function (s) {
+        if (!(s.val > 0)) return '';
+        let w = Math.round((s.val / total) * barW);
+        if (w < 1) w = 1;
+        if (fromRight) {
+          if (x - w < 0) w = Math.max(0, x);
+          x -= w;
+        } else if (x + w > vbW) {
+          w = Math.max(0, vbW - x);
+        }
+        const left = x;
+        if (!fromRight) x += w;
+        const pct = (s.val / total) * 100;
+        const title =
+          s.label +
+          ' ' +
+          formatMoney(s.val, unit) +
+          '（' +
+          s.n +
+          '人，' +
+          (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) +
+          '%）';
+        titles.push(title);
+        return (
+          '<rect x="' +
+          left +
+          '" y="0" width="' +
+          w +
+          '" height="' +
+          vbH +
+          '" fill="' +
+          s.color +
+          '"><title>' +
+          escHtml(title) +
+          '</title></rect>'
+        );
+      })
+      .join('');
+    return {
+      title: (teamName || '') + ' ' + titles.join(' · '),
+      svg:
+        '<svg viewBox="0 0 ' +
+        vbW +
+        ' ' +
+        vbH +
+        '" preserveAspectRatio="none">' +
+        rects +
+        '</svg>',
+    };
+  }
+
+  function mountFrameCorner(host, id, className, lines, teamName, unit, maxTotal, fromRight) {
+    const built = frameCornerInner(lines, teamName, unit, maxTotal, fromRight);
+    let el = document.getElementById(id);
+    if (!built) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      host.appendChild(el);
+    } else if (el.parentNode !== host) {
+      host.appendChild(el);
+    }
+    el.className = className;
+    el.title = built.title;
+    if (el.getAttribute('data-html') !== built.svg) {
+      el.innerHTML = built.svg;
+      el.setAttribute('data-html', built.svg);
+    }
+  }
+
+  function mountFrameCorners(stats, host) {
+    const names = teamNames();
+    const unit = stats.unit;
+    const maxTotal = Math.max(frameLineTotal(stats.home.lines), frameLineTotal(stats.away.lines), 1);
+    mountFrameCorner(host, 'tm-lv-corner-h', 'tm-lv-corner tm-lv-corner-h', stats.home.lines, names.home, unit, maxTotal, false);
+    mountFrameCorner(host, 'tm-lv-corner-a', 'tm-lv-corner tm-lv-corner-a', stats.away.lines, names.away, unit, maxTotal, true);
+  }
+
+  /** 主教练所在标题行。没有则退回整块阵容，避免只露出球场、裁掉教练。 */
+  function lineupPinAnchor() {
+    const box = document.getElementById('matchBox2');
+    const pitch = box && box.querySelector('.plays');
+    const coach = document.querySelector(
+      '#matchBox2 a.coach, .homeN a.coach, .guestN a.coach, #matchBox2 .coach'
+    );
+    const target = pitch || box;
+    if (coach && target) {
+      let row = coach;
+      while (row.parentElement && row.parentElement !== document.body) {
+        const parent = row.parentElement;
+        const holdsPitch = parent.contains(target);
+        const rowHoldsPitch = row.contains(target) || (pitch && pitch.contains(row));
+        if (holdsPitch && !rowHoldsPitch) return row;
+        row = parent;
+      }
+    }
+    return box || pitch;
+  }
+
+  /** 把主教练标题连同首发图顶到 iframe 可视区。不隐藏其它区块。 */
+  function pinPitchToTop() {
+    if (!inFrame) return;
+    const anchor = lineupPinAnchor();
+    if (!anchor) return;
+    const y = anchor.getBoundingClientRect().top;
+    if (Math.abs(y) < 8) return;
+    const root = document.documentElement;
+    const prev = parseFloat(root.style.marginTop) || 0;
+    root.style.marginTop = prev - y + 'px';
+  }
+
+  let pinTimerStarted = false;
+  function schedulePinLineup() {
+    pinPitchToTop();
+    if (pinTimerStarted) return;
+    pinTimerStarted = true;
+    [400, 1200, 2500].forEach(function (ms) {
+      window.setTimeout(pinPitchToTop, ms);
+    });
+  }
+
+  function mountFrameStrip(stats) {
+    const pitch = document.querySelector('#matchBox2 .plays');
+    const host = pitch || document.getElementById('matchBox2');
+    if (!host) return;
+    const html = frameStripInnerHtml(stats);
+    mountFrameCorners(stats, host);
+    if (html === lastHtml && document.getElementById(PANEL_ID)) {
+      schedulePinLineup();
+      return;
+    }
+
+    refreshing = true;
+    try {
+      let panel = document.getElementById(PANEL_ID);
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = PANEL_ID;
+      }
+      panel.className = 'tm-lv-frame';
+      if (panel.parentNode !== host) host.appendChild(panel);
+      panel.innerHTML = html;
+      panel.style.display = 'flex';
+      lastHtml = html;
+      schedulePinLineup();
+    } finally {
+      refreshing = false;
+    }
+  }
+
   function mountPanel(stats) {
+    if (inFrame) {
+      mountFrameStrip(stats);
+      return;
+    }
     const bodyHtml = panelBodyHtml(stats);
     if (bodyHtml === lastHtml) return;
 
@@ -2116,8 +2459,10 @@
     metricModeIndex = loadMetricModeIndex();
     valueWithAge = loadValueWithAge();
     bindCoachNewPage();
-    bindValuePanelHotkey();
-    watchQuickCoachButton();
+    if (!inFrame) {
+      bindValuePanelHotkey();
+      watchQuickCoachButton();
+    }
     stampCoachNewPage(document);
     injectStyle();
     const legacy = document.getElementById('tm-lineup-value-inline');

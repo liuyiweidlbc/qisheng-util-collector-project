@@ -1,16 +1,19 @@
 // ==UserScript==
 // @name         Titan007 动画直播开关
 // @namespace    https://titan007.com/
-// @version      1.1.0
-// @description  detail 页动画栏右侧磁吸开关：默认关闭并折叠动画区，悬停展开，点击开启/关闭。高清直播不受影响。
+// @version      1.1.1
+// @description  detail 页动画栏右侧磁吸开关：默认关闭并折叠动画区，悬停展开，点击开启/关闭。高清直播不受影响。iframe 内不注入。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
+// @noframes
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  if (window.top !== window.self) return;
 
   const STORAGE_KEY = 'tm-flash-live-enabled';
   const STYLE_ID = 'tm-flash-live-style';
