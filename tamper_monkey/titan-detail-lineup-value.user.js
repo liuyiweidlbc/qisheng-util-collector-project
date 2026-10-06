@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.46
+// @version      1.8.47
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -16,7 +16,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.46';
+  const SCRIPT_VERSION = '1.8.47';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const CLUB_CACHE_KEY = 'tm-player-club-cache-v10';
@@ -321,13 +321,15 @@
         }
         const html =
           (meta.num ? '<span class="tm-lv-subout-num">' + escHtml(meta.num) + '</span>' : '') +
-          escHtml(meta.name || '');
+          '<span class="tm-lv-subout-name">' +
+          escHtml(meta.name || '') +
+          '</span>';
         if (!label) {
           label = document.createElement('span');
           label.className = 'tm-lv-subout';
           img.insertAdjacentElement('afterend', label);
         }
-        if (label.getAttribute('data-out') !== outId) {
+        if (label.getAttribute('data-out') !== outId || !label.querySelector('.tm-lv-subout-name')) {
           label.innerHTML = html;
           label.setAttribute('data-out', outId);
           label.title = '换下 ' + (meta.num ? meta.num + ' ' : '') + (meta.name || '');
@@ -1887,7 +1889,8 @@
       n.classList.contains('tm-lv-hover-age') ||
       n.classList.contains('tm-lv-bday') ||
       n.classList.contains('tm-lv-subout') ||
-      n.classList.contains('tm-lv-subout-num')
+      n.classList.contains('tm-lv-subout-num') ||
+      n.classList.contains('tm-lv-subout-name')
     );
   }
 
@@ -2799,26 +2802,38 @@
       'line-height: 14px !important;' +
       'overflow: visible !important;' +
       '}' +
-      '#matchBox2 .backupPlay .eventicon .tm-lv-subout,' +
-      '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
-      'display: inline !important;' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout {' +
+      'display: inline-flex !important;' +
+      'align-items: center !important;' +
+      'vertical-align: middle !important;' +
       'width: auto !important;' +
-      'height: 12px !important;' +
+      'height: 14px !important;' +
       'min-width: 0 !important;' +
       'position: static !important;' +
-      'vertical-align: middle !important;' +
+      'margin-left: 3px;' +
       'font-size: 10px !important;' +
       'font-weight: 400 !important;' +
-      'line-height: 12px !important;' +
-      '}' +
-      '#matchBox2 .backupPlay .eventicon .tm-lv-subout {' +
-      'margin-left: 3px;' +
+      'line-height: 14px !important;' +
       'color: #73866c;' +
       'white-space: nowrap;' +
       'pointer-events: none;' +
       '}' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num,' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout-name {' +
+      'display: block !important;' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'min-width: 0 !important;' +
+      'position: static !important;' +
+      'vertical-align: baseline !important;' +
+      'margin: 0 !important;' +
+      'padding: 0 !important;' +
+      'font-size: 10px !important;' +
+      'font-weight: 400 !important;' +
+      'line-height: 14px !important;' +
+      '}' +
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
-      'margin-right: 2px;' +
+      'margin-right: 2px !important;' +
       '}' +
       '#matchBox2 .plays .playBox .play .tm-lv-metric[data-tm-mode="club"] {' +
       'max-width: 76px;' +
