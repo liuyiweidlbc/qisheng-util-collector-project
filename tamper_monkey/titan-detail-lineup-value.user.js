@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.38
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。
+// @version      1.8.41
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -16,14 +16,17 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.38';
+  const SCRIPT_VERSION = '1.8.41';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
-  const METRIC_MODES = [
+  const CLUB_CACHE_KEY = 'tm-player-club-cache-v10';
+  const CLUB_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const BASE_METRIC_MODES = [
     { key: 'value', label: '身价' },
     { key: 'age', label: '年龄' },
     { key: 'height', label: '身高' },
   ];
+  const CLUB_METRIC_MODE = { key: 'club', label: '俱乐部' };
   let lineupObserver = null;
   let observedBox = null;
   let lastHtml = '';
@@ -31,8 +34,12 @@
   let refreshing = false;
   let panelCollapsed = false;
   let refreshTimer = null;
-  let metricModeIndex = 0;
+  let metricModeKey = 'value';
   let valueWithAge = false;
+  let nationalMatch = null;
+  let nationalPromise = null;
+  const clubState = {};
+  let clubQueue = Promise.resolve();
   let coachNewPageBound = false;
   let quickCoachOwned = false;
 
@@ -92,30 +99,47 @@
     return age >= 0 && age < 80 ? age : null;
   }
 
-  function loadMetricModeIndex() {
-    try {
-      const saved = localStorage.getItem(METRIC_STORAGE_KEY);
-      const i = METRIC_MODES.findIndex(function (m) {
-        return m.key === saved;
-      });
-      return i >= 0 ? i : 0;
-    } catch (e) {
-      return 0;
-    }
+  function activeMetricModes() {
+    return nationalMatch ? BASE_METRIC_MODES.concat([CLUB_METRIC_MODE]) : BASE_METRIC_MODES.slice();
   }
 
-  function saveMetricModeIndex() {
+  function loadMetricModeKey() {
     try {
-      localStorage.setItem(METRIC_STORAGE_KEY, METRIC_MODES[metricModeIndex].key);
+      const saved = localStorage.getItem(METRIC_STORAGE_KEY);
+      if (saved === 'value' || saved === 'age' || saved === 'height' || saved === 'club') return saved;
+    } catch (e) {}
+    return 'value';
+  }
+
+  function saveMetricModeKey() {
+    try {
+      localStorage.setItem(METRIC_STORAGE_KEY, metricModeKey);
     } catch (e) {}
   }
 
   function currentMetricMode() {
-    return METRIC_MODES[metricModeIndex] || METRIC_MODES[0];
+    const modes = activeMetricModes();
+    for (let i = 0; i < modes.length; i++) {
+      if (modes[i].key === metricModeKey) return modes[i];
+    }
+    return modes[0];
   }
 
   function nextMetricMode() {
-    return METRIC_MODES[(metricModeIndex + 1) % METRIC_MODES.length];
+    const modes = activeMetricModes();
+    const cur = currentMetricMode();
+    const i = modes.findIndex(function (m) {
+      return m.key === cur.key;
+    });
+    return modes[(i + 1) % modes.length];
+  }
+
+  function modeCycleText() {
+    return activeMetricModes()
+      .map(function (m) {
+        return m.label;
+      })
+      .join(' → ');
   }
 
   function loadValueWithAge() {
@@ -196,6 +220,120 @@
     }
   }
 
+  function shirtNo(playEl) {
+    const el = playEl && (playEl.querySelector('.num') || playEl.querySelector('.name i'));
+    return el ? String(el.textContent || '').replace(/\s+/g, '') : '';
+  }
+
+  function shortName(playEl) {
+    const a = playEl && playEl.querySelector('.name a');
+    if (!a) return '';
+    return (a.getAttribute('title') || a.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function playerIdFromHref(a) {
+    const m = ((a && a.getAttribute('href')) || '').match(/\/(\d+)\.html/i);
+    return m ? m[1] : '';
+  }
+
+  /** 重要事件里的换人：4 换入、5 换出。主队图标在名字前，客队图标在名字后。 */
+  function subInToOutMap() {
+    const root = document.getElementById('teamEventDiv');
+    const map = {};
+    if (!root) return map;
+    root.querySelectorAll('li').forEach(function (li) {
+      if (!li.querySelector('img[src*="bf_img2/11.png"]')) return;
+      li.querySelectorAll('.data > span').forEach(function (span) {
+        const role = {};
+        let pendingIcon = '';
+        let pendingId = '';
+        for (let i = 0; i < span.childNodes.length; i++) {
+          const n = span.childNodes[i];
+          if (!n || n.nodeType !== 1) continue;
+          if (n.tagName === 'IMG') {
+            const m = (n.getAttribute('src') || '').match(/bf_img2\/(\d+)\.png/);
+            const kind = m && (m[1] === '4' || m[1] === '5') ? m[1] : '';
+            if (!kind) continue;
+            if (pendingId && !role[pendingId]) {
+              role[pendingId] = kind;
+              pendingId = '';
+            } else {
+              pendingIcon = kind;
+            }
+            continue;
+          }
+          if (n.tagName !== 'A') continue;
+          const id = playerIdFromHref(n);
+          if (!id) continue;
+          if (pendingIcon) {
+            role[id] = pendingIcon;
+            pendingIcon = '';
+          } else {
+            pendingId = id;
+          }
+        }
+        let inId = '';
+        let outId = '';
+        Object.keys(role).forEach(function (id) {
+          if (role[id] === '4') inId = id;
+          if (role[id] === '5') outId = id;
+        });
+        if (inId && outId) map[inId] = outId;
+      });
+    });
+    return map;
+  }
+
+  function lineupPlayerIndex(box) {
+    const map = {};
+    box.querySelectorAll('.play').forEach(function (playEl) {
+      const id = playerId(playEl);
+      if (!id) return;
+      map[id] = { num: shirtNo(playEl), name: shortName(playEl) };
+    });
+    return map;
+  }
+
+  /** 替补换入箭头右侧，浅色标出被换下的号码和名字。 */
+  function annotateSubOut(box) {
+    if (!box) return;
+    const index = lineupPlayerIndex(box);
+    const inToOut = subInToOutMap();
+    const prevRefreshing = refreshing;
+    refreshing = true;
+    try {
+      box.querySelectorAll('.backupPlay2 .eventicon img[src*="bf_img2/4.png"]').forEach(function (img) {
+        const title = (img.getAttribute('title') || '') + (img.getAttribute('alt') || '');
+        if (title && title.indexOf('换入') < 0) return;
+        const playEl = img.closest && img.closest('.play');
+        const inId = playEl && playerId(playEl);
+        const outId = inId && inToOut[inId];
+        const meta = outId && index[outId];
+        let label = img.nextElementSibling;
+        if (!(label && label.classList && label.classList.contains('tm-lv-subout'))) label = null;
+        if (!meta || (!meta.num && !meta.name)) {
+          if (label) label.remove();
+          return;
+        }
+        const html =
+          (meta.num ? '<span class="tm-lv-subout-num">' + escHtml(meta.num) + '</span>' : '') +
+          escHtml(meta.name || '');
+        if (!label) {
+          label = document.createElement('span');
+          label.className = 'tm-lv-subout';
+          img.insertAdjacentElement('afterend', label);
+        }
+        if (label.getAttribute('data-out') !== outId) {
+          label.innerHTML = html;
+          label.setAttribute('data-out', outId);
+          label.title = '换下 ' + (meta.num ? meta.num + ' ' : '') + (meta.name || '');
+        }
+      });
+    } finally {
+      refreshing = prevRefreshing;
+    }
+  }
+
   function formatPlayerMetric(playEl, modeKey, unit) {
     const money = formatMoney(parseValueWan(playEl), unit);
     if (modeKey === 'age') {
@@ -205,10 +343,283 @@
       const h = parseHeightCm(playEl);
       return Number.isFinite(h) ? Math.round(h) + 'cm' : '-';
     }
+    if (modeKey === 'club') {
+      const id = playerId(playEl);
+      if (!id) return '-';
+      const hit = clubState[id];
+      if (!hit || hit.pending) return '…';
+      return hit.name || '-';
+    }
     if (valueWithAge) {
       return money + '/' + formatAgeText(playEl);
     }
     return money;
+  }
+
+  function normalizeTeamName(s) {
+    return String(s || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, '')
+      .replace(/\./g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  function isContinentAddr(addr) {
+    return /^(欧洲|亚洲|非洲|北美洲|南美洲|大洋洲|中北美洲|中美洲)$/.test(
+      String(addr || '').trim()
+    );
+  }
+
+  function sideTeamId(selectors) {
+    for (let i = 0; i < selectors.length; i++) {
+      const a = document.querySelector(selectors[i]);
+      if (!a) continue;
+      const m = (a.getAttribute('href') || '').match(/\/Summary\/(\d+)\.html/i);
+      if (m) return m[1];
+    }
+    return '';
+  }
+
+  function matchTeamIds() {
+    return {
+      home: sideTeamId([
+        '.homeN a[href*="Summary/"]',
+        '.home a[href*="Summary/"]',
+        '#content .title .homeN a[href*="Summary/"]',
+      ]),
+      away: sideTeamId([
+        '.guestN a[href*="Summary/"]',
+        '.guest a[href*="Summary/"]',
+        '#content .title .guestN a[href*="Summary/"]',
+      ]),
+    };
+  }
+
+  /** 在空白 iframe 里执行跨域 js，避免污染详情页全局变量。 */
+  function loadJsInFrame(url) {
+    return new Promise(function (resolve) {
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;';
+      iframe.src = 'about:blank';
+      document.documentElement.appendChild(iframe);
+      let done = false;
+      function finish(val) {
+        if (done) return;
+        done = true;
+        iframe.remove();
+        resolve(val);
+      }
+      function start() {
+        try {
+          const doc = iframe.contentDocument;
+          const script = doc.createElement('script');
+          script.src = url;
+          script.onload = function () {
+            let snap = null;
+            try {
+              const w = iframe.contentWindow;
+              snap = {
+                teamDetail: (w && w.teamDetail) || null,
+                nowTeamInfo: (w && w.nowTeamInfo) || null,
+                transferInfo: (w && w.transferInfo) || null,
+              };
+            } catch (e) {}
+            finish(snap);
+          };
+          script.onerror = function () {
+            finish(null);
+          };
+          (doc.head || doc.documentElement).appendChild(script);
+        } catch (e) {
+          finish(null);
+        }
+      }
+      start();
+      window.setTimeout(function () {
+        finish(null);
+      }, 12000);
+    });
+  }
+
+  function detectNationalMatch() {
+    if (nationalMatch !== null) return Promise.resolve(nationalMatch);
+    if (nationalPromise) return nationalPromise;
+    const ids = matchTeamIds();
+    if (!ids.home || !ids.away) return Promise.resolve(false);
+    nationalPromise = Promise.all([
+      loadJsInFrame('https://info.titan007.com/jsData/teamInfo/teamDetail/tdl' + ids.home + '.js'),
+      loadJsInFrame('https://info.titan007.com/jsData/teamInfo/teamDetail/tdl' + ids.away + '.js'),
+    ])
+      .then(function (wins) {
+        const flags = wins.map(function (w) {
+          const td = w && w.teamDetail;
+          return !!(td && isContinentAddr(td[15]));
+        });
+        if (wins.some(function (w) { return !w; })) {
+          nationalPromise = null;
+          return false;
+        }
+        nationalMatch = flags[0] && flags[1];
+        return nationalMatch;
+      })
+      .catch(function () {
+        nationalPromise = null;
+        return false;
+      });
+    return nationalPromise;
+  }
+
+  function sideExcludeName(playEl) {
+    const names = teamNames();
+    if (playEl.closest && playEl.closest('.guest')) return names.away;
+    if (playEl.closest && playEl.closest('.home')) return names.home;
+    return '';
+  }
+
+  function pickClubName(nowTeamInfo, transferInfo, excludeTeamName) {
+    const ex = normalizeTeamName(excludeTeamName);
+    if (nowTeamInfo && nowTeamInfo.length) {
+      for (let i = 0; i < nowTeamInfo.length; i++) {
+        const name = String((nowTeamInfo[i] && nowTeamInfo[i][0]) || '').trim();
+        if (!name || normalizeTeamName(name) === ex) continue;
+        return name;
+      }
+    }
+    if (transferInfo && transferInfo.length) {
+      for (let i = transferInfo.length - 1; i >= 0; i--) {
+        const row = transferInfo[i];
+        if (!row || row.length < 8) continue;
+        const toName = String(row[7] || row[8] || '').trim();
+        if (!toName || normalizeTeamName(toName) === ex) continue;
+        return toName;
+      }
+    }
+    return '';
+  }
+
+  function readClubCacheMap() {
+    try {
+      const raw = localStorage.getItem(CLUB_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : null;
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function readCachedClubName(playerId) {
+    const hit = readClubCacheMap()[playerId];
+    if (!hit || Date.now() - hit.ts >= CLUB_CACHE_TTL_MS) return undefined;
+    if (!hit.club || !hit.club.name) return '';
+    return String(hit.club.name);
+  }
+
+  function writeCachedClubName(playerId, name) {
+    try {
+      const cache = readClubCacheMap();
+      cache[playerId] = {
+        club: name ? { name: name, href: null } : null,
+        ts: Date.now(),
+      };
+      localStorage.setItem(CLUB_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {}
+  }
+
+  function lineupClubTasks(box) {
+    const tasks = [];
+    const seen = {};
+    if (!box) return tasks;
+    box.querySelectorAll('.play').forEach(function (playEl) {
+      const id = playerId(playEl);
+      if (!id || seen[id] || clubState[id]) return;
+      seen[id] = true;
+      tasks.push({ id: id, exclude: sideExcludeName(playEl) });
+    });
+    return tasks;
+  }
+
+  function applyCachedClubs(tasks) {
+    const pending = [];
+    tasks.forEach(function (task) {
+      const cached = readCachedClubName(task.id);
+      if (cached === undefined) {
+        clubState[task.id] = { pending: true, name: '' };
+        pending.push(task);
+        return;
+      }
+      clubState[task.id] = { pending: false, name: cached };
+    });
+    return pending;
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function fetchClubTask(task, attempt) {
+    return loadJsInFrame(
+      'https://info.titan007.com/jsData/playerInfo/player' + task.id + '.js'
+    ).then(function (w) {
+      if (!w && attempt < 1) return fetchClubTask(task, attempt + 1);
+      if (!w) {
+        clubState[task.id] = { pending: false, name: '' };
+        return;
+      }
+      const name = pickClubName(w.nowTeamInfo, w.transferInfo, task.exclude);
+      clubState[task.id] = { pending: false, name: name };
+      writeCachedClubName(task.id, name);
+    });
+  }
+
+  function fetchClubBatches(tasks) {
+    const size = 3;
+    let chain = Promise.resolve();
+    for (let i = 0; i < tasks.length; i += size) {
+      const batch = tasks.slice(i, i + size);
+      chain = chain.then(function () {
+        return Promise.all(
+          batch.map(function (task) {
+            return fetchClubTask(task, 0);
+          })
+        ).then(function () {
+          if (currentMetricMode().key === 'club') {
+            lastMetricSig = '';
+            renderStarterMetrics();
+          }
+          return sleep(120);
+        });
+      });
+    }
+    return chain;
+  }
+
+  function ensureClubs() {
+    const box = document.getElementById('matchBox2');
+    const tasks = lineupClubTasks(box);
+    const pending = applyCachedClubs(tasks);
+    if (currentMetricMode().key === 'club') {
+      lastMetricSig = '';
+      renderStarterMetrics();
+    }
+    if (!pending.length) return clubQueue;
+    clubQueue = clubQueue
+      .then(function () {
+        return fetchClubBatches(pending);
+      })
+      .catch(function () {});
+    return clubQueue;
+  }
+
+  function refreshNationalClubMode() {
+    detectNationalMatch().then(function (isNational) {
+      if (!isNational) return;
+      updatePanelModeChip();
+      if (metricModeKey === 'club') ensureClubs();
+    });
   }
 
   function playerId(playEl) {
@@ -1068,7 +1479,9 @@
       mode.label +
       '，点击切换' +
       next.label +
-      '，双击回到身价（身价 → 年龄 → 身高）'
+      '，双击回到身价（' +
+      modeCycleText() +
+      '）'
     );
   }
 
@@ -1246,20 +1659,34 @@
     return (
       n.classList.contains('tm-lv-metric') ||
       n.classList.contains('tm-lv-hover-age') ||
-      n.classList.contains('tm-lv-bday')
+      n.classList.contains('tm-lv-bday') ||
+      n.classList.contains('tm-lv-subout') ||
+      n.classList.contains('tm-lv-subout-num')
     );
   }
 
   function isMetricMutation(record) {
-    const t = record.target;
-    if (isScriptNode(t)) return true;
-    if (t && t.closest && (t.closest('.tm-lv-metric') || t.closest('.tm-lv-hover-age'))) {
-      return true;
-    }
     const lists = [record.addedNodes, record.removedNodes];
     for (let i = 0; i < lists.length; i++) {
       const nodes = lists[i];
-      if (!nodes || !nodes.length) continue;
+      if (!nodes) continue;
+      for (let j = 0; j < nodes.length; j++) {
+        const n = nodes[j];
+        if (n && n.nodeType === 1 && !isScriptNode(n)) return false;
+      }
+    }
+    const t = record.target;
+    if (isScriptNode(t)) return true;
+    if (
+      t &&
+      t.closest &&
+      (t.closest('.tm-lv-metric') || t.closest('.tm-lv-hover-age') || t.closest('.tm-lv-subout'))
+    ) {
+      return true;
+    }
+    for (let i = 0; i < lists.length; i++) {
+      const nodes = lists[i];
+      if (!nodes) continue;
       for (let j = 0; j < nodes.length; j++) {
         if (isScriptNode(nodes[j])) return true;
       }
@@ -1301,7 +1728,12 @@
           const badge = ensureMetricBadge(playEl, inline);
           if (!badge) return;
           badge.textContent = text;
-          badge.setAttribute('title', title);
+          badge.setAttribute(
+            'title',
+            mode.key === 'club' && text && text !== '…' && text !== '-'
+              ? text + '。' + title
+              : title
+          );
           badge.setAttribute('data-tm-mode', mode.key);
         });
       });
@@ -1314,20 +1746,23 @@
   }
 
   function setMetricModeByKey(key) {
-    const i = METRIC_MODES.findIndex(function (m) {
+    const modes = activeMetricModes();
+    const found = modes.some(function (m) {
       return m.key === key;
     });
-    if (i < 0) return;
-    if (i === metricModeIndex) return;
-    metricModeIndex = i;
-    saveMetricModeIndex();
-    renderStarterMetrics();
+    if (!found) return;
+    if (metricModeKey === key) return;
+    metricModeKey = key;
+    saveMetricModeKey();
+    if (key === 'club') ensureClubs();
+    else renderStarterMetrics();
   }
 
   function cycleMetricMode() {
-    metricModeIndex = (metricModeIndex + 1) % METRIC_MODES.length;
-    saveMetricModeIndex();
-    renderStarterMetrics();
+    metricModeKey = nextMetricMode().key;
+    saveMetricModeKey();
+    if (metricModeKey === 'club') ensureClubs();
+    else renderStarterMetrics();
   }
 
   function injectStyle() {
@@ -2102,6 +2537,42 @@
       'width: 100%;' +
       'height: 16px;' +
       'border-radius: 3px;' +
+      '}' +
+      '#matchBox2 .backupPlay .eventicon:has(.tm-lv-subout) {' +
+      'width: auto !important;' +
+      'min-width: 0 !important;' +
+      'height: 14px !important;' +
+      'line-height: 14px !important;' +
+      'overflow: visible !important;' +
+      '}' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout,' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
+      'display: inline !important;' +
+      'width: auto !important;' +
+      'height: 12px !important;' +
+      'min-width: 0 !important;' +
+      'position: static !important;' +
+      'vertical-align: middle !important;' +
+      'font-size: 10px !important;' +
+      'font-weight: 400 !important;' +
+      'line-height: 12px !important;' +
+      '}' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout {' +
+      'margin-left: 3px;' +
+      'color: #73866c;' +
+      'white-space: nowrap;' +
+      'pointer-events: none;' +
+      '}' +
+      '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
+      'margin-right: 2px;' +
+      '}' +
+      '#matchBox2 .plays .playBox .play .tm-lv-metric[data-tm-mode="club"] {' +
+      'max-width: 76px;' +
+      '}' +
+      '#matchBox2 .backupPlay .play .tm-lv-metric[data-tm-mode="club"],' +
+      '#matchBox2 .hurtPlay .play .tm-lv-metric[data-tm-mode="club"],' +
+      '#matchBox2 .tm-lv-metric-inline[data-tm-mode="club"] {' +
+      'max-width: 108px;' +
       '}';
     (document.body || document.head || document.documentElement).appendChild(style);
   }
@@ -2414,6 +2885,16 @@
     lineupObserver.observe(box, { childList: true, subtree: true });
   }
 
+  function bindEventObserver() {
+    const el = document.getElementById('teamEventDiv');
+    if (!el || el.__tmLvEventWatch) return;
+    el.__tmLvEventWatch = true;
+    new MutationObserver(function () {
+      if (refreshing) return;
+      scheduleRefresh();
+    }).observe(el, { childList: true, subtree: true });
+  }
+
   function scheduleRefresh() {
     if (refreshTimer) return;
     refreshTimer = window.setTimeout(function () {
@@ -2434,7 +2915,10 @@
       mountPanel(stats);
       renderStarterMetrics();
       annotateAllHoverAges(document.getElementById('matchBox2'));
+      annotateSubOut(document.getElementById('matchBox2'));
       bindLineupObserver(document.getElementById('matchBox2'));
+      bindEventObserver();
+      refreshNationalClubMode();
     } catch (err) {
       console.warn('[Titan007 阵容身价统计]', err);
     }
@@ -2456,7 +2940,7 @@
   }
 
   function init() {
-    metricModeIndex = loadMetricModeIndex();
+    metricModeKey = loadMetricModeKey();
     valueWithAge = loadValueWithAge();
     bindCoachNewPage();
     if (!inFrame) {
