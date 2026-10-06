@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.47
+// @version      1.8.49
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -16,7 +16,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.47';
+  const SCRIPT_VERSION = '1.8.49';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const CLUB_CACHE_KEY = 'tm-player-club-cache-v10';
@@ -1668,7 +1668,11 @@
     const mode = currentMetricMode();
     const next = nextMetricMode();
     let text;
-    if (mode.key === 'value') {
+    if (mode.key === 'club') {
+      text = '当前俱乐部，点击切换' + next.label + '，右击切到身价/年龄，再右击回到俱乐部，双击回到身价';
+    } else if (mode.key === 'value' && valueWithAge && clubRightBack) {
+      text = '当前身价/年龄，右击回到俱乐部，点击切换' + next.label + '，双击回到身价';
+    } else if (mode.key === 'value') {
       text = valueWithAge
         ? '当前身价/年龄，点击切换' + next.label + '，右击切回身价，双击回到身价'
         : '当前身价，点击切换' + next.label + '，右击显示身价/年龄，双击回到身价';
@@ -1720,7 +1724,22 @@
   }
 
   let metricClickTimer = null;
+  let clubRightBack = false;
+  let valueWithAgeBeforeClubFlip = false;
   const METRIC_CLICK_DELAY = 260;
+
+  function clubModeAvailable() {
+    return activeMetricModes().some(function (m) {
+      return m.key === 'club';
+    });
+  }
+
+  function cancelClubAgeFlip() {
+    if (!clubRightBack) return;
+    clubRightBack = false;
+    valueWithAge = !!valueWithAgeBeforeClubFlip;
+    saveValueWithAge();
+  }
 
   function stopMetricClickTimer() {
     if (!metricClickTimer) return;
@@ -1749,6 +1768,7 @@
       e.stopPropagation();
     }
     stopMetricClickTimer();
+    clubRightBack = false;
     valueWithAge = false;
     saveValueWithAge();
     if (currentMetricMode().key === 'value') {
@@ -1765,7 +1785,24 @@
       e.stopPropagation();
     }
     stopMetricClickTimer();
-    if (currentMetricMode().key !== 'value') return;
+    const key = currentMetricMode().key;
+    if (key === 'club' && clubModeAvailable()) {
+      if (!clubRightBack) valueWithAgeBeforeClubFlip = valueWithAge;
+      clubRightBack = true;
+      valueWithAge = true;
+      saveValueWithAge();
+      setMetricModeByKey('value');
+      return;
+    }
+    if (key === 'value' && valueWithAge && clubRightBack && clubModeAvailable()) {
+      clubRightBack = false;
+      valueWithAge = !!valueWithAgeBeforeClubFlip;
+      saveValueWithAge();
+      setMetricModeByKey('club');
+      return;
+    }
+    clubRightBack = false;
+    if (key !== 'value') return;
     valueWithAge = !valueWithAge;
     saveValueWithAge();
     lastMetricSig = '';
@@ -1988,6 +2025,7 @@
   }
 
   function cycleMetricMode() {
+    cancelClubAgeFlip();
     metricModeKey = nextMetricMode().key;
     saveMetricModeKey();
     if (metricModeKey === 'club') ensureClubs();
