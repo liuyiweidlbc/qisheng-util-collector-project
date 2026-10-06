@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.49
+// @version      1.8.50
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -16,7 +16,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.49';
+  const SCRIPT_VERSION = '1.8.50';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const CLUB_CACHE_KEY = 'tm-player-club-cache-v10';
@@ -2643,51 +2643,77 @@
       '#matchBox2 .plays .guest .playBox .play .tm-lv-metric {' +
       'color: #0369a1;' +
       '}' +
+      '#matchBox2 .backupPlay2 .home,' +
+      '#matchBox2 .backupPlay2 .guest {' +
+      'display: grid !important;' +
+      'grid-template-columns: repeat(3, minmax(0, 1fr));' +
+      'align-items: start;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .play {' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'float: none !important;' +
+      'margin: 1px 2px !important;' +
+      '}' +
       '#matchBox2 .backupPlay .play,' +
       '#matchBox2 .hurtPlay .play {' +
       'display: flex !important;' +
       'flex-wrap: wrap;' +
       'align-items: center;' +
-      'gap: 4px 6px;' +
+      'gap: 1px 3px;' +
       '}' +
       '#matchBox2 .backupPlay .play .name,' +
       '#matchBox2 .hurtPlay .play .name {' +
       'display: inline-flex !important;' +
       'align-items: center;' +
+      'flex: 1 1 auto;' +
       'width: auto !important;' +
-      'max-width: 58%;' +
+      'max-width: none;' +
+      'min-width: 0;' +
       'float: none !important;' +
       'vertical-align: middle;' +
+      'overflow: hidden;' +
       '}' +
       '#matchBox2 .backupPlay2 .play > span {' +
       'display: flex;' +
       'flex-wrap: wrap;' +
       'align-items: center;' +
-      'gap: 2px 6px;' +
+      'gap: 1px 3px;' +
+      'width: 100%;' +
       'height: auto !important;' +
       '}' +
       '#matchBox2 .backupPlay2 .play > span .name {' +
-      'display: inline-block !important;' +
+      'display: inline-flex !important;' +
+      'align-items: center;' +
+      'flex: 1 1 auto;' +
       'width: auto !important;' +
-      'max-width: 120px;' +
+      'max-width: none;' +
+      'min-width: 0;' +
       'margin: 0;' +
+      'overflow: hidden;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .play > span .eventicon {' +
+      'flex: 0 0 100%;' +
+      'width: auto !important;' +
+      'height: 14px !important;' +
       '}' +
       '#matchBox2 .backupPlay .play .tm-lv-metric,' +
       '#matchBox2 .hurtPlay .play .tm-lv-metric,' +
       '#matchBox2 .tm-lv-metric-inline {' +
       'display: inline-block;' +
+      'flex: 0 0 auto;' +
       'box-sizing: border-box;' +
       'position: relative;' +
       'z-index: 5;' +
       'margin: 0;' +
-      'padding: 0 4px;' +
+      'padding: 0 2px;' +
       'width: auto;' +
       'max-width: none;' +
       'min-height: 0;' +
-      'height: 16px;' +
-      'line-height: 16px;' +
-      'font-size: 11px;' +
-      'font-weight: 700;' +
+      'height: 13px;' +
+      'line-height: 13px;' +
+      'font-size: 9px;' +
+      'font-weight: 600;' +
       'font-style: normal;' +
       'text-align: center;' +
       'white-space: nowrap;' +
@@ -2879,7 +2905,9 @@
       '#matchBox2 .backupPlay .play .tm-lv-metric[data-tm-mode="club"],' +
       '#matchBox2 .hurtPlay .play .tm-lv-metric[data-tm-mode="club"],' +
       '#matchBox2 .tm-lv-metric-inline[data-tm-mode="club"] {' +
-      'max-width: 108px;' +
+      'max-width: 64px;' +
+      'overflow: hidden;' +
+      'text-overflow: ellipsis;' +
       '}';
     (document.body || document.head || document.documentElement).appendChild(style);
   }
