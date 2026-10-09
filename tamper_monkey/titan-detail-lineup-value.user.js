@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.50
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
+// @version      1.8.51
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」旁小图标点击切换显示球员国籍（取自悬停提示）；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -16,9 +16,16 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.50';
+  const SCRIPT_VERSION = '1.8.51';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
+  const NAT_STORAGE_KEY = 'tm-lv-show-nat';
+  const NAT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"></circle>' +
+    '<ellipse cx="12" cy="12" rx="4.2" ry="9" fill="none" stroke="currentColor" stroke-width="1.6"></ellipse>' +
+    '<path d="M3.2 12h17.6M5.2 8.2h13.6M5.2 15.8h13.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>' +
+    '</svg>';
   const CLUB_CACHE_KEY = 'tm-player-club-cache-v10';
   const FORCE_NATIONAL_KEY = 'tm-lv-force-national';
   const FORCE_NAT_TITLE =
@@ -39,6 +46,7 @@
   let refreshTimer = null;
   let metricModeKey = 'value';
   let valueWithAge = false;
+  let showNat = false;
   let nationalMatch = null;
   let nationalPromise = null;
   let nationalForced = false;
@@ -218,6 +226,115 @@
       box.querySelectorAll('.play').forEach(function (playEl) {
         widenHoverCard(playEl);
         annotateHoverAge(playEl);
+      });
+    } finally {
+      refreshing = prevRefreshing;
+    }
+  }
+
+  function loadShowNat() {
+    try {
+      return localStorage.getItem(NAT_STORAGE_KEY) === '1';
+    } catch (e) {}
+    return false;
+  }
+
+  function saveShowNat() {
+    try {
+      localStorage.setItem(NAT_STORAGE_KEY, showNat ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function parseNationality(playEl) {
+    const ul = playEl && playEl.querySelector('ul');
+    if (!ul) return '';
+    const lis = ul.querySelectorAll('li');
+    for (let i = 0; i < lis.length; i++) {
+      const text = (lis[i].textContent || '').replace(/\u00a0/g, ' ').trim();
+      const m = text.match(/国籍[：:]\s*(.+)/);
+      if (m && m[1]) return m[1].trim();
+    }
+    return '';
+  }
+
+  function lineupTitleEl() {
+    const box = document.getElementById('matchBox2');
+    const parent = box && box.parentElement;
+    if (!parent) return null;
+    const titles = parent.querySelectorAll(':scope > .title');
+    for (let i = 0; i < titles.length; i++) {
+      if ((titles[i].textContent || '').indexOf('预计阵容') !== -1) return titles[i];
+    }
+    return null;
+  }
+
+  function syncNatToggle() {
+    const btn = document.querySelector('.tm-lv-nat-btn');
+    if (!btn) return;
+    btn.classList.toggle('tm-lv-nat-on', showNat);
+    btn.title = showNat ? '点击隐藏国籍' : '点击显示国籍';
+    btn.setAttribute('aria-pressed', showNat ? 'true' : 'false');
+  }
+
+  function toggleShowNat(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    showNat = !showNat;
+    saveShowNat();
+    syncNatToggle();
+    renderNationality(document.getElementById('matchBox2'));
+  }
+
+  function ensureNatToggle() {
+    const title = lineupTitleEl();
+    if (!title) return;
+    let btn = title.querySelector('.tm-lv-nat-btn');
+    if (!btn) {
+      btn = document.createElement('span');
+      btn.className = 'tm-lv-nat-btn';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
+      btn.setAttribute('aria-label', '显示国籍');
+      btn.innerHTML = NAT_ICON_SVG;
+      title.appendChild(btn);
+      btn.addEventListener('click', toggleShowNat);
+      btn.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        toggleShowNat(e);
+      });
+    }
+    syncNatToggle();
+  }
+
+  function renderNationality(box) {
+    if (!box) return;
+    const prevRefreshing = refreshing;
+    refreshing = true;
+    try {
+      box.querySelectorAll('.play').forEach(function (playEl) {
+        let el = playEl.querySelector('.tm-lv-nat');
+        if (!showNat) {
+          if (el) el.remove();
+          return;
+        }
+        const nat = parseNationality(playEl);
+        if (!nat) {
+          if (el) el.remove();
+          return;
+        }
+        if (!el) {
+          el = document.createElement('b');
+          el.className = 'tm-lv-nat';
+          const metric = playEl.querySelector('.tm-lv-metric');
+          const nameEl = playEl.querySelector('.name');
+          const anchor = metric || nameEl;
+          if (anchor) anchor.insertAdjacentElement('afterend', el);
+          else playEl.appendChild(el);
+        }
+        if (el.textContent !== nat) el.textContent = nat;
+        el.title = nat;
       });
     } finally {
       refreshing = prevRefreshing;
@@ -1927,7 +2044,8 @@
       n.classList.contains('tm-lv-bday') ||
       n.classList.contains('tm-lv-subout') ||
       n.classList.contains('tm-lv-subout-num') ||
-      n.classList.contains('tm-lv-subout-name')
+      n.classList.contains('tm-lv-subout-name') ||
+      n.classList.contains('tm-lv-nat')
     );
   }
 
@@ -1946,7 +2064,10 @@
     if (
       t &&
       t.closest &&
-      (t.closest('.tm-lv-metric') || t.closest('.tm-lv-hover-age') || t.closest('.tm-lv-subout'))
+      (t.closest('.tm-lv-metric') ||
+        t.closest('.tm-lv-hover-age') ||
+        t.closest('.tm-lv-subout') ||
+        t.closest('.tm-lv-nat'))
     ) {
       return true;
     }
@@ -2899,6 +3020,91 @@
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
       'margin-right: 2px !important;' +
       '}' +
+      '.tm-lv-nat-btn {' +
+      'position: absolute;' +
+      'left: calc(50% + 46px);' +
+      'top: 50%;' +
+      'transform: translateY(-50%);' +
+      'z-index: 8;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'justify-content: center;' +
+      'width: 22px;' +
+      'height: 22px;' +
+      'margin: 0;' +
+      'padding: 0;' +
+      'border: 1px solid #cbd5e1;' +
+      'border-radius: 6px;' +
+      'background: #fff;' +
+      'color: #64748b;' +
+      'cursor: pointer;' +
+      'user-select: none;' +
+      'line-height: 0;' +
+      '}' +
+      '.tm-lv-nat-btn:hover {' +
+      'border-color: #9a3412;' +
+      'color: #9a3412;' +
+      '}' +
+      '.tm-lv-nat-btn.tm-lv-nat-on {' +
+      'background: #9a3412;' +
+      'border-color: #9a3412;' +
+      'color: #fff;' +
+      '}' +
+      '.tm-lv-nat-btn svg {' +
+      'display: block;' +
+      'width: 14px;' +
+      'height: 14px;' +
+      '}' +
+      '#matchBox2 .plays .play .tm-lv-nat {' +
+      'display: block;' +
+      'box-sizing: border-box;' +
+      'position: relative;' +
+      'z-index: 5;' +
+      'width: max-content;' +
+      'max-width: 96px;' +
+      'margin: 0 auto;' +
+      'padding: 0 1px;' +
+      'height: 12px;' +
+      'line-height: 12px;' +
+      'font-size: 10px;' +
+      'font-weight: 700;' +
+      'font-style: normal;' +
+      'text-align: center;' +
+      'white-space: nowrap;' +
+      'overflow: hidden;' +
+      'text-overflow: ellipsis;' +
+      'color: #9a3412;' +
+      'background: transparent;' +
+      'text-shadow: 0 0 3px rgba(255,255,255,0.95), 0 1px 1px rgba(255,255,255,0.85);' +
+      'pointer-events: none;' +
+      '}' +
+      '#matchBox2 .backupPlay .play .tm-lv-nat,' +
+      '#matchBox2 .hurtPlay .play .tm-lv-nat,' +
+      '#matchBox2 .backupPlay2 .play .tm-lv-nat {' +
+      'display: inline-block;' +
+      'flex: 0 0 auto;' +
+      'position: relative;' +
+      'z-index: 5;' +
+      'width: auto;' +
+      'max-width: 72px;' +
+      'margin: 0;' +
+      'padding: 0 2px;' +
+      'height: 13px;' +
+      'line-height: 13px;' +
+      'font-size: 9px;' +
+      'font-weight: 600;' +
+      'font-style: normal;' +
+      'text-align: center;' +
+      'white-space: nowrap;' +
+      'vertical-align: middle;' +
+      'overflow: hidden;' +
+      'text-overflow: ellipsis;' +
+      'color: #9a3412;' +
+      'background: rgba(255,255,255,0.7);' +
+      'border-radius: 3px;' +
+      'text-shadow: none;' +
+      'pointer-events: none;' +
+      '}' +
       '#matchBox2 .plays .playBox .play .tm-lv-metric[data-tm-mode="club"] {' +
       'max-width: 76px;' +
       '}' +
@@ -3250,11 +3456,15 @@
       const stats = computeStats();
       if (!stats) {
         hidePanel();
+        ensureNatToggle();
+        renderNationality(document.getElementById('matchBox2'));
         return;
       }
 
       mountPanel(stats);
       renderStarterMetrics();
+      ensureNatToggle();
+      renderNationality(document.getElementById('matchBox2'));
       annotateAllHoverAges(document.getElementById('matchBox2'));
       annotateSubOut(document.getElementById('matchBox2'));
       bindLineupObserver(document.getElementById('matchBox2'));
@@ -3283,6 +3493,7 @@
   function init() {
     metricModeKey = loadMetricModeKey();
     valueWithAge = loadValueWithAge();
+    showNat = loadShowNat();
     if (isRememberedNational()) {
       nationalForced = true;
       nationalMatch = true;
