@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 两队历史排名快捷入口
 // @namespace    https://titan007.com/
-// @version      1.3.11
-// @description  在 detail 页面增加“两队历史排名”“主教练”“球员身价”“球员数据”“联赛排名”快捷按钮。F1 历史排名、F2 主教练（先客队再主队）、F3 球员身价、F4 球员数据、F5 联赛排名。联赛排名链接附带 tm_home/tm_away 等参数，统计 Tab 经独立 Cookie 传递；detail 页 URL 含 tab 参数时自动打开联赛排名并定位对应统计 Tab。iframe 内不注入（首发对比弹窗等嵌入页保持原站首发图）。
+// @version      1.3.12
+// @description  在 detail 页面增加“两队历史排名”“主教练”“球员身价”“球员数据”“联赛排名”快捷按钮。F1 历史排名、F2 主教练（先客队再主队）、F3 球员身价、F4 球员数据、F5 联赛排名。联赛排名链接附带 tm_home/tm_away 等参数，统计 Tab 经独立 Cookie 传递；detail 页 URL 含 tab 参数时自动打开联赛排名并定位对应统计 Tab。URL 含 act=f1 时，页面打开 1 秒后自动触发 F1。iframe 内不注入（首发对比弹窗等嵌入页保持原站首发图）。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @noframes
@@ -683,9 +683,32 @@
     });
   }
 
+  /** detail 页 ?act=f1：打开满 1 秒后走与按下 F1 相同的监听。 */
+  function scheduleAutoF1FromAct() {
+    let act = '';
+    try {
+      act = new URLSearchParams(window.location.search).get('act') || '';
+    } catch (_) {
+      return;
+    }
+    if (act.toLowerCase() !== 'f1') return;
+    const delay = Math.max(0, 1000 - performance.now());
+    window.setTimeout(() => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'F1',
+          code: 'F1',
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    }, delay);
+  }
+
   function init() {
     injectButton();
     bindHotkey();
+    scheduleAutoF1FromAct();
     enhanceLeagueNameLinks();
     let tries = 0;
     const timer = window.setInterval(() => {
