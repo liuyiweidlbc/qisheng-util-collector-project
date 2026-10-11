@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.90
+// @version      1.9.92
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场表默认6场可展开10场（两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时；腾讯云人机校验页自动勾选「确认你是真人」
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场「主场/客场」下拉改精致按钮组+6/10场按钮组（场次两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时；腾讯云人机校验页自动勾选「确认你是真人」
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -1878,7 +1878,7 @@
     }
 
     /** 放宽交战历史表格外层与 .M_content 的定宽，表格随可视区域变宽（为备注/盘口留空间） */
-    const DZ_NAME_STYLE_ID = 'tm500-dz-name-style-214';
+    const DZ_NAME_STYLE_ID = 'tm500-dz-name-style-216';
 
     /** 对阵列：战绩表主/客约6.5字超长省略（默认表与亚盘列模式都生效）；交战历史约9字 */
     function injectDzTeamNameStyle() {
@@ -1889,7 +1889,8 @@
             'tm500-dz-name-style-207', 'tm500-dz-name-style-208',
             'tm500-dz-name-style-209', 'tm500-dz-name-style-210',
             'tm500-dz-name-style-211', 'tm500-dz-name-style-212',
-            'tm500-dz-name-style-213'
+            'tm500-dz-name-style-213', 'tm500-dz-name-style-214',
+            'tm500-dz-name-style-215'
         ];
         legacyIds.forEach(function(id) {
             const el = document.getElementById(id);
@@ -2021,9 +2022,15 @@
             'box-sizing:border-box!important;' +
             'overflow:hidden!important;' +
             '}' +
-            '.tm500-zj2-expand-wrap .tm500-zj2-expand{' +
+            '.tm500-zj2-limit-wrap,' +
+            '.tm500-zj2-ha-wrap{' +
             'width:auto!important;min-width:0!important;max-width:none!important;' +
-            'display:inline-block!important;padding:2px 5px!important;' +
+            'display:inline-flex!important;' +
+            '}' +
+            '.tm500-zj2-limit-wrap .tm500-zj2-limit,' +
+            '.tm500-zj2-ha-wrap .tm500-zj2-ha{' +
+            'width:auto!important;min-width:0!important;max-width:none!important;' +
+            'display:inline-block!important;padding:1px 5px!important;' +
             '}';
         document.head.appendChild(s);
     }
@@ -4654,9 +4661,9 @@
         }, 300);
     }
 
-    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-206';
+    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-208';
 
-    /** 近期战绩三组：team_zhanji_* / getZhanji + zj0_；team_zhanji1_* / getZhanji1 + zj1_；team_zhanji2_* / getZhanji2 + zj2_（主场/客场块无 limit 下拉） */
+    /** 近期战绩三组：team_zhanji_* / getZhanji + zj0_；team_zhanji1_* / getZhanji1 + zj1_；team_zhanji2_* / getZhanji2 + zj2_（主客场：主场/客场按钮组 + 6/10 场按钮组） */
     const ZHANJI_SAME_LEAGUE_PANELS = [
         { teamIds: ['team_zhanji_0', 'team_zhanji_1'], zjMid: '0', getFn: 'getZhanji' },
         { teamIds: ['team_zhanji1_0', 'team_zhanji1_1'], zjMid: '1', getFn: 'getZhanji1' },
@@ -4684,6 +4691,10 @@
         if (legacy204) legacy204.remove();
         const legacy205 = document.getElementById('tm500-zj-same-league-style-205');
         if (legacy205) legacy205.remove();
+        const legacy206 = document.getElementById('tm500-zj-same-league-style-206');
+        if (legacy206) legacy206.remove();
+        const legacy207 = document.getElementById('tm500-zj-same-league-style-207');
+        if (legacy207) legacy207.remove();
         if (document.getElementById(ZJ_SL_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = ZJ_SL_STYLE_ID;
@@ -4697,7 +4708,7 @@
             'display:flex!important;align-items:center!important;flex-wrap:wrap;gap:8px;width:100%;' +
             'justify-content:flex-start;' +
             '}' +
-            /* 主客场：展开后赛果条变宽也不把按钮挤到下一行 */
+            /* 主客场：赛果条变宽也不把按钮挤到下一行 */
             '#team_zhanji2_0 form .M_content_t .selt,' +
             '#team_zhanji2_1 form .M_content_t .selt{' +
             'display:flex!important;flex-wrap:nowrap!important;align-items:center!important;' +
@@ -4713,8 +4724,14 @@
             '}' +
             '.tm500-zj-same-league-wrap,' +
             '.tm500-zj-yp-mode-wrap,' +
-            '.tm500-zj2-expand-wrap{' +
+            '.tm500-zj2-limit-wrap,' +
+            '.tm500-zj2-ha-wrap{' +
             'margin:0;display:inline-flex;justify-content:flex-end;flex-shrink:0;' +
+            '}' +
+            /* 隐藏主客场原生「主场/客场」下拉，改用按钮组 */
+            '#team_zhanji2_0 form .M_content_t .selt .selt_box.tm500-zj2-ha-native-hide,' +
+            '#team_zhanji2_1 form .M_content_t .selt .selt_box.tm500-zj2-ha-native-hide{' +
+            'display:none!important;' +
             '}' +
             '.tm500-zj-same-league{' +
             'box-sizing:border-box;min-width:0;width:auto;padding:4px 8px;font-size:12px;line-height:1.35;' +
@@ -4764,25 +4781,44 @@
             '.tm500-zj-yp-mode.tm500-zj-yp-on:hover{' +
             'background:linear-gradient(180deg,#ffdb80 0%,#f0c24a 100%);' +
             '}' +
-            '.tm500-zj2-expand{' +
+            /* 主客场：主场/客场 + 场次 精致小巧分段按钮组 */
+            '.tm500-zj2-limit-wrap,' +
+            '.tm500-zj2-ha-wrap{' +
+            'display:inline-flex!important;align-items:stretch;flex-shrink:0;' +
+            'border-radius:3px;overflow:hidden;' +
+            'box-shadow:0 1px 2px rgba(0,0,0,.08);' +
+            '}' +
+            '.tm500-zj2-ha-wrap{' +
+            'margin-left:4px!important;margin-right:2px!important;' +
+            'justify-content:flex-start!important;' +
+            '}' +
+            '.tm500-zj2-limit,' +
+            '.tm500-zj2-ha{' +
             'box-sizing:border-box;min-width:0!important;width:auto!important;max-width:none!important;' +
-            'padding:2px 5px!important;font-size:11px;line-height:1.2;' +
-            'white-space:nowrap;cursor:pointer;border:none;border-radius:3px;' +
-            'transition:opacity .18s ease,box-shadow .18s ease,filter .18s ease,background .18s ease;' +
-            'opacity:.85;filter:saturate(.8) brightness(1);font-weight:500;' +
-            'color:#3a5a78;' +
-            'background:linear-gradient(180deg,#d4e8f6 0%,#bddcf0 100%);' +
-            'box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(0,0,0,.08);' +
+            'margin:0;padding:1px 5px!important;font-size:10px;line-height:1.25;' +
+            'letter-spacing:0;font-weight:500;white-space:nowrap;cursor:pointer;' +
+            'border:1px solid #b7c9d8;border-right-width:0;' +
+            'color:#4a6478;background:linear-gradient(180deg,#f4f8fb 0%,#e8f0f6 100%);' +
+            'transition:color .15s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;' +
             '}' +
-            '.tm500-zj2-expand:hover{' +
-            'background:linear-gradient(180deg,#deeff9 0%,#cae4f5 100%);' +
+            '.tm500-zj2-limit:last-child,' +
+            '.tm500-zj2-ha:last-child{border-right-width:1px;}' +
+            '.tm500-zj2-limit:hover:not(.tm500-zj2-lim-on),' +
+            '.tm500-zj2-ha:hover:not(.tm500-zj2-ha-on){' +
+            'color:#2f4a60;background:linear-gradient(180deg,#f8fbfe 0%,#eef5fa 100%);' +
             '}' +
-            '.tm500-zj2-expand.tm500-zj2-exp-on{' +
-            'opacity:1;filter:saturate(1) brightness(1);font-weight:600;' +
-            'color:#142a3d;' +
-            'background:linear-gradient(180deg,#9bc5eb 0%,#6ba6d8 100%);' +
-            'box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(0,0,0,.08),' +
-            '0 2px 8px rgba(48,110,168,.22);' +
+            '.tm500-zj2-limit.tm500-zj2-lim-on,' +
+            '.tm500-zj2-ha.tm500-zj2-ha-on{' +
+            'color:#fff;font-weight:600;border-color:#5b8fbf;' +
+            'background:linear-gradient(180deg,#7eb3e0 0%,#5a94c8 100%);' +
+            'box-shadow:inset 0 1px 0 rgba(255,255,255,.28);' +
+            'z-index:1;' +
+            '}' +
+            '.tm500-zj2-limit.tm500-zj2-lim-on + .tm500-zj2-limit,' +
+            '.tm500-zj2-ha.tm500-zj2-ha-on + .tm500-zj2-ha{border-left-color:#5b8fbf;}' +
+            '.tm500-zj2-limit:disabled,' +
+            '.tm500-zj2-limit.tm500-zj2-lim-disabled{' +
+            'opacity:.45;cursor:default;pointer-events:none;' +
             '}' +
             '#team_zhanji2_0:not([data-tm500-zj2-exp="1"]) tr.tm500-zj2-overflow,' +
             '#team_zhanji2_1:not([data-tm500-zj2-exp="1"]) tr.tm500-zj2-overflow,' +
@@ -5114,82 +5150,309 @@
         return candidates.length;
     }
 
-    function syncZhanji2ExpandButton(teamRoot, candidateCount) {
+    function syncZhanji2LimitButtons(teamRoot, candidateCount) {
         if (!teamRoot) return;
         const n = typeof candidateCount === 'number'
             ? candidateCount
             : applyZhanji2OverflowMarks(teamRoot);
         const expanded = teamRoot.getAttribute('data-tm500-zj2-exp') === '1';
         const canExpand = n > ZJ2_COLLAPSE_DEFAULT;
-        const label = expanded ? '收起' : '展开';
-        const title = expanded
-            ? ('收起为近' + ZJ2_COLLAPSE_DEFAULT + '场')
-            : ('展开显示近' + ZJ2_COLLAPSE_EXPANDED + '场');
-        teamRoot.querySelectorAll('.tm500-zj-sl-right button.tm500-zj2-expand').forEach(function(btn) {
-            if (!canExpand) {
-                btn.style.display = 'none';
-                return;
-            }
-            btn.style.display = '';
-            btn.textContent = label;
-            btn.setAttribute('title', title);
-            if (expanded) {
-                btn.classList.add('tm500-zj2-exp-on');
-                btn.setAttribute('aria-pressed', 'true');
-            } else {
-                btn.classList.remove('tm500-zj2-exp-on');
-                btn.setAttribute('aria-pressed', 'false');
-            }
+        const wraps = teamRoot.querySelectorAll('.tm500-zj-sl-right .tm500-zj2-limit-wrap');
+        wraps.forEach(function(wrap) {
+            // 不足 6 场以上时仍显示按钮组，但禁用 10 场
+            wrap.style.display = '';
+            wrap.querySelectorAll('button.tm500-zj2-limit').forEach(function(btn) {
+                const lim = parseInt(btn.getAttribute('data-zj2-limit'), 10);
+                const on = expanded
+                    ? lim === ZJ2_COLLAPSE_EXPANDED
+                    : lim === ZJ2_COLLAPSE_DEFAULT;
+                if (on) {
+                    btn.classList.add('tm500-zj2-lim-on');
+                    btn.setAttribute('aria-pressed', 'true');
+                } else {
+                    btn.classList.remove('tm500-zj2-lim-on');
+                    btn.setAttribute('aria-pressed', 'false');
+                }
+                if (lim === ZJ2_COLLAPSE_EXPANDED && !canExpand) {
+                    btn.disabled = true;
+                    btn.classList.add('tm500-zj2-lim-disabled');
+                    btn.setAttribute('title', '可见场次不足' + ZJ2_COLLAPSE_EXPANDED + '场');
+                } else {
+                    btn.disabled = false;
+                    btn.classList.remove('tm500-zj2-lim-disabled');
+                    btn.setAttribute('title', '显示近' + lim + '场（主客两侧同步）');
+                }
+            });
         });
     }
 
-    function toggleZhanji2Expand(teamRoot) {
+    function setZhanji2Limit(limit, teamRoot) {
+        const lim = parseInt(limit, 10);
+        if (lim !== ZJ2_COLLAPSE_DEFAULT && lim !== ZJ2_COLLAPSE_EXPANDED) return;
         const roots = ['team_zhanji2_0', 'team_zhanji2_1'].map(function(tid) {
             return document.getElementById(tid);
         }).filter(Boolean);
         if (!roots.length) return;
-        // 以当前点击侧为准；两侧统一切换
-        const cur = teamRoot && roots.indexOf(teamRoot) >= 0 ? teamRoot : roots[0];
-        const nextOn = cur.getAttribute('data-tm500-zj2-exp') !== '1';
+        const nextOn = lim === ZJ2_COLLAPSE_EXPANDED;
+        // 点 10 场但当前侧不足时，不强制展开
+        if (nextOn && teamRoot) {
+            const n = applyZhanji2OverflowMarks(teamRoot);
+            if (n <= ZJ2_COLLAPSE_DEFAULT) return;
+        }
         roots.forEach(function(root) {
             if (nextOn) root.setAttribute('data-tm500-zj2-exp', '1');
             else root.removeAttribute('data-tm500-zj2-exp');
-            syncZhanji2ExpandButton(root);
+            syncZhanji2LimitButtons(root);
         });
         ensureZhanjiSameLeagueButtons();
     }
 
-    function bindZhanji2ExpandClick(btn) {
-        if (!btn || btn.dataset.tm500Zj2ExpBound === '1') return;
-        btn.dataset.tm500Zj2ExpBound = '1';
+    function bindZhanji2LimitClick(btn) {
+        if (!btn || btn.dataset.tm500Zj2LimBound === '1') return;
+        btn.dataset.tm500Zj2LimBound = '1';
         btn.addEventListener('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
+            if (btn.disabled) return;
             const root = btn.closest('[id^="team_zhanji2_"]');
-            toggleZhanji2Expand(root);
+            setZhanji2Limit(btn.getAttribute('data-zj2-limit'), root);
         });
     }
 
-    function createZhanji2ExpandButtonWrap() {
+    function createZhanji2LimitButtonWrap() {
         const wrap = document.createElement('span');
-        wrap.className = 'tm500-zj2-expand-wrap';
-        wrap.setAttribute('data-tm500-zj2-exp-btn', '1');
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'tm500-zj2-expand';
-        btn.textContent = '展开';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.setAttribute('title', '展开显示近' + ZJ2_COLLAPSE_EXPANDED + '场');
-        bindZhanji2ExpandClick(btn);
-        wrap.appendChild(btn);
+        wrap.className = 'tm500-zj2-limit-wrap';
+        wrap.setAttribute('data-tm500-zj2-lim-btn', '1');
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', '主客场显示场次');
+        [
+            { lim: ZJ2_COLLAPSE_DEFAULT, label: '6场' },
+            { lim: ZJ2_COLLAPSE_EXPANDED, label: '10场' }
+        ].forEach(function(opt) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'tm500-zj2-limit';
+            btn.textContent = opt.label;
+            btn.setAttribute('data-zj2-limit', String(opt.lim));
+            btn.setAttribute('aria-pressed', opt.lim === ZJ2_COLLAPSE_DEFAULT ? 'true' : 'false');
+            btn.setAttribute('title', '显示近' + opt.lim + '场（主客两侧同步）');
+            if (opt.lim === ZJ2_COLLAPSE_DEFAULT) btn.classList.add('tm500-zj2-lim-on');
+            bindZhanji2LimitClick(btn);
+            wrap.appendChild(btn);
+        });
         return wrap;
     }
 
     function removeZhanji2ExpandFooters(teamRoot) {
         if (!teamRoot) return;
-        teamRoot.querySelectorAll('.tm500-zj2-expand-foot').forEach(function(el) {
+        teamRoot.querySelectorAll('.tm500-zj2-expand-foot, .tm500-zj2-expand-wrap').forEach(function(el) {
             el.remove();
         });
+    }
+
+    /** 主客场块：识别原生「主场/客场」下拉（.selt_box + 两项） */
+    function findZhanji2VenueSeltBox(teamRoot) {
+        if (!teamRoot) return null;
+        const selt = teamRoot.querySelector('form .M_content_t .selt');
+        if (!selt) return null;
+        const boxes = selt.querySelectorAll('.selt_box');
+        let i;
+        for (i = 0; i < boxes.length; i++) {
+            const box = boxes[i];
+            const lis = box.querySelectorAll('ul.selt_list li');
+            if (!lis.length) continue;
+            let hasHome = false;
+            let hasAway = false;
+            let j;
+            for (j = 0; j < lis.length; j++) {
+                const t = (lis[j].textContent || '').replace(/\s+/g, '');
+                if (t === '主场') hasHome = true;
+                if (t === '客场') hasAway = true;
+            }
+            if (hasHome && hasAway) return box;
+            const em = box.querySelector('em');
+            const et = em ? (em.textContent || '').replace(/\s+/g, '') : '';
+            if ((et === '主场' || et === '客场') && lis.length >= 2) return box;
+        }
+        return null;
+    }
+
+    function getZhanji2VenueOptions(seltBox) {
+        if (!seltBox) return [];
+        const lis = seltBox.querySelectorAll('ul.selt_list li');
+        const opts = [];
+        Array.from(lis).forEach(function(li) {
+            const label = (li.textContent || '').replace(/\s+/g, '');
+            if (label !== '主场' && label !== '客场') return;
+            let val = li.getAttribute('val');
+            if (val == null || val === '') {
+                if (window.jQuery) val = window.jQuery(li).attr('val');
+            }
+            if (val == null || val === '') val = label === '主场' ? '1' : '0';
+            opts.push({ val: String(val), label: label, li: li });
+        });
+        return opts;
+    }
+
+    function getZhanji2VenueCurrentVal(seltBox) {
+        if (!seltBox) return '';
+        const em = seltBox.querySelector('em');
+        if (!em) return '';
+        let v = em.getAttribute('val');
+        if (v == null || v === '') {
+            if (window.jQuery) v = window.jQuery(em).attr('val');
+        }
+        if (v != null && v !== '') return String(v);
+        const t = (em.textContent || '').replace(/\s+/g, '');
+        if (t === '主场' || t === '客场') {
+            const opts = getZhanji2VenueOptions(seltBox);
+            let i;
+            for (i = 0; i < opts.length; i++) {
+                if (opts[i].label === t) return opts[i].val;
+            }
+        }
+        return '';
+    }
+
+    function syncZhanji2VenueButtons(teamRoot) {
+        if (!teamRoot) return;
+        const box = findZhanji2VenueSeltBox(teamRoot);
+        const cur = getZhanji2VenueCurrentVal(box);
+        teamRoot.querySelectorAll('.tm500-zj2-ha-wrap button.tm500-zj2-ha').forEach(function(btn) {
+            const on = String(btn.getAttribute('data-zj2-ha')) === String(cur);
+            if (on) {
+                btn.classList.add('tm500-zj2-ha-on');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.classList.remove('tm500-zj2-ha-on');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        });
+    }
+
+    function triggerZhanji2VenueFilter(teamRoot, val) {
+        const box = findZhanji2VenueSeltBox(teamRoot);
+        if (!box) return;
+        const opts = getZhanji2VenueOptions(box);
+        let hit = null;
+        let i;
+        for (i = 0; i < opts.length; i++) {
+            if (String(opts[i].val) === String(val)) {
+                hit = opts[i];
+                break;
+            }
+        }
+        if (!hit || !hit.li) return;
+        const em = box.querySelector('em');
+        const emId = em && em.id ? em.id : '';
+        const sideM = teamRoot.id.match(/_(\d+)$/);
+        const side = sideM ? parseInt(sideM[1], 10) : 0;
+
+        // 1) 站点常见：getZhanji2(li, 'home_zj2_x')（仅当第二参为 id 时）
+        if (typeof window.getZhanji2 === 'function' && emId && /home/i.test(emId)) {
+            try {
+                window.getZhanji2(hit.li, emId);
+                syncZhanji2VenueButtons(teamRoot);
+                return;
+            } catch (err) { /* fall through */ }
+        }
+        // 2) 点原生 li，走站点 live/delegate（下拉虽隐藏仍可触发）
+        if (window.jQuery) {
+            window.jQuery(hit.li).trigger('click');
+            syncZhanji2VenueButtons(teamRoot);
+            return;
+        }
+        if (typeof hit.li.click === 'function') {
+            hit.li.click();
+            syncZhanji2VenueButtons(teamRoot);
+            return;
+        }
+        // 3) 兜底：改 em 后按侧刷新
+        if (em) {
+            em.setAttribute('val', String(hit.val));
+            em.textContent = hit.label;
+        }
+        if (typeof window.getZhanji2 === 'function') {
+            window.getZhanji2(side);
+        }
+        syncZhanji2VenueButtons(teamRoot);
+    }
+
+    function bindZhanji2VenueClick(btn) {
+        if (!btn || btn.dataset.tm500Zj2HaBound === '1') return;
+        btn.dataset.tm500Zj2HaBound = '1';
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const root = btn.closest('[id^="team_zhanji2_"]');
+            if (!root) return;
+            const val = btn.getAttribute('data-zj2-ha');
+            if (val == null) return;
+            // 已选中再点不重复请求
+            if (btn.classList.contains('tm500-zj2-ha-on')) return;
+            triggerZhanji2VenueFilter(root, val);
+        });
+    }
+
+    function createZhanji2VenueButtonWrap(seltBox) {
+        const wrap = document.createElement('span');
+        wrap.className = 'tm500-zj2-ha-wrap';
+        wrap.setAttribute('data-tm500-zj2-ha-btn', '1');
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', '主场客场切换');
+        const opts = getZhanji2VenueOptions(seltBox);
+        const cur = getZhanji2VenueCurrentVal(seltBox);
+        // 固定顺序：主场、客场
+        const ordered = opts.slice().sort(function(a, b) {
+            if (a.label === b.label) return 0;
+            if (a.label === '主场') return -1;
+            if (b.label === '主场') return 1;
+            return 0;
+        });
+        ordered.forEach(function(opt) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'tm500-zj2-ha';
+            btn.textContent = opt.label;
+            btn.setAttribute('data-zj2-ha', opt.val);
+            btn.setAttribute('title', '切换为' + opt.label);
+            if (String(opt.val) === String(cur)) {
+                btn.classList.add('tm500-zj2-ha-on');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.setAttribute('aria-pressed', 'false');
+            }
+            bindZhanji2VenueClick(btn);
+            wrap.appendChild(btn);
+        });
+        return wrap;
+    }
+
+    function ensureZhanji2VenueButtons(teamRoot) {
+        if (!teamRoot || !/^team_zhanji2_/.test(teamRoot.id)) return;
+        const selt = teamRoot.querySelector('form .M_content_t .selt');
+        if (!selt) return;
+        const box = findZhanji2VenueSeltBox(teamRoot);
+        if (!box) return;
+        box.classList.add('tm500-zj2-ha-native-hide');
+        let wrap = selt.querySelector('.tm500-zj2-ha-wrap[data-tm500-zj2-ha-btn="1"]');
+        if (!wrap) {
+            wrap = createZhanji2VenueButtonWrap(box);
+            // 插在原生下拉旁（队名后），保持左侧位置
+            if (box.parentNode) box.parentNode.insertBefore(wrap, box.nextSibling);
+            else selt.insertBefore(wrap, selt.firstChild);
+        } else {
+            // 选项 val 可能随刷新变化：按当前原生下拉重建若缺按钮
+            const opts = getZhanji2VenueOptions(box);
+            const btns = wrap.querySelectorAll('button.tm500-zj2-ha');
+            if (!btns.length && opts.length) {
+                wrap.remove();
+                wrap = createZhanji2VenueButtonWrap(box);
+                if (box.parentNode) box.parentNode.insertBefore(wrap, box.nextSibling);
+                else selt.insertBefore(wrap, selt.firstChild);
+            }
+        }
+        syncZhanji2VenueButtons(teamRoot);
     }
 
     function ensureZhanji2Collapse(teamRoot) {
@@ -5197,12 +5460,20 @@
         removeZhanji2ExpandFooters(teamRoot);
         const selt = teamRoot.querySelector('form .M_content_t .selt');
         if (!selt) return;
+        ensureZhanji2VenueButtons(teamRoot);
         const cluster = ensureZhanjiSameLeagueClusterInSelt(selt);
-        if (!cluster.querySelector('[data-tm500-zj2-exp-btn="1"]')) {
-            cluster.appendChild(createZhanji2ExpandButtonWrap());
+        // 隐藏主客场原生场次下拉（若有），改用按钮组
+        selt.querySelectorAll('.selt_box').forEach(function(box) {
+            if (box.classList.contains('tm500-zj2-ha-native-hide')) return;
+            if (box.querySelector('#limit_zj2_0, #limit_zj2_1, [id^="limit_zj2_"]')) {
+                box.style.display = 'none';
+            }
+        });
+        if (!cluster.querySelector('[data-tm500-zj2-lim-btn="1"]')) {
+            cluster.appendChild(createZhanji2LimitButtonWrap());
         }
         const n = applyZhanji2OverflowMarks(teamRoot);
-        syncZhanji2ExpandButton(teamRoot, n);
+        syncZhanji2LimitButtons(teamRoot, n);
     }
 
     function ensureZhanji2CollapseAll() {
