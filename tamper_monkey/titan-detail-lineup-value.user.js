@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.51
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补），并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」旁小图标点击切换显示球员国籍（取自悬停提示）；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
+// @version      1.8.54
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示）；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -16,7 +16,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.51';
+  const SCRIPT_VERSION = '1.8.54';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -263,7 +263,8 @@
     if (!parent) return null;
     const titles = parent.querySelectorAll(':scope > .title');
     for (let i = 0; i < titles.length; i++) {
-      if ((titles[i].textContent || '').indexOf('预计阵容') !== -1) return titles[i];
+      const text = titles[i].textContent || '';
+      if (text.indexOf('预计阵容') !== -1 || text.indexOf('首发阵容') !== -1) return titles[i];
     }
     return null;
   }
@@ -989,6 +990,27 @@
     }, 0);
   }
 
+  /** 首发平均年龄：按比赛日计整岁，无生日的不计。 */
+  function starterAgeStat(root) {
+    const asOf = matchAsOfDate();
+    let sum = 0;
+    let n = 0;
+    if (root) {
+      root.querySelectorAll('.play').forEach(function (playEl) {
+        const age = calcAge(parseBirthday(playEl), asOf);
+        if (!Number.isFinite(age)) return;
+        sum += age;
+        n += 1;
+      });
+    }
+    return { avg: n ? sum / n : null, n: n };
+  }
+
+  function formatAvgAge(stat) {
+    if (!stat || !Number.isFinite(stat.avg)) return '-';
+    return stat.avg.toFixed(1);
+  }
+
   function detectUnit(box) {
     const sample = box.querySelector('.play');
     if (sample) {
@@ -1407,6 +1429,7 @@
           starter: homeStarters.length,
           onField: homeOnField.length,
         },
+        age: starterAgeStat(box.querySelector('.plays .home')),
       },
       away: {
         total: sumValues(awayTotal),
@@ -1418,6 +1441,7 @@
           starter: awayStarters.length,
           onField: awayOnField.length,
         },
+        age: starterAgeStat(box.querySelector('.plays .guest')),
       },
     };
   }
@@ -1526,6 +1550,7 @@
       '<span class="tm-lv-leg tm-lv-leg-away"><i></i>' +
       escHtml(names.away) +
       '（客）</span></div>' +
+      ageLineHtml(stats, names) +
       '<div class="tm-lv-clusters">' +
       clusters +
       '</div></div>' +
@@ -2294,6 +2319,40 @@
       '}' +
       '#' +
       PANEL_ID +
+      ' .tm-lv-chart .tm-lv-ages {' +
+      'display: flex;' +
+      'align-items: baseline;' +
+      'gap: 4px;' +
+      'margin: -2px 0 8px;' +
+      'font-size: 12px;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-chart .tm-lv-ages b {' +
+      'margin-right: 2px;' +
+      'font-weight: 600;' +
+      'color: #475569;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-chart .tm-lv-sum-h {' +
+      'font-weight: 700;' +
+      'color: #15803d;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-chart .tm-lv-sum-a {' +
+      'font-weight: 700;' +
+      'color: #0369a1;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-chart .tm-lv-sum-sep {' +
+      'color: #94a3b8;' +
+      'font-size: 11px;' +
+      '}' +
+      '#' +
+      PANEL_ID +
       ' .tm-lv-leg {' +
       'display: inline-flex;' +
       'align-items: center;' +
@@ -3042,13 +3101,18 @@
       'line-height: 0;' +
       '}' +
       '.tm-lv-nat-btn:hover {' +
-      'border-color: #9a3412;' +
-      'color: #9a3412;' +
+      'border-color: #94a3b8;' +
+      'color: #1e293b;' +
       '}' +
       '.tm-lv-nat-btn.tm-lv-nat-on {' +
-      'background: #9a3412;' +
-      'border-color: #9a3412;' +
-      'color: #fff;' +
+      'background: #f1f5f9;' +
+      'border-color: #334155;' +
+      'color: #0f172a;' +
+      '}' +
+      '.tm-lv-nat-btn.tm-lv-nat-on:hover {' +
+      'background: #e2e8f0;' +
+      'border-color: #0f172a;' +
+      'color: #0f172a;' +
       '}' +
       '.tm-lv-nat-btn svg {' +
       'display: block;' +
@@ -3073,7 +3137,7 @@
       'white-space: nowrap;' +
       'overflow: hidden;' +
       'text-overflow: ellipsis;' +
-      'color: #9a3412;' +
+      'color: #1e293b;' +
       'background: transparent;' +
       'text-shadow: 0 0 3px rgba(255,255,255,0.95), 0 1px 1px rgba(255,255,255,0.85);' +
       'pointer-events: none;' +
@@ -3099,7 +3163,7 @@
       'vertical-align: middle;' +
       'overflow: hidden;' +
       'text-overflow: ellipsis;' +
-      'color: #9a3412;' +
+      'color: #334155;' +
       'background: rgba(255,255,255,0.7);' +
       'border-radius: 3px;' +
       'text-shadow: none;' +
@@ -3154,11 +3218,35 @@
     );
   }
 
+  function ageTip(stat, teamName) {
+    const base = (teamName || '') + ' 首发平均年龄';
+    if (!stat || !stat.n) return base;
+    return base + ' ' + formatAvgAge(stat) + '（' + stat.n + '人，按比赛日计算）';
+  }
+
+  function ageLineHtml(stats, names) {
+    const home = stats.home && stats.home.age;
+    const away = stats.away && stats.away.age;
+    return (
+      '<span class="tm-lv-sum tm-lv-ages" title="首发平均年龄，按比赛日计算，无生日的不计">' +
+      '<b>均龄</b><span class="tm-lv-sum-h" title="' +
+      escHtml(ageTip(home, names.home)) +
+      '">' +
+      escHtml(formatAvgAge(home)) +
+      '</span><span class="tm-lv-sum-sep">vs</span><span class="tm-lv-sum-a" title="' +
+      escHtml(ageTip(away, names.away)) +
+      '">' +
+      escHtml(formatAvgAge(away)) +
+      '</span></span>'
+    );
+  }
+
   function frameStripInnerHtml(stats) {
     const names = teamNames();
     return (
       frameSumHtml('首发', 'starter', stats, names) +
       frameSumHtml('上场', 'onField', stats, names) +
+      ageLineHtml(stats, names) +
       '<span class="tm-lv-force-nat" role="button" tabindex="0" title="' +
       escHtml(FORCE_NAT_TITLE) +
       '">国家队</span>'
