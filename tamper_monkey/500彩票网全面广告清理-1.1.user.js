@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         500彩票网全面广告清理
 // @namespace    http://tampermonkey.net/
-// @version      1.9.92
+// @version      1.9.94
 // @run-at       document-idle
-// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场「主场/客场」下拉改精致按钮组+6/10场按钮组（场次两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时；腾讯云人机校验页自动勾选「确认你是真人」
+// @description  删除500彩票网分析页面中的特定广告图片行、轮播图和悬浮广告；数据分析(shuju)交战历史赛果条+盘路条、欧赔实时(相对初盘升降)、亚盘初盘/实时终盘、快捷筛选、主客相同两态(同联=home2仅本联赛；全联=home2全联赛；优先.zhu)、相同赛事再点恢复全部、复制盘口同切换、复制表格(当前可见行同格式)；联赛勾选后重填欧赔/备注/亚盘；点击勾选框旁文字等同点击勾选框；盘路堆叠段等高；近期战绩「同联赛」默认开启且保持10场+左侧赛果序列；主客场块置顶、近期战绩表/图下移；近期战绩/主客场表亚盘列开关(默认关，不影响交战史)；队名定宽省略悬停全称；目标队主场胜左边框/客场胜右边框；主客场「主场/客场」下拉改精致按钮组+6/10场单按钮切换（场次两侧同步）；任一点击六表同联赛同步；交战列表头语义定位兼容登录多列；隐藏原生平均欧指/亚盘/盘路/大小/盘口列；交战史主客队名加宽；战绩表队名超长省略、亚盘定宽三列对齐不溢出；包含本场补齐本场行列格；澳门无亚盘时用马会(cid=122)补初盘/实时；腾讯云人机校验页自动勾选「确认你是真人」
 // @author       YourName
 // @match        https://odds.500.com/fenxi/*
 // @match        https://www.odds.500.com/fenxi/*
@@ -1878,7 +1878,7 @@
     }
 
     /** 放宽交战历史表格外层与 .M_content 的定宽，表格随可视区域变宽（为备注/盘口留空间） */
-    const DZ_NAME_STYLE_ID = 'tm500-dz-name-style-216';
+    const DZ_NAME_STYLE_ID = 'tm500-dz-name-style-217';
 
     /** 对阵列：战绩表主/客约6.5字超长省略（默认表与亚盘列模式都生效）；交战历史约9字 */
     function injectDzTeamNameStyle() {
@@ -1890,7 +1890,7 @@
             'tm500-dz-name-style-209', 'tm500-dz-name-style-210',
             'tm500-dz-name-style-211', 'tm500-dz-name-style-212',
             'tm500-dz-name-style-213', 'tm500-dz-name-style-214',
-            'tm500-dz-name-style-215'
+            'tm500-dz-name-style-215', 'tm500-dz-name-style-216'
         ];
         legacyIds.forEach(function(id) {
             const el = document.getElementById(id);
@@ -2027,7 +2027,10 @@
             'width:auto!important;min-width:0!important;max-width:none!important;' +
             'display:inline-flex!important;' +
             '}' +
-            '.tm500-zj2-limit-wrap .tm500-zj2-limit,' +
+            '.tm500-zj2-limit-wrap .tm500-zj2-limit{' +
+            'width:auto!important;min-width:2.6em!important;max-width:none!important;' +
+            'display:inline-block!important;padding:4px 8px!important;font-size:12px!important;' +
+            '}' +
             '.tm500-zj2-ha-wrap .tm500-zj2-ha{' +
             'width:auto!important;min-width:0!important;max-width:none!important;' +
             'display:inline-block!important;padding:1px 5px!important;' +
@@ -4661,7 +4664,7 @@
         }, 300);
     }
 
-    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-208';
+    const ZJ_SL_STYLE_ID = 'tm500-zj-same-league-style-210';
 
     /** 近期战绩三组：team_zhanji_* / getZhanji + zj0_；team_zhanji1_* / getZhanji1 + zj1_；team_zhanji2_* / getZhanji2 + zj2_（主客场：主场/客场按钮组 + 6/10 场按钮组） */
     const ZHANJI_SAME_LEAGUE_PANELS = [
@@ -4695,6 +4698,10 @@
         if (legacy206) legacy206.remove();
         const legacy207 = document.getElementById('tm500-zj-same-league-style-207');
         if (legacy207) legacy207.remove();
+        const legacy208 = document.getElementById('tm500-zj-same-league-style-208');
+        if (legacy208) legacy208.remove();
+        const legacy209 = document.getElementById('tm500-zj-same-league-style-209');
+        if (legacy209) legacy209.remove();
         if (document.getElementById(ZJ_SL_STYLE_ID)) return;
         const s = document.createElement('style');
         s.id = ZJ_SL_STYLE_ID;
@@ -4781,18 +4788,14 @@
             '.tm500-zj-yp-mode.tm500-zj-yp-on:hover{' +
             'background:linear-gradient(180deg,#ffdb80 0%,#f0c24a 100%);' +
             '}' +
-            /* 主客场：主场/客场 + 场次 精致小巧分段按钮组 */
-            '.tm500-zj2-limit-wrap,' +
+            /* 主客场：主场/客场分段按钮组 */
             '.tm500-zj2-ha-wrap{' +
             'display:inline-flex!important;align-items:stretch;flex-shrink:0;' +
+            'margin-left:4px!important;margin-right:2px!important;' +
+            'justify-content:flex-start!important;' +
             'border-radius:3px;overflow:hidden;' +
             'box-shadow:0 1px 2px rgba(0,0,0,.08);' +
             '}' +
-            '.tm500-zj2-ha-wrap{' +
-            'margin-left:4px!important;margin-right:2px!important;' +
-            'justify-content:flex-start!important;' +
-            '}' +
-            '.tm500-zj2-limit,' +
             '.tm500-zj2-ha{' +
             'box-sizing:border-box;min-width:0!important;width:auto!important;max-width:none!important;' +
             'margin:0;padding:1px 5px!important;font-size:10px;line-height:1.25;' +
@@ -4801,21 +4804,46 @@
             'color:#4a6478;background:linear-gradient(180deg,#f4f8fb 0%,#e8f0f6 100%);' +
             'transition:color .15s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;' +
             '}' +
-            '.tm500-zj2-limit:last-child,' +
             '.tm500-zj2-ha:last-child{border-right-width:1px;}' +
-            '.tm500-zj2-limit:hover:not(.tm500-zj2-lim-on),' +
             '.tm500-zj2-ha:hover:not(.tm500-zj2-ha-on){' +
             'color:#2f4a60;background:linear-gradient(180deg,#f8fbfe 0%,#eef5fa 100%);' +
             '}' +
-            '.tm500-zj2-limit.tm500-zj2-lim-on,' +
             '.tm500-zj2-ha.tm500-zj2-ha-on{' +
             'color:#fff;font-weight:600;border-color:#5b8fbf;' +
             'background:linear-gradient(180deg,#7eb3e0 0%,#5a94c8 100%);' +
             'box-shadow:inset 0 1px 0 rgba(255,255,255,.28);' +
             'z-index:1;' +
             '}' +
-            '.tm500-zj2-limit.tm500-zj2-lim-on + .tm500-zj2-limit,' +
             '.tm500-zj2-ha.tm500-zj2-ha-on + .tm500-zj2-ha{border-left-color:#5b8fbf;}' +
+            /* 主客场场次：单按钮切换（6场 ↔ 10场），尺寸对齐同联赛/亚盘 */
+            '.tm500-zj2-limit-wrap{' +
+            'display:inline-flex!important;align-items:center;flex-shrink:0;' +
+            'margin:0;justify-content:flex-end;' +
+            '}' +
+            '.tm500-zj2-limit{' +
+            'box-sizing:border-box;min-width:2.6em;width:auto!important;max-width:none!important;' +
+            'margin:0;padding:4px 8px!important;font-size:12px;line-height:1.35;' +
+            'letter-spacing:0;font-weight:400;white-space:nowrap;cursor:pointer;text-align:center;' +
+            'border:none;border-radius:4px;' +
+            'color:#3a5a78;' +
+            'background:linear-gradient(180deg,#d4e8f6 0%,#bddcf0 100%);' +
+            'box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(0,0,0,.08);' +
+            'transition:opacity .18s ease,box-shadow .18s ease,filter .18s ease,background .18s ease;' +
+            'opacity:.72;filter:saturate(.68) brightness(.98);' +
+            '}' +
+            '.tm500-zj2-limit:hover:not(:disabled):not(.tm500-zj2-lim-on){' +
+            'background:linear-gradient(180deg,#deeff9 0%,#cae4f5 100%);' +
+            '}' +
+            '.tm500-zj2-limit.tm500-zj2-lim-on{' +
+            'opacity:1;filter:saturate(1) brightness(1);font-weight:600;' +
+            'color:#142a3d;' +
+            'background:linear-gradient(180deg,#9bc5eb 0%,#6ba6d8 100%);' +
+            'box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(0,0,0,.08),' +
+            '0 4px 14px rgba(48,110,168,.28);' +
+            '}' +
+            '.tm500-zj2-limit.tm500-zj2-lim-on:hover{' +
+            'background:linear-gradient(180deg,#a8cef0 0%,#78b2e0 100%);' +
+            '}' +
             '.tm500-zj2-limit:disabled,' +
             '.tm500-zj2-limit.tm500-zj2-lim-disabled{' +
             'opacity:.45;cursor:default;pointer-events:none;' +
@@ -5157,46 +5185,43 @@
             : applyZhanji2OverflowMarks(teamRoot);
         const expanded = teamRoot.getAttribute('data-tm500-zj2-exp') === '1';
         const canExpand = n > ZJ2_COLLAPSE_DEFAULT;
-        const wraps = teamRoot.querySelectorAll('.tm500-zj-sl-right .tm500-zj2-limit-wrap');
-        wraps.forEach(function(wrap) {
-            // 不足 6 场以上时仍显示按钮组，但禁用 10 场
-            wrap.style.display = '';
-            wrap.querySelectorAll('button.tm500-zj2-limit').forEach(function(btn) {
-                const lim = parseInt(btn.getAttribute('data-zj2-limit'), 10);
-                const on = expanded
-                    ? lim === ZJ2_COLLAPSE_EXPANDED
-                    : lim === ZJ2_COLLAPSE_DEFAULT;
-                if (on) {
-                    btn.classList.add('tm500-zj2-lim-on');
-                    btn.setAttribute('aria-pressed', 'true');
-                } else {
-                    btn.classList.remove('tm500-zj2-lim-on');
-                    btn.setAttribute('aria-pressed', 'false');
-                }
-                if (lim === ZJ2_COLLAPSE_EXPANDED && !canExpand) {
-                    btn.disabled = true;
-                    btn.classList.add('tm500-zj2-lim-disabled');
-                    btn.setAttribute('title', '可见场次不足' + ZJ2_COLLAPSE_EXPANDED + '场');
-                } else {
-                    btn.disabled = false;
-                    btn.classList.remove('tm500-zj2-lim-disabled');
-                    btn.setAttribute('title', '显示近' + lim + '场（主客两侧同步）');
-                }
-            });
+        const curLim = expanded ? ZJ2_COLLAPSE_EXPANDED : ZJ2_COLLAPSE_DEFAULT;
+        const nextLim = expanded ? ZJ2_COLLAPSE_DEFAULT : ZJ2_COLLAPSE_EXPANDED;
+        teamRoot.querySelectorAll('.tm500-zj-sl-right .tm500-zj2-limit-wrap button.tm500-zj2-limit').forEach(function(btn) {
+            btn.style.display = '';
+            btn.textContent = curLim + '场';
+            btn.setAttribute('data-zj2-limit', String(curLim));
+            if (expanded) {
+                btn.classList.add('tm500-zj2-lim-on');
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btn.classList.remove('tm500-zj2-lim-on');
+                btn.setAttribute('aria-pressed', 'false');
+            }
+            // 当前 6 场且不足可展开时禁用切换
+            if (!expanded && !canExpand) {
+                btn.disabled = true;
+                btn.classList.add('tm500-zj2-lim-disabled');
+                btn.setAttribute('title', '可见场次不足' + ZJ2_COLLAPSE_EXPANDED + '场');
+            } else {
+                btn.disabled = false;
+                btn.classList.remove('tm500-zj2-lim-disabled');
+                btn.setAttribute('title',
+                    '切换为近' + nextLim + '场（主客两侧同步）');
+            }
         });
     }
 
-    function setZhanji2Limit(limit, teamRoot) {
-        const lim = parseInt(limit, 10);
-        if (lim !== ZJ2_COLLAPSE_DEFAULT && lim !== ZJ2_COLLAPSE_EXPANDED) return;
+    function toggleZhanji2Limit(teamRoot) {
         const roots = ['team_zhanji2_0', 'team_zhanji2_1'].map(function(tid) {
             return document.getElementById(tid);
         }).filter(Boolean);
         if (!roots.length) return;
-        const nextOn = lim === ZJ2_COLLAPSE_EXPANDED;
-        // 点 10 场但当前侧不足时，不强制展开
-        if (nextOn && teamRoot) {
-            const n = applyZhanji2OverflowMarks(teamRoot);
+        const cur = teamRoot && roots.indexOf(teamRoot) >= 0 ? teamRoot : roots[0];
+        const expanded = cur.getAttribute('data-tm500-zj2-exp') === '1';
+        const nextOn = !expanded;
+        if (nextOn) {
+            const n = applyZhanji2OverflowMarks(cur);
             if (n <= ZJ2_COLLAPSE_DEFAULT) return;
         }
         roots.forEach(function(root) {
@@ -5215,7 +5240,7 @@
             e.stopPropagation();
             if (btn.disabled) return;
             const root = btn.closest('[id^="team_zhanji2_"]');
-            setZhanji2Limit(btn.getAttribute('data-zj2-limit'), root);
+            toggleZhanji2Limit(root);
         });
     }
 
@@ -5223,23 +5248,16 @@
         const wrap = document.createElement('span');
         wrap.className = 'tm500-zj2-limit-wrap';
         wrap.setAttribute('data-tm500-zj2-lim-btn', '1');
-        wrap.setAttribute('role', 'group');
-        wrap.setAttribute('aria-label', '主客场显示场次');
-        [
-            { lim: ZJ2_COLLAPSE_DEFAULT, label: '6场' },
-            { lim: ZJ2_COLLAPSE_EXPANDED, label: '10场' }
-        ].forEach(function(opt) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'tm500-zj2-limit';
-            btn.textContent = opt.label;
-            btn.setAttribute('data-zj2-limit', String(opt.lim));
-            btn.setAttribute('aria-pressed', opt.lim === ZJ2_COLLAPSE_DEFAULT ? 'true' : 'false');
-            btn.setAttribute('title', '显示近' + opt.lim + '场（主客两侧同步）');
-            if (opt.lim === ZJ2_COLLAPSE_DEFAULT) btn.classList.add('tm500-zj2-lim-on');
-            bindZhanji2LimitClick(btn);
-            wrap.appendChild(btn);
-        });
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tm500-zj2-limit';
+        btn.textContent = ZJ2_COLLAPSE_DEFAULT + '场';
+        btn.setAttribute('data-zj2-limit', String(ZJ2_COLLAPSE_DEFAULT));
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('title',
+            '切换为近' + ZJ2_COLLAPSE_EXPANDED + '场（主客两侧同步）');
+        bindZhanji2LimitClick(btn);
+        wrap.appendChild(btn);
         return wrap;
     }
 
@@ -5469,7 +5487,13 @@
                 box.style.display = 'none';
             }
         });
-        if (!cluster.querySelector('[data-tm500-zj2-lim-btn="1"]')) {
+        let limWrap = cluster.querySelector('[data-tm500-zj2-lim-btn="1"]');
+        // 旧版双按钮组升级为单按钮切换
+        if (limWrap && limWrap.querySelectorAll('button.tm500-zj2-limit').length !== 1) {
+            limWrap.remove();
+            limWrap = null;
+        }
+        if (!limWrap) {
             cluster.appendChild(createZhanji2LimitButtonWrap());
         }
         const n = applyZhanji2OverflowMarks(teamRoot);
