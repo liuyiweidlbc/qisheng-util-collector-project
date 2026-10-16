@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.65
+// @version      1.8.76
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
 // @connect      info.titan007.com
+// @connect      live.titan007.com
 // ==/UserScript==
 
 (function () {
@@ -18,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.65';
+  const SCRIPT_VERSION = '1.8.76';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -28,8 +29,8 @@
   const BALL_ICON = '⚽';
   const PITCH_SUBS_ICON =
     '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-    '<path d="M4 8h12.2M13.2 5.1L16.6 8l-3.4 2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
-    '<path d="M20 16H7.8M10.8 13.1L7.4 16l3.4 2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
+    '<path d="M8 19V7.2M5.1 10.1L8 6.6l2.9 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
+    '<path d="M16 5v11.8M13.1 13.9L16 17.4l2.9-3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
     '</svg>';
   const NAT_ICON_SVG =
     '<svg viewBox="0 0 24 24" aria-hidden="true">' +
@@ -1029,6 +1030,934 @@
       });
     }
     syncPitchSubsToggle();
+  }
+
+  const CMP_ICON = '首';
+  let cmpReq = 0;
+  let cmpPack = null;
+  let cmpSelected = null;
+  const cmpLineupCache = {};
+
+  let cmpScrollLock = null;
+
+  function lockCmpPage() {
+    if (cmpScrollLock) return;
+    const root = document.documentElement;
+    cmpScrollLock = {
+      body: document.body.style.overflow,
+      root: root.style.overflow,
+    };
+    document.body.style.overflow = 'hidden';
+    root.style.overflow = 'hidden';
+  }
+
+  function unlockCmpPage() {
+    if (!cmpScrollLock) return;
+    document.body.style.overflow = cmpScrollLock.body;
+    document.documentElement.style.overflow = cmpScrollLock.root;
+    cmpScrollLock = null;
+  }
+
+  let cmpChrome = null;
+
+  function hideCmpChrome() {
+    if (cmpChrome) return;
+    const quick = document.getElementById(QUICK_PANEL_ID);
+    const panel = document.getElementById(PANEL_ID);
+    cmpChrome = {
+      quickDisplay: quick ? quick.style.display : '',
+      panelDisplay: panel ? panel.style.display : '',
+    };
+    if (quick) quick.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+  }
+
+  function restoreCmpChrome() {
+    if (!cmpChrome) return;
+    const quick = document.getElementById(QUICK_PANEL_ID);
+    const panel = document.getElementById(PANEL_ID);
+    if (quick) quick.style.display = cmpChrome.quickDisplay || '';
+    if (panel) panel.style.display = cmpChrome.panelDisplay || '';
+    cmpChrome = null;
+  }
+
+  function closeCmpModal() {
+    const modal = document.getElementById('tm-lv-cmp');
+    if (!modal || modal.hidden) return false;
+    modal.hidden = true;
+    unlockCmpPage();
+    restoreCmpChrome();
+    return true;
+  }
+
+  function sideLink(selectors) {
+    for (let i = 0; i < selectors.length; i++) {
+      const a = document.querySelector(selectors[i]);
+      if (a) return a;
+    }
+    return null;
+  }
+
+  function cmpTeamMeta(side) {
+    const a = sideLink(
+      side === 'home'
+        ? ['.homeN a[href*="Summary/"]', '#content .title .homeN a[href*="Summary/"]']
+        : ['.guestN a[href*="Summary/"]', '#content .title .guestN a[href*="Summary/"]']
+    );
+    const href = (a && a.getAttribute('href')) || '';
+    const idm = href.match(/\/Summary\/(\d+)\.html/i);
+    return {
+      id: idm ? idm[1] : '',
+      name: a ? String(a.textContent || '').replace(/\s+/g, '') : side === 'home' ? '主队' : '客队',
+    };
+  }
+
+  function cmpFormation(el) {
+    const text = String((el && el.textContent) || '').replace(/\s+/g, '');
+    const m = text.match(/(\d+(?:-\d+){1,6})/);
+    return m ? m[1] : '';
+  }
+
+  function cmpPlayerFromScope(scope) {
+    const a = scope.querySelector('.name a, a[href*="/player/"]');
+    const href = (a && a.getAttribute('href')) || '';
+    const idm = href.match(/\/player\/\d+\/(\d+)\.html/i);
+    const numEl = scope.querySelector('.num, .name i');
+    const name = a ? String(a.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    const imgEl = scope.querySelector('.headpic img');
+    let img = (imgEl && imgEl.getAttribute('src')) || '';
+    if (img.indexOf('//') === 0) img = 'https:' + img;
+    const blob = String(scope.textContent || '').replace(/\u00a0/g, ' ');
+    const vm = blob.match(/身价[：:]\s*(\d+(?:\.\d+)?)/);
+    return {
+      id: idm ? idm[1] : '',
+      name: name,
+      num: numEl ? String(numEl.textContent || '').replace(/\s+/g, '') : '',
+      img: img,
+      value: vm ? parseFloat(vm[1]) : null,
+      bday: birthdayFromText(blob),
+    };
+  }
+
+  function cmpPlayers(root, selector) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll(selector))
+      .map(cmpPlayerFromScope)
+      .filter(function (p) {
+        return p.id || p.name;
+      });
+  }
+
+  function currentCmpXi(side) {
+    const sel = '#matchBox2 .plays .' + (side === 'home' ? 'home' : 'guest') + ' .play';
+    return Array.from(document.querySelectorAll(sel)).map(function (playEl) {
+      const swapped =
+        playEl.dataset &&
+        playEl.dataset.tmLvOrig &&
+        String(playerId(playEl) || '') !== String(origPlayId(playEl) || '');
+      if (!swapped) return cmpPlayerFromScope(playEl);
+      const holder = document.createElement('div');
+      holder.innerHTML = playEl.dataset.tmLvOrig;
+      return cmpPlayerFromScope(holder);
+    }).filter(function (p) {
+      return p.id || p.name;
+    });
+  }
+
+  function currentCmpColumns(side) {
+    const root = document.querySelector('#matchBox2 .plays .' + (side === 'home' ? 'home' : 'guest'));
+    if (!root) return [];
+    return Array.from(root.children)
+      .filter(function (el) {
+        return el.classList && el.classList.contains('playBox');
+      })
+      .map(function (box) {
+        const top = parseFloat(box.style.top);
+        return {
+          top: isNaN(top) ? 0 : top,
+          players: Array.from(box.children)
+            .filter(function (el) {
+              return el.classList && el.classList.contains('play');
+            })
+            .map(function (playEl) {
+              const swapped =
+                playEl.dataset &&
+                playEl.dataset.tmLvOrig &&
+                String(playerId(playEl) || '') !== String(origPlayId(playEl) || '');
+              if (!swapped) return cmpPlayerFromScope(playEl);
+              const holder = document.createElement('div');
+              holder.innerHTML = playEl.dataset.tmLvOrig;
+              return cmpPlayerFromScope(holder);
+            })
+            .filter(function (p) {
+              return p.id || p.name;
+            }),
+        };
+      })
+      .filter(function (col) {
+        return col.players.length;
+      });
+  }
+
+  function currentCmpBench(side) {
+    const sel = '#matchBox2 .backupPlay2 .' + (side === 'home' ? 'home' : 'guest') + ' .play';
+    return Array.from(document.querySelectorAll(sel)).map(function (playEl) {
+      const swapped =
+        playEl.dataset &&
+        playEl.dataset.tmLvOrig &&
+        String(playerId(playEl) || '') !== String(origPlayId(playEl) || '');
+      if (!swapped) return cmpPlayerFromScope(playEl);
+      const holder = document.createElement('div');
+      holder.innerHTML = playEl.dataset.tmLvOrig;
+      return cmpPlayerFromScope(holder);
+    }).filter(function (p) {
+      return p.id || p.name;
+    });
+  }
+
+  function currentCmpHurt(side) {
+    const sel = '#matchBox2 .hurtPlay .' + (side === 'home' ? 'home' : 'guest') + ' .play';
+    return cmpPlayers(document, sel);
+  }
+
+  function currentCmpForm(side) {
+    return cmpFormation(document.querySelector(side === 'home' ? '.homeN' : '.guestN'));
+  }
+
+  function parseTeamCountJs(js) {
+    const start = String(js || '').indexOf('teamCount');
+    if (start < 0) throw new Error('没有读到赛程');
+    const lb = js.indexOf('[', start);
+    const next = js.indexOf('var teamHonor', lb);
+    let slice = (next > lb ? js.slice(lb, next) : js.slice(lb)).trim();
+    slice = slice.replace(/;\s*$/, '');
+    if (!slice || slice === 'null') return [];
+    const rows = new Function('return ' + slice)();
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  function recentVenueMatches(rows, teamId, venue) {
+    const asOf = matchAsOfDate();
+    const curId = String((pageWin && pageWin.scheduleID) || '');
+    const out = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 11) continue;
+      const id = String(row[0] || '');
+      if (!id || id === curId) continue;
+      const homeId = String(row[1] || '');
+      const awayId = String(row[2] || '');
+      if (venue === 'home' && homeId !== String(teamId)) continue;
+      if (venue === 'away' && awayId !== String(teamId)) continue;
+      const when = String(row[3] || '');
+      const at = new Date(when.replace(/-/g, '/'));
+      if (!isNaN(at.getTime()) && asOf && at.getTime() >= asOf.getTime()) continue;
+      const homeName = String(row[7] || '').split('^')[0];
+      const awayName = String(row[8] || '').split('^')[0];
+      const hs = row[9];
+      const awayScore = row[10];
+      const scored = hs !== '' && hs != null && awayScore !== '' && awayScore != null;
+      out.push({
+        id: id,
+        when: when,
+        league: String(row[5] || '').split('^')[0],
+        homeName: homeName,
+        awayName: awayName,
+        opponent: venue === 'home' ? awayName : homeName,
+        score: scored ? String(hs) + '-' + String(awayScore) : '',
+        venue: venue,
+      });
+      if (out.length >= 6) break;
+    }
+    return out;
+  }
+
+  function cmpColumns(doc, side) {
+    const root = doc.querySelector('#matchBox2 .plays .' + (side === 'home' ? 'home' : 'guest'));
+    if (!root) return [];
+    return Array.from(root.children)
+      .filter(function (el) {
+        return el.classList && el.classList.contains('playBox');
+      })
+      .map(function (box) {
+        const top = parseFloat(box.style.top);
+        return {
+          top: isNaN(top) ? 0 : top,
+          players: Array.from(box.children)
+            .filter(function (el) {
+              return el.classList && el.classList.contains('play');
+            })
+            .map(cmpPlayerFromScope)
+            .filter(function (p) {
+              return p.id || p.name;
+            }),
+        };
+      })
+      .filter(function (col) {
+        return col.players.length;
+      });
+  }
+
+  function parseDetailLineup(html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const home = cmpPlayers(doc, '#matchBox2 .plays .home .play');
+    const away = cmpPlayers(doc, '#matchBox2 .plays .guest .play');
+    let homeCols = cmpColumns(doc, 'home');
+    let awayCols = cmpColumns(doc, 'away');
+    if (!homeCols.length && home.length) homeCols = [{ top: 80, players: home }];
+    if (!awayCols.length && away.length) awayCols = [{ top: 80, players: away }];
+    return {
+      homeForm: cmpFormation(doc.querySelector('.homeN')),
+      awayForm: cmpFormation(doc.querySelector('.guestN')),
+      home: home,
+      away: away,
+      homeCols: homeCols,
+      awayCols: awayCols,
+      homeBench: cmpPlayers(doc, '#matchBox2 .backupPlay2 .home .play'),
+      awayBench: cmpPlayers(doc, '#matchBox2 .backupPlay2 .guest .play'),
+    };
+  }
+
+  function loadCmpLineup(id) {
+    if (cmpLineupCache[id] && cmpLineupCache[id].v === 2) return Promise.resolve(cmpLineupCache[id]);
+    return gmGetText('https://live.titan007.com/detail/' + id + 'cn.htm?lineup=1').then(function (html) {
+      const parsed = parseDetailLineup(html);
+      if (!parsed.home.length && !parsed.away.length) parsed.empty = true;
+      parsed.v = 2;
+      cmpLineupCache[id] = parsed;
+      return parsed;
+    });
+  }
+
+  function cmpPool(items, limit, worker) {
+    let cursor = 0;
+    function next() {
+      if (cursor >= items.length) return Promise.resolve();
+      const item = items[cursor++];
+      return Promise.resolve()
+        .then(function () {
+          return worker(item);
+        })
+        .then(next, next);
+    }
+    const jobs = [];
+    const n = Math.min(limit, items.length);
+    for (let i = 0; i < n; i++) jobs.push(next());
+    return Promise.all(jobs);
+  }
+
+  function cmpName(p) {
+    return (p.num ? p.num + ' ' : '') + (p.name || '');
+  }
+
+  function cmpCoreNeed(have) {
+    if (have >= 6) return 4;
+    if (have >= 4) return 3;
+    if (have >= 2) return have;
+    return 99;
+  }
+
+  function renderCmpCores(side) {
+    const modal = document.getElementById('tm-lv-cmp');
+    const box = modal && modal.querySelector('[data-side="' + side + '"] .tm-lv-cmp-core');
+    if (!box || !cmpPack) return;
+    const rows = cmpPack[side].rows;
+    const current = currentCmpXi(side);
+    const hurt = currentCmpHurt(side);
+    const curSet = {};
+    const hurtSet = {};
+    current.forEach(function (p) {
+      if (p.id) curSet[p.id] = 1;
+    });
+    hurt.forEach(function (p) {
+      if (p.id) hurtSet[p.id] = 1;
+    });
+    const count = {};
+    const meta = {};
+    let have = 0;
+    rows.forEach(function (row) {
+      const pack = cmpLineupCache[row.id];
+      const xi = pack && (row.venue === 'away' ? pack.away : pack.home);
+      if (!xi || !xi.length) return;
+      have += 1;
+      xi.forEach(function (p) {
+        if (!p.id) return;
+        count[p.id] = (count[p.id] || 0) + 1;
+        meta[p.id] = p;
+      });
+    });
+    const need = cmpCoreNeed(have);
+    const list = Object.keys(count)
+      .filter(function (id) {
+        return count[id] >= need && !curSet[id];
+      })
+      .map(function (id) {
+        return { player: meta[id], n: count[id], hurt: !!hurtSet[id] };
+      })
+      .sort(function (a, b) {
+        return b.n - a.n;
+      });
+    if (!have) {
+      box.textContent = '正在读取各场首发…';
+      return;
+    }
+    if (!list.length) {
+      box.textContent = '近' + have + '场里，没有常首发却缺席本场的人。';
+      return;
+    }
+    box.innerHTML =
+      '<b>常首发、本场没上</b>' +
+      list
+        .map(function (item) {
+          return (
+            '<span>' +
+            escHtml(cmpName(item.player)) +
+            ' ' +
+            item.n +
+            '/' +
+            have +
+            (item.hurt ? ' 伤停' : '') +
+            '</span>'
+          );
+        })
+        .join('');
+  }
+
+  function cmpIdSet(list) {
+    const set = {};
+    (list || []).forEach(function (p) {
+      if (p.id) set[p.id] = 1;
+    });
+    return set;
+  }
+
+  function cmpMetricText(p) {
+    const money = Number.isFinite(p.value) ? formatMoney(p.value, '万欧元') : '-';
+    const age = calcAge(p.bday, matchAsOfDate());
+    const ageText = Number.isFinite(age) ? age + '岁' : '-';
+    if (money === '-' && ageText === '-') return '';
+    return money + '/' + ageText;
+  }
+
+  function cmpPitchCard(p, mark) {
+    const img = p.img || PITCH_NOPHOTO;
+    const tag = mark.tag ? '<em>' + escHtml(mark.tag) + '</em>' : '';
+    return (
+      '<div class="tm-lv-cmp-pl ' +
+      mark.cls +
+      '" title="' +
+      escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
+      '"><i>' +
+      escHtml(p.num || '') +
+      '</i><div class="tm-lv-cmp-av"><img class="tm-lv-cmp-photo-img" alt="" src="' +
+      escHtml(img) +
+      '"></div><b>' +
+      escHtml(p.name || '') +
+      '</b><span>' +
+      escHtml(cmpMetricText(p)) +
+      '</span>' +
+      tag +
+      '</div>'
+    );
+  }
+
+  function cmpBenchCard(p, mark, side) {
+    const tag = mark.tag ? '<em>' + escHtml(mark.tag) + '</em>' : '';
+    return (
+      '<div class="tm-lv-cmp-bc tm-lv-cmp-bc-' +
+      side +
+      ' ' +
+      mark.cls +
+      '" title="' +
+      escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
+      '"><i>' +
+      escHtml(p.num || '') +
+      '</i><span><b>' +
+      escHtml(p.name || '') +
+      '</b>' +
+      tag +
+      '<small>' +
+      escHtml(cmpMetricText(p)) +
+      '</small></span></div>'
+    );
+  }
+
+  function cmpXiMark(p, curXi, hurt) {
+    if (p.id && curXi[p.id]) return { cls: 'keep', tag: '' };
+    if (p.id && hurt[p.id]) return { cls: 'hurt', tag: '伤停' };
+    return { cls: 'miss', tag: '没上' };
+  }
+
+  function cmpBenchMark(p, curXi, curBench, hurt) {
+    if (p.id && curXi[p.id]) return { cls: 'up', tag: '首发' };
+    if (p.id && hurt[p.id]) return { cls: 'hurt', tag: '伤停' };
+    if (p.id && curBench[p.id]) return { cls: 'keep', tag: '' };
+    return { cls: 'miss', tag: '没上' };
+  }
+
+  function renderCmpBoard() {
+    const modal = document.getElementById('tm-lv-cmp');
+    const board = modal && modal.querySelector('.tm-lv-cmp-board');
+    if (!board || !cmpPack) return;
+    const pickedBoth = cmpSelected && cmpSelected.home && cmpSelected.away;
+    if (!pickedBoth) {
+      board.innerHTML = '<p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p>';
+      return;
+    }
+    function sideBlock(side) {
+      const id = cmpSelected && cmpSelected[side];
+      if (!id) {
+        return {
+          cap: '<p class="tm-lv-cmp-empty">' + (side === 'home' ? '再选一场主队比赛' : '再选一场客队比赛') + '</p>',
+          pitch: '<div class="tm-lv-cmp-wait">未选</div>',
+          news: '',
+          bench: '',
+        };
+      }
+      const row = cmpPack[side].rows.filter(function (item) {
+        return item.id === id;
+      })[0];
+      const pack = cmpLineupCache[id];
+      const venue = row && row.venue === 'away' ? 'away' : 'home';
+      const pastForm = pack ? (venue === 'away' ? pack.awayForm : pack.homeForm) : '';
+      const curForm = currentCmpForm(side);
+      const formNote =
+        pastForm && curForm
+          ? pastForm === curForm
+            ? pastForm
+            : '变阵 本场' + curForm + ' / 那场' + pastForm
+          : pastForm || curForm || '';
+      const cap =
+        '<div class="tm-lv-cmp-cap"><b>' +
+        escHtml(cmpPack[side].name) +
+        '</b> ' +
+        escHtml(row ? row.when.slice(5, 16) : '') +
+        ' 对' +
+        escHtml(row ? row.opponent : '') +
+        ' ' +
+        (venue === 'home' ? '主场' : '客场') +
+        ' ' +
+        escHtml(row && row.score ? row.score : '') +
+        ' <span>' +
+        escHtml(formNote) +
+        '</span> <a href="https://live.titan007.com/detail/' +
+        id +
+        'cn.htm?lineup=1" target="_blank" rel="noreferrer">那场</a></div>';
+      if (!pack) {
+        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">正在读取阵容…</div>', news: '', bench: '' };
+      }
+      let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
+      cols = cols.slice();
+      if ((side === 'home' && venue === 'away') || (side === 'away' && venue === 'home')) cols.reverse();
+      const pastXi = (venue === 'away' ? pack.away : pack.home) || [];
+      const pastBench = (venue === 'away' ? pack.awayBench : pack.homeBench) || [];
+      if (!pastXi.length) {
+        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">这场没有首发</div>', news: '', bench: '' };
+      }
+      const curXi = currentCmpXi(side);
+      const curBench = currentCmpBench(side);
+      const hurt = currentCmpHurt(side);
+      const curXiSet = cmpIdSet(curXi);
+      const curBenchSet = cmpIdSet(curBench);
+      const hurtSet = cmpIdSet(hurt);
+      const pastSet = cmpIdSet(pastXi);
+      const n = cols.length || 1;
+      const colW = n <= 5 ? 100 : 500 / n;
+      const pitch = (cols || [])
+        .map(function (col, i) {
+          return (
+            '<div class="tm-lv-cmp-col" style="left:' +
+            i * colW +
+            'px;width:' +
+            colW +
+            'px;top:' +
+            Math.max(0, (480 - ((col.players || []).length * 95 - 15)) / 2) +
+            'px">' +
+            col.players
+              .map(function (player) {
+                return cmpPitchCard(player, cmpXiMark(player, curXiSet, hurtSet));
+              })
+              .join('') +
+            '</div>'
+          );
+        })
+        .join('');
+      const added = curXi.filter(function (player) {
+        return player.id && !pastSet[player.id];
+      });
+      const news = added.length
+        ? added
+            .map(function (player) {
+              return cmpBenchCard(player, { cls: 'new', tag: '新' }, side);
+            })
+            .join('')
+        : '';
+      const bench = pastBench.length
+        ? pastBench
+            .map(function (player) {
+              return cmpBenchCard(player, cmpBenchMark(player, curXiSet, curBenchSet, hurtSet), side);
+            })
+            .join('')
+        : '<span class="tm-lv-cmp-empty">那场没有替补</span>';
+      return { cap: cap, pitch: pitch, news: news, bench: bench };
+    }
+    const home = sideBlock('home');
+    const away = sideBlock('away');
+    const plain = { cls: 'keep', tag: '' };
+    function colsHtml(cols, renderPlayer) {
+      const n = (cols && cols.length) || 1;
+      const colW = n <= 5 ? 100 : 500 / n;
+      return (cols || [])
+        .map(function (col, i) {
+          return (
+            '<div class="tm-lv-cmp-col" style="left:' +
+            i * colW +
+            'px;width:' +
+            colW +
+            'px;top:' +
+            Math.max(0, (480 - ((col.players || []).length * 95 - 15)) / 2) +
+            'px">' +
+            (col.players || []).map(renderPlayer).join('') +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+    function fieldHtml(homeInner, awayInner) {
+      return (
+        '<div class="tm-lv-cmp-scale"><div class="tm-lv-cmp-field"><div class="tm-lv-cmp-half tm-lv-cmp-half-home">' +
+        homeInner +
+        '</div><div class="tm-lv-cmp-half tm-lv-cmp-half-away">' +
+        awayInner +
+        '</div></div></div>'
+      );
+    }
+    function benchHtml(homeCards, awayCards) {
+      return (
+        '<div class="tm-lv-cmp-subs"><div class="tm-lv-cmp-subs-side">' +
+        homeCards +
+        '</div><div class="tm-lv-cmp-subs-mid">替补</div><div class="tm-lv-cmp-subs-side">' +
+        awayCards +
+        '</div></div>'
+      );
+    }
+    const curHomeCols = currentCmpColumns('home');
+    const curAwayCols = currentCmpColumns('away');
+    const curField = fieldHtml(
+      colsHtml(curHomeCols, function (player) {
+        return cmpPitchCard(player, plain);
+      }),
+      colsHtml(curAwayCols, function (player) {
+        return cmpPitchCard(player, plain);
+      })
+    );
+    const curBench = benchHtml(
+      currentCmpBench('home')
+        .map(function (player) {
+          return cmpBenchCard(player, plain, 'home');
+        })
+        .join(''),
+      currentCmpBench('away')
+        .map(function (player) {
+          return cmpBenchCard(player, plain, 'away');
+        })
+        .join('')
+    );
+    const curCap =
+      '<div class="tm-lv-cmp-cap"><b>本场</b> ' +
+      escHtml(cmpPack.home.name) +
+      ' ' +
+      escHtml(currentCmpForm('home') || '') +
+      ' · ' +
+      escHtml(cmpPack.away.name) +
+      ' ' +
+      escHtml(currentCmpForm('away') || '') +
+      '</div>';
+    board.innerHTML =
+      '<div class="tm-lv-cmp-legend"><span><i class="keep"></i>本场仍在</span><span><i class="miss"></i>本场没上</span><span><i class="hurt"></i>伤停</span><span><i class="up"></i>替补升首发</span><span><i class="new"></i>本场新首发</span></div>' +
+      '<div class="tm-lv-cmp-pair">' +
+      '<section class="tm-lv-cmp-pane"><h4>本场</h4><div class="tm-lv-cmp-capslot">' +
+      curCap +
+      '</div>' +
+      curField +
+      curBench +
+      '</section>' +
+      '<section class="tm-lv-cmp-pane"><h4>拼成</h4><div class="tm-lv-cmp-capslot"><div class="tm-lv-cmp-caps">' +
+      home.cap +
+      away.cap +
+      '</div></div>' +
+      fieldHtml(home.pitch, away.pitch) +
+      benchHtml(home.bench, away.bench) +
+      '<div class="tm-lv-cmp-fresh"><div>' +
+      (home.news ? '<b>本场新首发</b>' + home.news : '') +
+      '</div><div>' +
+      (away.news ? '<b>本场新首发</b>' + away.news : '') +
+      '</div></div>' +
+      '</section></div>';
+    fitCmpField(board);
+  }
+
+  function fitCmpField(board) {
+    if (!board) return;
+    board.querySelectorAll('.tm-lv-cmp-scale').forEach(function (wrap) {
+      const field = wrap.querySelector('.tm-lv-cmp-field');
+      if (!field) return;
+      const w = wrap.clientWidth;
+      if (!w) return;
+      const s = w / 1040;
+      field.style.transform = 'scale(' + s + ')';
+      wrap.style.height = Math.ceil(510 * s) + 'px';
+    });
+  }
+
+  function renderCmpLists() {
+    const modal = document.getElementById('tm-lv-cmp');
+    if (!modal || !cmpPack) return;
+    ['home', 'away'].forEach(function (side) {
+      const sec = modal.querySelector('[data-side="' + side + '"]');
+      if (!sec) return;
+      const info = cmpPack[side];
+      const venueName = info.venue === 'away' ? '客场' : '主场';
+      sec.querySelector('h3').textContent = info.name + ' · 近6个' + venueName;
+      sec.querySelectorAll('.tm-lv-cmp-venue-btn').forEach(function (btn) {
+        btn.classList.toggle('tm-lv-cmp-on', btn.getAttribute('data-venue') === info.venue);
+      });
+      const list = sec.querySelector('.tm-lv-cmp-list');
+      if (!info.rows.length) {
+        list.innerHTML = '<p class="tm-lv-cmp-empty">没有更早的' + venueName + '。</p>';
+        const core = sec.querySelector('.tm-lv-cmp-core');
+        if (core) core.textContent = '';
+        return;
+      }
+      list.innerHTML = info.rows
+        .map(function (row) {
+          const pack = cmpLineupCache[row.id];
+          const form = pack ? (row.venue === 'away' ? pack.awayForm : pack.homeForm) : '';
+          const cur = currentCmpForm(side);
+          const changed = form && cur && form !== cur;
+          return (
+            '<button type="button" class="tm-lv-cmp-row' +
+            (cmpSelected && cmpSelected[side] === row.id ? ' tm-lv-cmp-on' : '') +
+            '" data-id="' +
+            row.id +
+            '" data-side="' +
+            side +
+            '"><span>' +
+            escHtml(row.when.slice(5, 16)) +
+            ' ' +
+            escHtml(row.league) +
+            '</span><b>' +
+            escHtml(row.opponent) +
+            '</b><span>' +
+            escHtml(row.score || '未完') +
+            (form ? ' ' + escHtml(form) : '') +
+            (changed ? ' 变阵' : '') +
+            '</span></button>'
+          );
+        })
+        .join('');
+      renderCmpCores(side);
+    });
+    renderCmpBoard();
+  }
+
+  function prefetchCmpRows(rows) {
+    const req = cmpReq;
+    return cmpPool(rows, 3, function (row) {
+      if (req !== cmpReq) return null;
+      return loadCmpLineup(row.id).then(function () {
+        if (req !== cmpReq) return;
+        renderCmpLists();
+      });
+    });
+  }
+
+  function setCmpVenue(side, venue) {
+    const info = cmpPack && cmpPack[side];
+    if (!info || (venue !== 'home' && venue !== 'away') || info.venue === venue) return;
+    info.venue = venue;
+    info.rows = recentVenueMatches(info.all, info.teamId, venue);
+    if (cmpSelected && cmpSelected[side]) {
+      const still = info.rows.some(function (row) {
+        return row.id === cmpSelected[side];
+      });
+      if (!still) cmpSelected[side] = null;
+    }
+    renderCmpLists();
+    prefetchCmpRows(info.rows);
+  }
+
+  function selectCmpRow(side, id) {
+    const modal = document.getElementById('tm-lv-cmp');
+    if (!modal || !cmpPack) return;
+    if (!cmpSelected) cmpSelected = { home: null, away: null };
+    cmpSelected[side] = cmpSelected[side] === id ? null : id;
+    renderCmpLists();
+    const selectedId = cmpSelected[side];
+    if (!selectedId || cmpLineupCache[selectedId]) return;
+    loadCmpLineup(selectedId)
+      .then(function () {
+        if (!document.getElementById('tm-lv-cmp') || document.getElementById('tm-lv-cmp').hidden) return;
+        renderCmpLists();
+      })
+      .catch(function () {
+        const board = modal.querySelector('.tm-lv-cmp-board');
+        if (board) board.innerHTML = '<p class="tm-lv-cmp-empty">读取那场阵容失败。</p>';
+      });
+  }
+
+  function ensureCmpModal() {
+    let modal = document.getElementById('tm-lv-cmp');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'tm-lv-cmp';
+    modal.className = 'tm-lv-cmp';
+    modal.hidden = true;
+    modal.innerHTML =
+      '<div class="tm-lv-cmp-mask"></div>' +
+      '<div class="tm-lv-cmp-box" role="dialog" aria-label="近6场首发对比">' +
+      '<header><b>近6场首发对比</b><span>左边是本场，右边是选中比赛拼成的阵容。弹窗内可滚动。</span><button type="button" class="tm-lv-cmp-x">关闭</button></header>' +
+      '<div class="tm-lv-cmp-board"><p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p></div>' +
+      '<div class="tm-lv-cmp-cols">' +
+      '<section data-side="home"><div class="tm-lv-cmp-head"><h3>主队</h3><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn" data-venue="away">客场</button></div></div><div class="tm-lv-cmp-core"></div><div class="tm-lv-cmp-list"></div></section>' +
+      '<section data-side="away"><div class="tm-lv-cmp-head"><h3>客队</h3><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn" data-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-venue="away">客场</button></div></div><div class="tm-lv-cmp-core"></div><div class="tm-lv-cmp-list"></div></section>' +
+      '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    modal.addEventListener(
+      'wheel',
+      function (e) {
+        const box = modal.querySelector('.tm-lv-cmp-box');
+        if (box && box.contains(e.target)) return;
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+    modal.querySelector('.tm-lv-cmp-mask').addEventListener('click', closeCmpModal);
+    modal.querySelector('.tm-lv-cmp-x').addEventListener('click', closeCmpModal);
+    modal.addEventListener(
+      'error',
+      function (e) {
+        const img = e.target;
+        if (!img || !img.classList || !img.classList.contains('tm-lv-cmp-photo-img')) return;
+        if (img.getAttribute('src') === PITCH_NOPHOTO) return;
+        img.src = PITCH_NOPHOTO;
+      },
+      true
+    );
+    modal.addEventListener('click', function (e) {
+      const venueBtn = e.target.closest && e.target.closest('.tm-lv-cmp-venue-btn');
+      if (venueBtn) {
+        const sec = venueBtn.closest('[data-side]');
+        if (sec) setCmpVenue(sec.getAttribute('data-side'), venueBtn.getAttribute('data-venue'));
+        return;
+      }
+      const btn = e.target.closest && e.target.closest('.tm-lv-cmp-row');
+      if (!btn) return;
+      selectCmpRow(btn.getAttribute('data-side'), btn.getAttribute('data-id'));
+    });
+    modal.addEventListener('contextmenu', function (e) {
+      const btn = e.target.closest && e.target.closest('.tm-lv-cmp-row');
+      if (!btn) return;
+      const id = btn.getAttribute('data-id');
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.open('https://live.titan007.com/detail/' + id + 'cn.htm?lineup=1', '_blank', 'noopener');
+    });
+    return modal;
+  }
+
+  function openCmpModal() {
+    const modal = ensureCmpModal();
+    modal.hidden = false;
+    lockCmpPage();
+    hideCmpChrome();
+    const board = modal.querySelector('.tm-lv-cmp-board');
+    if (board) board.innerHTML = '<p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p>';
+    modal.querySelectorAll('.tm-lv-cmp-list').forEach(function (el) {
+      el.innerHTML = '<p class="tm-lv-cmp-empty">正在读取赛程…</p>';
+    });
+    modal.querySelectorAll('.tm-lv-cmp-core').forEach(function (el) {
+      el.textContent = '';
+    });
+    const home = cmpTeamMeta('home');
+    const away = cmpTeamMeta('away');
+    if (!home.id || !away.id) {
+      modal.querySelector('[data-side="home"] .tm-lv-cmp-list').innerHTML =
+        '<p class="tm-lv-cmp-empty">未能识别两队。</p>';
+      return;
+    }
+    cmpSelected = { home: null, away: null };
+    const req = ++cmpReq;
+    Promise.all([
+      gmGetText('https://info.titan007.com/jsData/teamInfo/teamDetail/tdl' + home.id + '.js?version=' + dataJsVersion(0)),
+      gmGetText('https://info.titan007.com/jsData/teamInfo/teamDetail/tdl' + away.id + '.js?version=' + dataJsVersion(0)),
+    ])
+      .then(function (pair) {
+        if (req !== cmpReq) return;
+        const homeRows = parseTeamCountJs(pair[0]);
+        const awayRows = parseTeamCountJs(pair[1]);
+        cmpPack = {
+          home: {
+            name: home.name,
+            teamId: home.id,
+            all: homeRows,
+            venue: 'home',
+            rows: recentVenueMatches(homeRows, home.id, 'home'),
+          },
+          away: {
+            name: away.name,
+            teamId: away.id,
+            all: awayRows,
+            venue: 'away',
+            rows: recentVenueMatches(awayRows, away.id, 'away'),
+          },
+        };
+        renderCmpLists();
+        return prefetchCmpRows(cmpPack.home.rows.concat(cmpPack.away.rows));
+      })
+      .catch(function (err) {
+        if (req !== cmpReq) return;
+        const msg = (err && err.message) || '读取赛程失败';
+        modal.querySelectorAll('.tm-lv-cmp-list').forEach(function (el) {
+          el.innerHTML = '<p class="tm-lv-cmp-empty">' + escHtml(msg) + '</p>';
+        });
+      });
+  }
+
+  function toggleCmpModal(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const modal = document.getElementById('tm-lv-cmp');
+    if (modal && !modal.hidden) {
+      closeCmpModal();
+      return;
+    }
+    openCmpModal();
+  }
+
+  function ensureCmpToggle() {
+    const title = lineupTitleEl();
+    if (!title) return;
+    let btn = title.querySelector('.tm-lv-cmp-btn');
+    if (!btn) {
+      btn = document.createElement('span');
+      btn.className = 'tm-lv-cmp-btn';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
+      btn.setAttribute('aria-label', '近6场首发对比');
+      btn.textContent = CMP_ICON;
+      btn.title = '近6场首发、替补对比，可切换主客场';
+      title.appendChild(btn);
+      btn.addEventListener('click', toggleCmpModal);
+      btn.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        toggleCmpModal(e);
+      });
+    }
   }
 
   function shirtNo(playEl) {
@@ -2486,6 +3415,11 @@
       function (e) {
         if (e.key !== 'Escape' && e.key !== 'Esc') return;
         if (e.repeat) return;
+        if (closeCmpModal()) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         const el = e.target;
         const tag = el && el.tagName;
         if (
@@ -4102,7 +5036,187 @@
       'max-width: 64px;' +
       'overflow: hidden;' +
       'text-overflow: ellipsis;' +
-      '}';
+      '}' +
+      '.tm-lv-cmp-btn {' +
+      'position: absolute;' +
+      'left: calc(50% + 124px);' +
+      'top: 50%;' +
+      'transform: translateY(-50%);' +
+      'z-index: 8;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'justify-content: center;' +
+      'width: 22px;' +
+      'height: 22px;' +
+      'border: 1px solid #cbd5e1;' +
+      'border-radius: 6px;' +
+      'background: #fff;' +
+      'color: #334155;' +
+      'cursor: pointer;' +
+      'font-size: 12px;' +
+      'font-weight: 700;' +
+      'line-height: 22px;' +
+      '}' +
+      '.tm-lv-cmp {' +
+      'position: fixed;' +
+      'inset: 0;' +
+      'z-index: 1000002;' +
+      'font-size: 13px;' +
+      'color: #1e293b;' +
+      '}' +
+      '.tm-lv-cmp[hidden] { display: none !important; }' +
+      '.tm-lv-cmp-mask { position: absolute; inset: 0; background: rgba(15,23,42,.45); }' +
+      '.tm-lv-cmp-box {' +
+      'position: relative;' +
+      'z-index: 1;' +
+      'width: min(1680px, calc(100vw - 24px));' +
+      'height: calc(100vh - 24px);' +
+      'max-height: calc(100vh - 24px);' +
+      'margin: 12px auto;' +
+      'background: #fff;' +
+      'border-radius: 12px;' +
+      'box-shadow: 0 16px 50px rgba(15,23,42,.28);' +
+      'overflow-x: hidden;' +
+      'overflow-y: auto;' +
+      'overscroll-behavior: contain;' +
+      '}' +
+      '.tm-lv-cmp-box header {' +
+      'position: sticky;' +
+      'top: 0;' +
+      'z-index: 3;' +
+      'display: flex;' +
+      'align-items: center;' +
+      'gap: 10px;' +
+      'padding: 12px 14px;' +
+      'border-bottom: 1px solid #e2e8f0;' +
+      'background: #fff;' +
+      '}' +
+      '.tm-lv-cmp-box header b { font-size: 15px; }' +
+      '.tm-lv-cmp-box header span { flex: 1; color: #64748b; font-size: 12px; }' +
+      '.tm-lv-cmp-x {' +
+      'border: 0;' +
+      'background: #f1f5f9;' +
+      'border-radius: 6px;' +
+      'padding: 4px 8px;' +
+      'cursor: pointer;' +
+      '}' +
+      '.tm-lv-cmp-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }' +
+      '.tm-lv-cmp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }' +
+      '.tm-lv-cmp-cols h3 { margin: 0; font-size: 14px; }' +
+      '.tm-lv-cmp-venue { display: flex; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }' +
+      '.tm-lv-cmp-venue-btn { border: 0; background: #fff; color: #475569; padding: 2px 10px; font-size: 12px; cursor: pointer; }' +
+      '.tm-lv-cmp-venue-btn.tm-lv-cmp-on { background: #0369a1; color: #fff; }' +
+      '.tm-lv-cmp-core { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; color: #9a3412; font-size: 12px; }' +
+      '.tm-lv-cmp-core b { width: 100%; color: #9a3412; }' +
+      '.tm-lv-cmp-core span { background: #fff7ed; border-radius: 4px; padding: 1px 6px; }' +
+      '.tm-lv-cmp-row {' +
+      'display: grid;' +
+      'grid-template-columns: max-content max-content max-content;' +
+      'justify-content: start;' +
+      'align-items: center;' +
+      'gap: 8px;' +
+      'width: 100%;' +
+      'margin: 0 0 4px;' +
+      'padding: 6px 8px;' +
+      'border: 1px solid #e2e8f0;' +
+      'border-radius: 8px;' +
+      'background: #fff;' +
+      'text-align: left;' +
+      'cursor: pointer;' +
+      'color: #1e293b;' +
+      'font-size: 12px;' +
+      '}' +
+      '.tm-lv-cmp-row > span,' +
+      '.tm-lv-cmp-row > b {' +
+      'white-space: nowrap;' +
+      'word-break: keep-all;' +
+      'width: auto;' +
+      'max-width: none;' +
+      '}' +
+      '.tm-lv-cmp-row.tm-lv-cmp-on { border-color: #0369a1; background: #f0f9ff; }' +
+      '.tm-lv-cmp-diff { border-top: 1px solid #e2e8f0; padding: 10px 14px 14px; overflow: auto; background: #f8fafc; }' +
+      '.tm-lv-cmp-diff-h { font-weight: 700; margin-bottom: 6px; }' +
+      '.tm-lv-cmp-diff-h a { font-weight: 400; margin-left: 8px; }' +
+      '.tm-lv-cmp-form { margin: 0 0 8px; color: #334155; }' +
+      '.tm-lv-cmp-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }' +
+      '.tm-lv-cmp-split ul { margin: 4px 0 0; padding-left: 18px; }' +
+      '.tm-lv-cmp-split em { color: #b91c1c; font-style: normal; }' +
+      '.tm-lv-cmp-empty { color: #64748b; margin: 4px 0; }' +
+      '.tm-lv-cmp-board { padding: 10px 14px 12px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }' +
+      '.tm-lv-cmp-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; color: #475569; font-size: 11px; }' +
+      '.tm-lv-cmp-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 3px; border-radius: 2px; vertical-align: middle; }' +
+      '.tm-lv-cmp-legend i.keep { background: #166534; }' +
+      '.tm-lv-cmp-legend i.miss { background: #ea580c; }' +
+      '.tm-lv-cmp-legend i.hurt { background: #dc2626; }' +
+      '.tm-lv-cmp-legend i.up { background: #2563eb; }' +
+      '.tm-lv-cmp-legend i.new { background: #ca8a04; }' +
+      '.tm-lv-cmp-caps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }' +
+      '.tm-lv-cmp-cap { font-size: 12px; color: #334155; }' +
+      '.tm-lv-cmp-cap span { color: #9a3412; }' +
+      '.tm-lv-cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }' +
+      '.tm-lv-cmp-pane { min-width: 0; }' +
+      '.tm-lv-cmp-pane h4 { height: 20px; margin: 0 0 2px; font-size: 14px; line-height: 20px; }' +
+      '.tm-lv-cmp-capslot { height: 48px; overflow: hidden; margin-bottom: 4px; }' +
+      '.tm-lv-cmp-pane .tm-lv-cmp-caps { grid-template-columns: 1fr 1fr; gap: 4px; margin: 0; }' +
+      '.tm-lv-cmp-scale { position: relative; width: 100%; overflow: hidden; }' +
+      '.tm-lv-cmp-field {' +
+      'position: absolute; left: 0; top: 0; width: 1040px; height: 510px;' +
+      'background: url(https://live.titan007.com/images/statistics/court.png) no-repeat;' +
+      'background-size: 100% 100%; transform-origin: top left;' +
+      '}' +
+      '.tm-lv-cmp-half { position: absolute; top: 25px; width: 500px; height: 460px; }' +
+      '.tm-lv-cmp-half-home { left: 20px; }' +
+      '.tm-lv-cmp-half-away { left: 520px; }' +
+      '.tm-lv-cmp-col { position: absolute; }' +
+      '.tm-lv-cmp-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #14532d; font-size: 14px; }' +
+      '.tm-lv-cmp-pl { position: relative; width: 100px; height: 80px; margin: 0 0 15px; text-align: center; box-sizing: border-box; }' +
+      '.tm-lv-cmp-col > .tm-lv-cmp-pl:last-child { margin-bottom: 0; }' +
+      '.tm-lv-cmp-pl > i {' +
+      'position: absolute; left: 25px; top: -3px; z-index: 2; width: 18px; height: 18px;' +
+      'border-radius: 50%; color: #fff; font-style: normal; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center;' +
+      '}' +
+      '.tm-lv-cmp-half-home .tm-lv-cmp-pl > i { background: #fb8c00; }' +
+      '.tm-lv-cmp-half-away .tm-lv-cmp-pl > i { background: #1e88e5; }' +
+      '.tm-lv-cmp-av { width: 40px; height: 40px; margin: 0 auto; border-radius: 50%; overflow: hidden; background: #e5e7eb; }' +
+      '.tm-lv-cmp-av img { width: 40px; height: 40px; object-fit: cover; display: block; }' +
+      '.tm-lv-cmp-pl > b {' +
+      'display: block; width: 100px; margin-top: 1px; color: #333; font-size: 12px; font-weight: 400; line-height: 16px;' +
+      'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' +
+      '}' +
+      '.tm-lv-cmp-pl > span { display: block; font-size: 11px; line-height: 14px; white-space: nowrap; }' +
+      '.tm-lv-cmp-half-home .tm-lv-cmp-pl > span { color: #15803d; }' +
+      '.tm-lv-cmp-half-away .tm-lv-cmp-pl > span { color: #0369a1; }' +
+      '.tm-lv-cmp-pl > em {' +
+      'position: absolute; right: 0; top: 22px; padding: 0 3px; border-radius: 3px;' +
+      'background: #fff7ed; color: #9a3412; font-style: normal; font-size: 10px; line-height: 14px;' +
+      '}' +
+      '.tm-lv-cmp-pl.hurt > em { background: #fee2e2; color: #991b1b; }' +
+      '.tm-lv-cmp-pl.miss .tm-lv-cmp-av { box-shadow: 0 0 0 2px #ea580c; }' +
+      '.tm-lv-cmp-pl.hurt .tm-lv-cmp-av { box-shadow: 0 0 0 2px #dc2626; }' +
+      '.tm-lv-cmp-fresh { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }' +
+      '.tm-lv-cmp-fresh > div > b { display: block; width: 100%; margin-bottom: 4px; color: #854d0e; font-size: 12px; }' +
+      '.tm-lv-cmp-subs {' +
+      'display: grid; grid-template-columns: 1fr 36px 1fr; gap: 8px; align-items: start;' +
+      'margin-top: 8px; padding: 8px; border-radius: 6px; background: #cfe8b6;' +
+      '}' +
+      '.tm-lv-cmp-subs-side { display: flex; flex-wrap: wrap; gap: 6px 10px; }' +
+      '.tm-lv-cmp-subs-mid { padding-top: 8px; color: #3f6212; font-size: 13px; font-weight: 700; text-align: center; }' +
+      '.tm-lv-cmp-bc { display: flex; align-items: center; gap: 4px; width: 168px; min-height: 36px; }' +
+      '.tm-lv-cmp-bc > i {' +
+      'flex: none; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-style: normal;' +
+      'font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;' +
+      '}' +
+      '.tm-lv-cmp-bc-home > i { background: #fb8c00; }' +
+      '.tm-lv-cmp-bc-away > i { background: #1e88e5; }' +
+      '.tm-lv-cmp-bc > span { min-width: 0; }' +
+      '.tm-lv-cmp-bc b { display: block; color: #333; font-size: 12px; font-weight: 400; line-height: 16px; white-space: nowrap; }' +
+      '.tm-lv-cmp-bc em { margin-left: 4px; color: #9a3412; font-style: normal; font-size: 10px; }' +
+      '.tm-lv-cmp-bc.hurt em { color: #991b1b; }' +
+      '.tm-lv-cmp-bc.up em { color: #1d4ed8; }' +
+      '.tm-lv-cmp-bc.new em { color: #a16207; }' +
+      '.tm-lv-cmp-bc small { display: block; font-size: 11px; line-height: 14px; }' +
+      '.tm-lv-cmp-bc-home small { color: #15803d; }' +
+      '.tm-lv-cmp-bc-away small { color: #0369a1; }';
     (document.body || document.head || document.documentElement).appendChild(style);
   }
 
@@ -4474,6 +5588,7 @@
         placeSubsOnPitch(box);
         ensureNatToggle();
         ensurePitchSubsToggle();
+        ensureCmpToggle();
         renderNationality(box);
         refreshGoalMarks(false);
         return;
@@ -4484,6 +5599,7 @@
       renderStarterMetrics();
       ensureNatToggle();
       ensurePitchSubsToggle();
+      ensureCmpToggle();
       renderNationality(document.getElementById('matchBox2'));
       refreshGoalMarks(false);
       annotateAllHoverAges(document.getElementById('matchBox2'));
