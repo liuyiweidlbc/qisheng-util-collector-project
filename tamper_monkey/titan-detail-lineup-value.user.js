@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.76
+// @version      1.8.78
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -19,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.76';
+  const SCRIPT_VERSION = '1.8.78';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -1512,6 +1512,7 @@
           pitch: '<div class="tm-lv-cmp-wait">未选</div>',
           news: '',
           bench: '',
+          pastSet: {},
         };
       }
       const row = cmpPack[side].rows.filter(function (item) {
@@ -1521,30 +1522,22 @@
       const venue = row && row.venue === 'away' ? 'away' : 'home';
       const pastForm = pack ? (venue === 'away' ? pack.awayForm : pack.homeForm) : '';
       const curForm = currentCmpForm(side);
-      const formNote =
-        pastForm && curForm
-          ? pastForm === curForm
-            ? pastForm
-            : '变阵 本场' + curForm + ' / 那场' + pastForm
-          : pastForm || curForm || '';
+      const changed = !!(pastForm && curForm && pastForm !== curForm);
+      const when = row && row.when ? row.when.slice(5, 16) : '';
       const cap =
-        '<div class="tm-lv-cmp-cap"><b>' +
+        '<div class="tm-lv-cmp-cap"><div>' +
+        escHtml(when) +
+        '  ' +
         escHtml(cmpPack[side].name) +
-        '</b> ' +
-        escHtml(row ? row.when.slice(5, 16) : '') +
-        ' 对' +
+        (row && row.score ? ' ' + escHtml(row.score) : '') +
+        '  对' +
         escHtml(row ? row.opponent : '') +
-        ' ' +
-        (venue === 'home' ? '主场' : '客场') +
-        ' ' +
-        escHtml(row && row.score ? row.score : '') +
-        ' <span>' +
-        escHtml(formNote) +
-        '</span> <a href="https://live.titan007.com/detail/' +
-        id +
-        'cn.htm?lineup=1" target="_blank" rel="noreferrer">那场</a></div>';
+        (pastForm ? ' ' + escHtml(pastForm) : '') +
+        '</div><div class="tm-lv-cmp-cap2">' +
+        (changed ? '变阵 本场' + escHtml(curForm) : '') +
+        '</div></div>';
       if (!pack) {
-        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">正在读取阵容…</div>', news: '', bench: '' };
+        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">正在读取阵容…</div>', news: '', bench: '', pastSet: {} };
       }
       let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
       cols = cols.slice();
@@ -1552,7 +1545,7 @@
       const pastXi = (venue === 'away' ? pack.away : pack.home) || [];
       const pastBench = (venue === 'away' ? pack.awayBench : pack.homeBench) || [];
       if (!pastXi.length) {
-        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">这场没有首发</div>', news: '', bench: '' };
+        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">这场没有首发</div>', news: '', bench: '', pastSet: {} };
       }
       const curXi = currentCmpXi(side);
       const curBench = currentCmpBench(side);
@@ -1599,7 +1592,7 @@
             })
             .join('')
         : '<span class="tm-lv-cmp-empty">那场没有替补</span>';
-      return { cap: cap, pitch: pitch, news: news, bench: bench };
+      return { cap: cap, pitch: pitch, news: news, bench: bench, pastSet: pastSet };
     }
     const home = sideBlock('home');
     const away = sideBlock('away');
@@ -1643,12 +1636,17 @@
     }
     const curHomeCols = currentCmpColumns('home');
     const curAwayCols = currentCmpColumns('away');
+    function curXiMark(player, pastSet) {
+      const hasPast = pastSet && Object.keys(pastSet).length;
+      if (!hasPast || !player.id || pastSet[player.id]) return plain;
+      return { cls: 'new', tag: '新' };
+    }
     const curField = fieldHtml(
       colsHtml(curHomeCols, function (player) {
-        return cmpPitchCard(player, plain);
+        return cmpPitchCard(player, curXiMark(player, home.pastSet));
       }),
       colsHtml(curAwayCols, function (player) {
-        return cmpPitchCard(player, plain);
+        return cmpPitchCard(player, curXiMark(player, away.pastSet));
       })
     );
     const curBench = benchHtml(
@@ -5149,10 +5147,11 @@
       '.tm-lv-cmp-legend i.miss { background: #ea580c; }' +
       '.tm-lv-cmp-legend i.hurt { background: #dc2626; }' +
       '.tm-lv-cmp-legend i.up { background: #2563eb; }' +
-      '.tm-lv-cmp-legend i.new { background: #ca8a04; }' +
+      '.tm-lv-cmp-legend i.new { background: #7c3aed; }' +
       '.tm-lv-cmp-caps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }' +
-      '.tm-lv-cmp-cap { font-size: 12px; color: #334155; }' +
-      '.tm-lv-cmp-cap span { color: #9a3412; }' +
+      '.tm-lv-cmp-cap { font-size: 12px; line-height: 16px; color: #334155; }' +
+      '.tm-lv-cmp-cap > div:first-child { white-space: nowrap; }' +
+      '.tm-lv-cmp-cap2 { color: #9a3412; min-height: 16px; }' +
       '.tm-lv-cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }' +
       '.tm-lv-cmp-pane { min-width: 0; }' +
       '.tm-lv-cmp-pane h4 { height: 20px; margin: 0 0 2px; font-size: 14px; line-height: 20px; }' +
@@ -5190,11 +5189,12 @@
       'position: absolute; right: 0; top: 22px; padding: 0 3px; border-radius: 3px;' +
       'background: #fff7ed; color: #9a3412; font-style: normal; font-size: 10px; line-height: 14px;' +
       '}' +
-      '.tm-lv-cmp-pl.hurt > em { background: #fee2e2; color: #991b1b; }' +
+      '.tm-lv-cmp-pl.new > em { background: #ede9fe; color: #6d28d9; }' +
+      '.tm-lv-cmp-pl.new .tm-lv-cmp-av { box-shadow: 0 0 0 2px #7c3aed; }' +
       '.tm-lv-cmp-pl.miss .tm-lv-cmp-av { box-shadow: 0 0 0 2px #ea580c; }' +
       '.tm-lv-cmp-pl.hurt .tm-lv-cmp-av { box-shadow: 0 0 0 2px #dc2626; }' +
       '.tm-lv-cmp-fresh { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }' +
-      '.tm-lv-cmp-fresh > div > b { display: block; width: 100%; margin-bottom: 4px; color: #854d0e; font-size: 12px; }' +
+      '.tm-lv-cmp-fresh > div > b { display: block; width: 100%; margin-bottom: 4px; color: #6d28d9; font-size: 12px; }' +
       '.tm-lv-cmp-subs {' +
       'display: grid; grid-template-columns: 1fr 36px 1fr; gap: 8px; align-items: start;' +
       'margin-top: 8px; padding: 8px; border-radius: 6px; background: #cfe8b6;' +
@@ -5213,7 +5213,7 @@
       '.tm-lv-cmp-bc em { margin-left: 4px; color: #9a3412; font-style: normal; font-size: 10px; }' +
       '.tm-lv-cmp-bc.hurt em { color: #991b1b; }' +
       '.tm-lv-cmp-bc.up em { color: #1d4ed8; }' +
-      '.tm-lv-cmp-bc.new em { color: #a16207; }' +
+      '.tm-lv-cmp-bc.new em { color: #6d28d9; }' +
       '.tm-lv-cmp-bc small { display: block; font-size: 11px; line-height: 14px; }' +
       '.tm-lv-cmp-bc-home small { color: #15803d; }' +
       '.tm-lv-cmp-bc-away small { color: #0369a1; }';
