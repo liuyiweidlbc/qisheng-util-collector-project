@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.78
+// @version      1.8.79
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -19,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.78';
+  const SCRIPT_VERSION = '1.8.79';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -5147,7 +5147,7 @@
       '.tm-lv-cmp-legend i.miss { background: #ea580c; }' +
       '.tm-lv-cmp-legend i.hurt { background: #dc2626; }' +
       '.tm-lv-cmp-legend i.up { background: #2563eb; }' +
-      '.tm-lv-cmp-legend i.new { background: #7c3aed; }' +
+      '.tm-lv-cmp-legend i.new { background: #16a34a; }' +
       '.tm-lv-cmp-caps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }' +
       '.tm-lv-cmp-cap { font-size: 12px; line-height: 16px; color: #334155; }' +
       '.tm-lv-cmp-cap > div:first-child { white-space: nowrap; }' +
@@ -5189,12 +5189,12 @@
       'position: absolute; right: 0; top: 22px; padding: 0 3px; border-radius: 3px;' +
       'background: #fff7ed; color: #9a3412; font-style: normal; font-size: 10px; line-height: 14px;' +
       '}' +
-      '.tm-lv-cmp-pl.new > em { background: #ede9fe; color: #6d28d9; }' +
-      '.tm-lv-cmp-pl.new .tm-lv-cmp-av { box-shadow: 0 0 0 2px #7c3aed; }' +
+      '.tm-lv-cmp-pl.new > em { background: #dcfce7; color: #166534; }' +
+      '.tm-lv-cmp-pl.new .tm-lv-cmp-av { box-shadow: 0 0 0 2px #16a34a; }' +
       '.tm-lv-cmp-pl.miss .tm-lv-cmp-av { box-shadow: 0 0 0 2px #ea580c; }' +
       '.tm-lv-cmp-pl.hurt .tm-lv-cmp-av { box-shadow: 0 0 0 2px #dc2626; }' +
       '.tm-lv-cmp-fresh { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }' +
-      '.tm-lv-cmp-fresh > div > b { display: block; width: 100%; margin-bottom: 4px; color: #6d28d9; font-size: 12px; }' +
+      '.tm-lv-cmp-fresh > div > b { display: block; width: 100%; margin-bottom: 4px; color: #166534; font-size: 12px; }' +
       '.tm-lv-cmp-subs {' +
       'display: grid; grid-template-columns: 1fr 36px 1fr; gap: 8px; align-items: start;' +
       'margin-top: 8px; padding: 8px; border-radius: 6px; background: #cfe8b6;' +
@@ -5213,7 +5213,7 @@
       '.tm-lv-cmp-bc em { margin-left: 4px; color: #9a3412; font-style: normal; font-size: 10px; }' +
       '.tm-lv-cmp-bc.hurt em { color: #991b1b; }' +
       '.tm-lv-cmp-bc.up em { color: #1d4ed8; }' +
-      '.tm-lv-cmp-bc.new em { color: #6d28d9; }' +
+      '.tm-lv-cmp-bc.new em { color: #166534; }' +
       '.tm-lv-cmp-bc small { display: block; font-size: 11px; line-height: 14px; }' +
       '.tm-lv-cmp-bc-home small { color: #15803d; }' +
       '.tm-lv-cmp-bc-away small { color: #0369a1; }';
