@@ -1,25 +1,36 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.54
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示）；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
+// @version      1.8.65
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      info.titan007.com
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const inFrame = window.top !== window.self;
+  const pageWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  const inFrame = pageWin.top !== pageWin.self;
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.54';
+  const SCRIPT_VERSION = '1.8.65';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
+  const GOAL_STORAGE_KEY = 'tm-lv-show-goals';
+  const GOAL_LEAGUE_KEY = 'tm-lv-goal-league';
+  const PITCH_SUBS_KEY = 'tm-lv-pitch-subs';
+  const BALL_ICON = '⚽';
+  const PITCH_SUBS_ICON =
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M4 8h12.2M13.2 5.1L16.6 8l-3.4 2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
+    '<path d="M20 16H7.8M10.8 13.1L7.4 16l3.4 2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>' +
+    '</svg>';
   const NAT_ICON_SVG =
     '<svg viewBox="0 0 24 24" aria-hidden="true">' +
     '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"></circle>' +
@@ -47,6 +58,13 @@
   let metricModeKey = 'value';
   let valueWithAge = false;
   let showNat = false;
+  let showGoals = false;
+  let goalLeagueOnly = false;
+  let showPitchSubs = true;
+  let pitchSuppress = 0;
+  let goalLoading = false;
+  let goalPack = null;
+  let goalReq = 0;
   let nationalMatch = null;
   let nationalPromise = null;
   let nationalForced = false;
@@ -80,10 +98,37 @@
     return '';
   }
 
-  function parseBirthday(playEl) {
-    const m = playBlob(playEl).match(/生日[：:]\s*(\d{4})-(\d{1,2})-(\d{1,2})/);
+  function birthdayFromText(text) {
+    const m = String(text || '').match(/(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
     if (!m) return null;
     return { y: parseInt(m[1], 10), m: parseInt(m[2], 10), d: parseInt(m[3], 10) };
+  }
+
+  function birthdayKey(bday) {
+    return bday ? bday.y + '-' + bday.m + '-' + bday.d : '';
+  }
+
+  function parseBirthday(playEl) {
+    const cached = playEl && playEl.dataset && playEl.dataset.tmBday;
+    if (cached) {
+      const fromCache = birthdayFromText(cached);
+      if (fromCache) return fromCache;
+    }
+    const m = playBlob(playEl).match(/生日[：:]\s*(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
+    if (!m) return null;
+    return { y: parseInt(m[1], 10), m: parseInt(m[2], 10), d: parseInt(m[3], 10) };
+  }
+
+  function stampBirthday(playEl, sourceEl) {
+    if (!playEl) return;
+    const blob = playBlob(sourceEl || playEl);
+    const m = blob.match(/生日[：:]\s*(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
+    const bday = m
+      ? { y: parseInt(m[1], 10), m: parseInt(m[2], 10), d: parseInt(m[3], 10) }
+      : null;
+    const key = birthdayKey(bday);
+    if (key) playEl.dataset.tmBday = key;
+    else delete playEl.dataset.tmBday;
   }
 
   function parseHeightCm(playEl) {
@@ -92,11 +137,11 @@
   }
 
   function matchAsOfDate() {
-    if (window.matchTime instanceof Date && !isNaN(window.matchTime.getTime())) {
-      return window.matchTime;
+    if (pageWin.matchTime instanceof Date && !isNaN(pageWin.matchTime.getTime())) {
+      return pageWin.matchTime;
     }
-    if (typeof window.strTime === 'string' && window.strTime) {
-      const d = new Date(String(window.strTime).replace(/-/g, '/'));
+    if (typeof pageWin.strTime === 'string' && pageWin.strTime) {
+      const d = new Date(String(pageWin.strTime).replace(/-/g, '/'));
       if (!isNaN(d.getTime())) return d;
     }
     return new Date();
@@ -342,6 +387,650 @@
     }
   }
 
+  function loadShowGoals() {
+    try {
+      return localStorage.getItem(GOAL_STORAGE_KEY) === '1';
+    } catch (e) {}
+    return false;
+  }
+
+  function loadGoalLeagueOnly() {
+    try {
+      return localStorage.getItem(GOAL_LEAGUE_KEY) === '1';
+    } catch (e) {}
+    return false;
+  }
+
+  function saveShowGoals() {
+    try {
+      localStorage.setItem(GOAL_STORAGE_KEY, showGoals ? '1' : '0');
+      localStorage.setItem(GOAL_LEAGUE_KEY, showGoals && goalLeagueOnly ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function gmGetText(url) {
+    return new Promise(function (resolve, reject) {
+      if (typeof GM_xmlhttpRequest !== 'function') {
+        reject(new Error('需要允许 GM_xmlhttpRequest 才能读取球员进球'));
+        return;
+      }
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: url,
+        timeout: 15000,
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+        onload: function (res) {
+          if (res.status >= 200 && res.status < 300) resolve(res.responseText || '');
+          else reject(new Error('读取失败 HTTP ' + res.status));
+        },
+        onerror: function () {
+          reject(new Error('读取球员数据失败'));
+        },
+        ontimeout: function () {
+          reject(new Error('读取球员数据超时'));
+        },
+      });
+    });
+  }
+
+  function seasonFromTitle() {
+    const m = String(document.title || '').match(/(\d{4}(?:-\d{4})?)\s*赛季/);
+    return m ? m[1] : '';
+  }
+
+  function matchLeagueName() {
+    const a = document.querySelector('a.LName');
+    return a ? String(a.textContent || '').replace(/\s+/g, '') : '';
+  }
+
+  function matchSclassId() {
+    const a = document.querySelector('a.LName');
+    const href = (a && a.getAttribute('href')) || '';
+    let m = href.match(/[?&]sclassid=(\d+)/i);
+    if (!m) m = href.match(/\/(?:SubLeague|subleague|League|CupMatch|cupmatch)\/(\d+)\.html/i);
+    return m ? m[1] : '';
+  }
+
+  function goalCacheKey(ids, season, sclassId, leagueName) {
+    return [ids.home || '', ids.away || '', season || '', sclassId || '', leagueName || '', 'both'].join('|');
+  }
+
+  function readGoalTable(table) {
+    const byId = {};
+    let total = 0;
+    if (!table) return { byId: byId, total: 0 };
+    const rows = table.querySelectorAll('tr');
+    let header = null;
+    for (let r = 0; r < rows.length; r++) {
+      const text = String(rows[r].textContent || '').replace(/\s+/g, '');
+      if (text.indexOf('总进球') !== -1 && text.indexOf('球员') !== -1) {
+        header = rows[r];
+        break;
+      }
+    }
+    if (!header) return { byId: byId, total: 0 };
+    const heads = header.cells || header.children;
+    let goalIdx = -1;
+    let nameIdx = -1;
+    for (let i = 0; i < heads.length; i++) {
+      const text = String(heads[i].textContent || '').replace(/\s+/g, '');
+      if (nameIdx < 0 && text.indexOf('球员') !== -1) nameIdx = i;
+      if (goalIdx < 0 && text.indexOf('总进球') !== -1) goalIdx = i;
+    }
+    if (goalIdx < 0 || nameIdx < 0) return { byId: byId, total: 0 };
+    const headerIndex = Array.prototype.indexOf.call(rows, header);
+    for (let r = headerIndex + 1; r < rows.length; r++) {
+      const cells = rows[r].cells || rows[r].children;
+      if (!cells || cells.length <= goalIdx || cells.length <= nameIdx) continue;
+      const link = cells[nameIdx].querySelector && cells[nameIdx].querySelector('a');
+      const href = (link && link.getAttribute('href')) || '';
+      const idm = href.match(/playerid=(\d+)/i) || href.match(/\/player\/\d+\/(\d+)\.html/i);
+      const goals = parseInt(String(cells[goalIdx].textContent || '').replace(/\s+/g, ''), 10);
+      if (!idm || !isFinite(goals) || goals <= 0) continue;
+      byId[idm[1]] = goals;
+      total += goals;
+    }
+    return { byId: byId, total: total };
+  }
+
+  function addGoalMap(target, part) {
+    Object.keys((part && part.byId) || {}).forEach(function (id) {
+      target[id] = (target[id] || 0) + part.byId[id];
+    });
+  }
+
+  function sameLeagueTable(doc) {
+    const menu = doc.querySelector('#menuContent [id^="menu_"]');
+    const idm = menu && String(menu.id || '').match(/menu_(\d+)/);
+    const name = menu ? String(menu.textContent || '').replace(/\s+/g, '') : '';
+    return {
+      table: idm ? doc.getElementById('tb_' + idm[1]) : null,
+      name: name,
+    };
+  }
+
+  function parseGoalTable(html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const byId = {};
+    let total = 0;
+    doc.querySelectorAll('table[id^="tb_"]').forEach(function (table) {
+      const part = readGoalTable(table);
+      addGoalMap(byId, part);
+      total += part.total;
+    });
+    const league = sameLeagueTable(doc);
+    const leagueParsed = readGoalTable(league.table);
+    return {
+      byId: byId,
+      total: total,
+      leagueById: leagueParsed.byId,
+      leagueTotal: leagueParsed.total,
+      leagueName: league.name || '',
+    };
+  }
+
+  function resolveGoalSeason(teamId) {
+    const fromTitle = seasonFromTitle();
+    if (fromTitle) return Promise.resolve(fromTitle);
+    return gmGetText('https://info.titan007.com/cn/team/PlayerData/' + teamId + '.html').then(function (html) {
+      const m = String(html || '').match(/currMatchSeason\s*=\s*['"]([^'"]+)['"]/);
+      if (!m) throw new Error('未能识别当前赛季');
+      return m[1];
+    });
+  }
+
+  function loadSideGoals(teamId, season) {
+    const url =
+      'https://info.titan007.com/cn/team/PlayerDataAjax.aspx?SclassID=0&matchSeason=' +
+      encodeURIComponent(season) +
+      '&teamID=' +
+      teamId +
+      '&_=' +
+      Date.now();
+    return gmGetText(url).then(function (html) {
+      if (!/menuContent|id=["']tb_/.test(html)) throw new Error('球员进球数据为空');
+      return parseGoalTable(html);
+    });
+  }
+
+  function ensureGoalData() {
+    const ids = matchTeamIds();
+    if (!ids.home || !ids.away) return Promise.reject(new Error('未能识别两队，无法读取进球'));
+    const sclassId = matchSclassId();
+    const leagueName = matchLeagueName();
+    return resolveGoalSeason(ids.home).then(function (season) {
+      const key = goalCacheKey(ids, season, sclassId, leagueName);
+      if (goalPack && goalPack.key === key && goalPack.leagueById) return goalPack;
+      return Promise.all([
+        loadSideGoals(ids.home, season),
+        loadSideGoals(ids.away, season),
+      ]).then(function (pair) {
+        const byId = {};
+        const leagueById = {};
+        addGoalMap(byId, pair[0]);
+        addGoalMap(byId, pair[1]);
+        addGoalMap(leagueById, { byId: pair[0].leagueById });
+        addGoalMap(leagueById, { byId: pair[1].leagueById });
+        goalPack = {
+          key: key,
+          leagueName: pair[0].leagueName || pair[1].leagueName || leagueName || '',
+          homeLeagueName: pair[0].leagueName || leagueName || '',
+          awayLeagueName: pair[1].leagueName || leagueName || '',
+          homeTotal: pair[0].total,
+          awayTotal: pair[1].total,
+          homeLeague: pair[0].leagueTotal,
+          awayLeague: pair[1].leagueTotal,
+          byId: byId,
+          leagueById: leagueById,
+        };
+        return goalPack;
+      });
+    });
+  }
+
+  function syncGoalToggle() {
+    const btn = document.querySelector('.tm-lv-goal-btn');
+    if (!btn) return;
+    btn.classList.toggle('tm-lv-goal-on', showGoals && !goalLeagueOnly);
+    btn.classList.toggle('tm-lv-goal-league', showGoals && goalLeagueOnly);
+    btn.classList.toggle('tm-lv-goal-loading', goalLoading);
+    let title = '点击显示全部赛事进球，右击只显示本场相同联赛';
+    if (goalLoading) title = '正在读取进球';
+    else if (showGoals && goalLeagueOnly) title = '当前只显示相同联赛进球，右击隐藏；点击改为全部赛事';
+    else if (showGoals) title = '当前显示全部赛事进球，点击隐藏；右击改为相同联赛';
+    btn.title = title;
+    btn.setAttribute('aria-pressed', showGoals ? 'true' : 'false');
+  }
+
+  function renderGoalMarks() {
+    document.querySelectorAll('.tm-lv-goal, .tm-lv-goal-sum').forEach(function (el) {
+      el.remove();
+    });
+    syncGoalToggle();
+    if (!showGoals || !goalPack) return;
+    const box = document.getElementById('matchBox2');
+    if (!box) return;
+    const prevRefreshing = refreshing;
+    refreshing = true;
+    try {
+      const goalMap = goalLeagueOnly ? goalPack.leagueById || {} : goalPack.byId || {};
+      box.querySelectorAll('.play').forEach(function (playEl) {
+        const id = playerId(playEl);
+        const goals = id && goalMap[String(id)];
+        if (!goals) return;
+        const badge = document.createElement('span');
+        badge.className = 'tm-lv-goal';
+        badge.title = goals + '球';
+        badge.innerHTML = BALL_ICON + '<span>' + goals + '</span>';
+        if (playEl.closest('.plays')) {
+          const host = playEl.querySelector('span') || playEl;
+          host.appendChild(badge);
+          return;
+        }
+        const nameEl = playEl.querySelector('.name');
+        if (nameEl) nameEl.insertAdjacentElement('afterend', badge);
+        else playEl.appendChild(badge);
+      });
+      const plays = box.querySelector('.plays');
+      if (plays) {
+        [
+          { side: 'home', total: goalLeagueOnly ? goalPack.homeLeague : goalPack.homeTotal },
+          { side: 'away', total: goalLeagueOnly ? goalPack.awayLeague : goalPack.awayTotal },
+        ].forEach(function (item) {
+          const sum = document.createElement('span');
+          sum.className = 'tm-lv-goal-sum tm-lv-goal-sum-' + item.side;
+          const leagueLabel =
+            item.side === 'home' ? goalPack.homeLeagueName : goalPack.awayLeagueName;
+          const comp = goalLeagueOnly ? leagueLabel || goalPack.leagueName || '相同联赛' : '全部赛事';
+          sum.title = comp + '总进球';
+          sum.innerHTML = BALL_ICON + '<span>' + item.total + '</span>';
+          plays.appendChild(sum);
+        });
+      }
+    } finally {
+      refreshing = prevRefreshing;
+    }
+  }
+
+  function refreshGoalMarks(alertOnError) {
+    ensureGoalToggle();
+    if (!showGoals) {
+      renderGoalMarks();
+      return;
+    }
+    const ids = matchTeamIds();
+    const season = seasonFromTitle();
+    const parts = goalPack ? String(goalPack.key || '').split('|') : [];
+    const samePack =
+      goalPack &&
+      ids.home &&
+      ids.away &&
+      parts[0] === ids.home &&
+      parts[1] === ids.away &&
+      (!season || parts[2] === season) &&
+      parts[3] === (matchSclassId() || '') &&
+      parts[4] === (matchLeagueName() || '') &&
+      parts[5] === 'both';
+    if (samePack) {
+      renderGoalMarks();
+      return;
+    }
+    if (goalLoading) return;
+    goalLoading = true;
+    syncGoalToggle();
+    const req = ++goalReq;
+    ensureGoalData()
+      .then(function () {
+        if (req !== goalReq || !showGoals) return;
+        goalLoading = false;
+        renderGoalMarks();
+      })
+      .catch(function (err) {
+        if (req !== goalReq) return;
+        goalLoading = false;
+        showGoals = false;
+        saveShowGoals();
+        syncGoalToggle();
+        renderGoalMarks();
+        if (alertOnError) alert((err && err.message) || '读取球员进球失败');
+      });
+  }
+
+  function applyGoalMode(show, leagueOnly) {
+    if (goalLoading) return;
+    showGoals = show;
+    goalLeagueOnly = !!leagueOnly && show;
+    saveShowGoals();
+    if (!showGoals) {
+      goalReq += 1;
+      renderGoalMarks();
+      return;
+    }
+    refreshGoalMarks(true);
+  }
+
+  function toggleShowGoals(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button === 2) return;
+    }
+    if (showGoals && !goalLeagueOnly) applyGoalMode(false, false);
+    else applyGoalMode(true, false);
+  }
+
+  function toggleGoalLeague(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (showGoals && goalLeagueOnly) applyGoalMode(false, false);
+    else applyGoalMode(true, true);
+  }
+
+  function ensureGoalToggle() {
+    const title = lineupTitleEl();
+    if (!title) return;
+    let btn = title.querySelector('.tm-lv-goal-btn');
+    if (!btn) {
+      btn = document.createElement('span');
+      btn.className = 'tm-lv-goal-btn';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
+      btn.setAttribute('aria-label', '显示进球');
+      btn.textContent = BALL_ICON;
+      title.appendChild(btn);
+      btn.addEventListener('click', toggleShowGoals);
+      btn.addEventListener('contextmenu', toggleGoalLeague);
+      btn.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        toggleShowGoals(e);
+      });
+    }
+    syncGoalToggle();
+  }
+
+  function loadPitchSubs() {
+    try {
+      return localStorage.getItem(PITCH_SUBS_KEY) !== '0';
+    } catch (e) {}
+    return true;
+  }
+
+  function savePitchSubs() {
+    try {
+      localStorage.setItem(PITCH_SUBS_KEY, showPitchSubs ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function withPitchSuppress(fn) {
+    pitchSuppress += 1;
+    const prevRefreshing = refreshing;
+    refreshing = true;
+    try {
+      fn();
+    } finally {
+      refreshing = prevRefreshing;
+      Promise.resolve().then(function () {
+        pitchSuppress = Math.max(0, pitchSuppress - 1);
+      });
+    }
+  }
+
+  function pagePlayHtml(playEl) {
+    const clone = playEl.cloneNode(true);
+    clone.querySelectorAll('.tm-lv-hover-age').forEach(function (n) {
+      n.remove();
+    });
+    clone.querySelectorAll('.tm-lv-bday').forEach(function (n) {
+      n.classList.remove('tm-lv-bday');
+    });
+    clone
+      .querySelectorAll('.tm-lv-metric, .tm-lv-subout, .tm-lv-nat, .tm-lv-goal')
+      .forEach(function (n) {
+        n.remove();
+      });
+    return clone.innerHTML;
+  }
+
+  function capturePlayOrig(box) {
+    if (!box) return;
+    box.querySelectorAll('.play').forEach(function (playEl) {
+      const mouse = playEl.getAttribute('onmouseover') || '';
+      const curId = playerId(playEl);
+      const known = playEl.dataset.tmLvOrig != null;
+      if (known && (!curId || curId !== origPlayId(playEl))) return;
+      playEl.dataset.tmLvOrig = pagePlayHtml(playEl);
+      playEl.dataset.tmLvMouse = mouse;
+      playEl.dataset.tmLvClass = playEl.className;
+    });
+  }
+
+  function origPlayId(playEl) {
+    const mouse = (playEl && playEl.dataset && playEl.dataset.tmLvMouse) || '';
+    let m = mouse.match(/setImgUrl\((\d+)\)/);
+    if (m) return m[1];
+    const html = (playEl && playEl.dataset && playEl.dataset.tmLvOrig) || '';
+    m = html.match(/playerTech_(\d+)/) || html.match(/\/player\/\d+\/(\d+)\.html/i);
+    return m ? m[1] : '';
+  }
+
+  function restorePlayOrig(playEl) {
+    if (!playEl || playEl.dataset.tmLvOrig == null) return;
+    if (String(playerId(playEl) || '') === String(origPlayId(playEl) || '')) return;
+    lastMetricSig = '';
+    playEl.innerHTML = playEl.dataset.tmLvOrig;
+    const mouse = playEl.dataset.tmLvMouse || '';
+    if (mouse) playEl.setAttribute('onmouseover', mouse);
+    else playEl.removeAttribute('onmouseover');
+    if (playEl.dataset.tmLvClass) playEl.className = playEl.dataset.tmLvClass;
+    stampBirthday(playEl);
+  }
+
+  const PITCH_NOPHOTO =
+    'data:image/svg+xml,' +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#e5e7eb"/>' +
+        '<circle cx="32" cy="24" r="12" fill="#9ca3af"/>' +
+        '<path d="M12 58c4-12 12-18 20-18s16 6 20 18" fill="#9ca3af"/></svg>'
+    );
+
+  function playerPhotoSrc(id) {
+    const data = String((pageWin && pageWin.playerImgData) || '');
+    const m = data.match(new RegExp('(?:^|\\^)' + id + ',(images/[^\\^]*)'));
+    if (!m || !m[1]) return PITCH_NOPHOTO;
+    return '//zq.titan007.com/Image/player/' + m[1];
+  }
+
+  function latestSubId(starterId, replacedBy) {
+    let cur = starterId;
+    const seen = {};
+    while (replacedBy[cur] && !seen[cur]) {
+      seen[cur] = 1;
+      cur = replacedBy[cur];
+    }
+    return cur;
+  }
+
+  function pitchSubPairs(box) {
+    const inToOut = subInToOutMap();
+    const replacedBy = {};
+    Object.keys(inToOut).forEach(function (inId) {
+      replacedBy[inToOut[inId]] = inId;
+    });
+    const byId = {};
+    box.querySelectorAll('.play').forEach(function (playEl) {
+      const id = playerId(playEl);
+      if (id && !byId[id]) byId[id] = playEl;
+    });
+    const pairs = [];
+    box.querySelectorAll('.plays .play').forEach(function (pitchEl) {
+      const starterId = playerId(pitchEl);
+      const subId = latestSubId(starterId, replacedBy);
+      if (!starterId || !subId || subId === starterId) return;
+      const benchEl = byId[subId];
+      if (!benchEl || (benchEl.closest && benchEl.closest('.plays'))) return;
+      pairs.push({ pitch: pitchEl, bench: benchEl });
+    });
+    return pairs;
+  }
+
+  function fillPitchFromBench(pitchEl, benchEl) {
+    const pitch = pitchEl.cloneNode(true);
+    const bench = benchEl.cloneNode(true);
+    const subId = playerId(bench);
+    const subLink = bench.querySelector('.name a');
+    const subNum = shirtNo(bench);
+    const subTech = bench.querySelector('.eventicon, [id^="playerTech_"]');
+    pitch.setAttribute('onmouseover', 'setImgUrl(' + subId + ')');
+    const num = pitch.querySelector('.num');
+    if (num) num.textContent = subNum ? subNum + ' ' : '';
+    const img = pitch.querySelector('.headpic img');
+    if (img) {
+      img.setAttribute('src', playerPhotoSrc(subId));
+      if (img.id && /^playerImg_\d+$/.test(img.id)) img.id = 'playerImg_' + subId;
+    }
+    const link = pitch.querySelector('.name a');
+    if (link && subLink) {
+      link.textContent = subLink.textContent;
+      link.setAttribute('href', subLink.getAttribute('href') || '');
+      const title = subLink.getAttribute('title');
+      if (title) link.setAttribute('title', title);
+      else link.removeAttribute('title');
+    }
+    const ul = pitch.querySelector('ul');
+    const subUl = bench.querySelector('ul');
+    if (ul && subUl) ul.innerHTML = subUl.innerHTML;
+    stampBirthday(pitch, bench);
+    let tech = pitch.querySelector('[id^="playerTech_"]');
+    if (!tech) {
+      tech = document.createElement('div');
+      pitch.appendChild(tech);
+    }
+    tech.id = 'playerTech_' + subId;
+    tech.innerHTML = eventIconHtml(subTech);
+    const captain = pitch.querySelector('.captain');
+    if (captain) captain.remove();
+    return pitch;
+  }
+
+  function fillBenchFromPitch(benchEl, pitchEl) {
+    const bench = benchEl.cloneNode(true);
+    const pitch = pitchEl.cloneNode(true);
+    const starterId = playerId(pitch);
+    const starterLink = pitch.querySelector('.name a');
+    const starterNum = shirtNo(pitch);
+    const starterTech = pitch.querySelector('[id^="playerTech_"]');
+    bench.setAttribute('onmouseover', 'setImgUrl(' + starterId + ')');
+    const num = bench.querySelector('.name i');
+    if (num) num.textContent = starterNum ? starterNum + ' ' : '';
+    const link = bench.querySelector('.name a');
+    if (link && starterLink) {
+      link.textContent = starterLink.textContent;
+      link.setAttribute('href', starterLink.getAttribute('href') || '');
+      const title = starterLink.getAttribute('title');
+      if (title) link.setAttribute('title', title);
+      else link.removeAttribute('title');
+    }
+    const ul = bench.querySelector('ul');
+    const starterUl = pitch.querySelector('ul');
+    if (ul && starterUl) ul.innerHTML = starterUl.innerHTML;
+    stampBirthday(bench, pitch);
+    let tech = bench.querySelector('.eventicon, [id^="playerTech_"]');
+    if (!tech) {
+      tech = document.createElement('div');
+      tech.className = 'eventicon';
+      const name = bench.querySelector('.name');
+      if (name) name.insertAdjacentElement('afterend', tech);
+      else bench.appendChild(tech);
+    }
+    tech.id = 'playerTech_' + starterId;
+    if (!tech.classList.contains('eventicon')) tech.classList.add('eventicon');
+    tech.innerHTML = eventIconHtml(starterTech);
+    return bench;
+  }
+
+  function assignPlayView(playEl, view) {
+    lastMetricSig = '';
+    playEl.innerHTML = view.innerHTML;
+    const mouse = view.getAttribute('onmouseover');
+    if (mouse) playEl.setAttribute('onmouseover', mouse);
+    else playEl.removeAttribute('onmouseover');
+    if (view.dataset && view.dataset.tmBday) playEl.dataset.tmBday = view.dataset.tmBday;
+    else delete playEl.dataset.tmBday;
+  }
+
+  function restoreOriginalLineup(box) {
+    if (!box) return;
+    capturePlayOrig(box);
+    withPitchSuppress(function () {
+      box.querySelectorAll('.play').forEach(restorePlayOrig);
+    });
+  }
+
+  function placeSubsOnPitch(box) {
+    if (!box || !showPitchSubs) return;
+    const pairs = pitchSubPairs(box);
+    if (!pairs.length) return;
+    const jobs = pairs.map(function (pair) {
+      return {
+        pitch: pair.pitch,
+        bench: pair.bench,
+        pitchView: fillPitchFromBench(pair.pitch, pair.bench),
+        benchView: fillBenchFromPitch(pair.bench, pair.pitch),
+      };
+    });
+    withPitchSuppress(function () {
+      jobs.forEach(function (job) {
+        assignPlayView(job.pitch, job.pitchView);
+        job.pitch.classList.remove('captain');
+        assignPlayView(job.bench, job.benchView);
+      });
+    });
+  }
+
+  function syncPitchSubsToggle() {
+    const btn = document.querySelector('.tm-lv-pitch-btn');
+    if (!btn) return;
+    btn.classList.toggle('tm-lv-pitch-on', showPitchSubs);
+    btn.title = showPitchSubs
+      ? '换上的替补在首发位置。点击恢复网页原始首发'
+      : '当前是网页原始首发。点击把换上的替补放到首发图';
+    btn.setAttribute('aria-pressed', showPitchSubs ? 'true' : 'false');
+  }
+
+  function togglePitchSubs(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    showPitchSubs = !showPitchSubs;
+    savePitchSubs();
+    syncPitchSubsToggle();
+    refresh();
+  }
+
+  function ensurePitchSubsToggle() {
+    const title = lineupTitleEl();
+    if (!title) return;
+    let btn = title.querySelector('.tm-lv-pitch-btn');
+    if (!btn) {
+      btn = document.createElement('span');
+      btn.className = 'tm-lv-pitch-btn';
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
+      btn.setAttribute('aria-label', '切换换上替补');
+      btn.innerHTML = PITCH_SUBS_ICON;
+      title.appendChild(btn);
+      btn.addEventListener('click', togglePitchSubs);
+      btn.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        togglePitchSubs(e);
+      });
+    }
+    syncPitchSubsToggle();
+  }
+
   function shirtNo(playEl) {
     const el = playEl && (playEl.querySelector('.num') || playEl.querySelector('.name i'));
     return el ? String(el.textContent || '').replace(/\s+/g, '') : '';
@@ -416,9 +1105,24 @@
     return map;
   }
 
-  /** 替补换入箭头右侧，浅色标出被换下的号码和名字。 */
+  function eventIconHtml(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('.tm-lv-subout').forEach(function (n) {
+      n.remove();
+    });
+    return clone.innerHTML;
+  }
+
+  /** 替补换入箭头右侧，浅色标出被换下的号码和名字。换上首发时不再标，避免白字盖住身价。 */
   function annotateSubOut(box) {
     if (!box) return;
+    if (showPitchSubs) {
+      box.querySelectorAll('.tm-lv-subout').forEach(function (el) {
+        el.remove();
+      });
+      return;
+    }
     const index = lineupPlayerIndex(box);
     const inToOut = subInToOutMap();
     const prevRefreshing = refreshing;
@@ -587,7 +1291,7 @@
   }
 
   function currentScheduleId() {
-    if (typeof window.scheduleID !== 'undefined' && window.scheduleID) return String(window.scheduleID);
+    if (typeof pageWin.scheduleID !== 'undefined' && pageWin.scheduleID) return String(pageWin.scheduleID);
     const m = location.pathname.match(/(\d{5,})/);
     return m ? m[1] : '';
   }
@@ -1382,11 +2086,11 @@
     return {
       home:
         (homeEl && homeEl.textContent.trim()) ||
-        (typeof window.homeTeamName === 'string' && window.homeTeamName) ||
+        (typeof pageWin.homeTeamName === 'string' && pageWin.homeTeamName) ||
         '主队',
       away:
         (awayEl && awayEl.textContent.trim()) ||
-        (typeof window.guestTeamName === 'string' && window.guestTeamName) ||
+        (typeof pageWin.guestTeamName === 'string' && pageWin.guestTeamName) ||
         '客队',
     };
   }
@@ -2070,7 +2774,11 @@
       n.classList.contains('tm-lv-subout') ||
       n.classList.contains('tm-lv-subout-num') ||
       n.classList.contains('tm-lv-subout-name') ||
-      n.classList.contains('tm-lv-nat')
+      n.classList.contains('tm-lv-nat') ||
+      n.classList.contains('tm-lv-goal') ||
+      n.classList.contains('tm-lv-goal-sum') ||
+      n.classList.contains('tm-lv-goal-btn') ||
+      n.classList.contains('tm-lv-pitch-btn')
     );
   }
 
@@ -2092,7 +2800,9 @@
       (t.closest('.tm-lv-metric') ||
         t.closest('.tm-lv-hover-age') ||
         t.closest('.tm-lv-subout') ||
-        t.closest('.tm-lv-nat'))
+        t.closest('.tm-lv-nat') ||
+        t.closest('.tm-lv-goal') ||
+        t.closest('.tm-lv-goal-sum'))
     ) {
       return true;
     }
@@ -2101,6 +2811,20 @@
       if (!nodes) continue;
       for (let j = 0; j < nodes.length; j++) {
         if (isScriptNode(nodes[j])) return true;
+      }
+    }
+    return false;
+  }
+
+  function metricsMissing(box, modeKey, unit) {
+    const roots = lineupMetricRoots(box);
+    for (let i = 0; i < roots.length; i++) {
+      const plays = roots[i].querySelectorAll('.play');
+      for (let j = 0; j < plays.length; j++) {
+        const playEl = plays[j];
+        const text = formatPlayerMetric(playEl, modeKey, unit);
+        if (modeKey !== 'club' && (!text || text === '-' || text === '-/-')) continue;
+        if (!playEl.querySelector('.tm-lv-metric')) return true;
       }
     }
     return false;
@@ -2121,7 +2845,7 @@
     const unit = detectUnit(box);
     const mode = currentMetricMode();
     const sig = starterMetricSignature(box, mode.key, unit);
-    if (sig === lastMetricSig && box.querySelector('.tm-lv-metric')) {
+    if (sig === lastMetricSig && !metricsMissing(box, mode.key, unit)) {
       updatePanelModeChip();
       bindMetricClick(box);
       return;
@@ -2777,7 +3501,10 @@
       'flex-direction: column;' +
       'align-items: flex-start;' +
       'gap: 1px;' +
-      'z-index: 6;' +
+      'z-index: 4;' +
+      'overflow: hidden !important;' +
+      'font-size: 0 !important;' +
+      'color: transparent !important;' +
       'pointer-events: none;' +
       '}' +
       '#matchBox2 .plays .guest .playBox .play [id^="playerTech_"] {' +
@@ -2802,15 +3529,16 @@
       'width: auto;' +
       'max-width: none;' +
       'min-height: 0;' +
-      'height: 15px;' +
+      'height: auto;' +
+      'min-height: 15px;' +
       'line-height: 15px;' +
       'font-size: 10px;' +
       'font-weight: 700;' +
       'font-style: normal;' +
       'text-align: center;' +
       'white-space: nowrap;' +
-      'overflow: hidden;' +
-      'text-overflow: ellipsis;' +
+      'overflow: visible;' +
+      'text-overflow: clip;' +
       'color: #15803d;' +
       'background: rgba(255,255,255,0.18);' +
       'border: none;' +
@@ -2872,10 +3600,26 @@
       'margin: 0;' +
       'overflow: hidden;' +
       '}' +
-      '#matchBox2 .backupPlay2 .play > span .eventicon {' +
+      '#matchBox2 .backupPlay2 .play,' +
+      '#matchBox2 .hurtPlay .play {' +
+      'color: #333;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .play > span .eventicon,' +
+      '#matchBox2 .backupPlay2 [id^="playerTech_"] {' +
+      'position: static !important;' +
+      'top: auto !important;' +
+      'left: auto !important;' +
+      'right: auto !important;' +
       'flex: 0 0 100%;' +
       'width: auto !important;' +
-      'height: 14px !important;' +
+      'max-width: none !important;' +
+      'height: auto !important;' +
+      'min-height: 0 !important;' +
+      'margin: 0 !important;' +
+      'line-height: 14px !important;' +
+      'font-size: 12px !important;' +
+      'color: #64748b !important;' +
+      'overflow: visible !important;' +
       '}' +
       '#matchBox2 .backupPlay .play .tm-lv-metric,' +
       '#matchBox2 .hurtPlay .play .tm-lv-metric,' +
@@ -3039,6 +3783,7 @@
       'height: 16px;' +
       'border-radius: 3px;' +
       '}' +
+      '#matchBox2 .backupPlay2 .eventicon:has(.tm-lv-subout),' +
       '#matchBox2 .backupPlay .eventicon:has(.tm-lv-subout) {' +
       'width: auto !important;' +
       'min-width: 0 !important;' +
@@ -3046,6 +3791,10 @@
       'line-height: 14px !important;' +
       'overflow: visible !important;' +
       '}' +
+      '#matchBox2 .plays .tm-lv-subout {' +
+      'display: none !important;' +
+      '}' +
+      '#matchBox2 .backupPlay2 .eventicon .tm-lv-subout,' +
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout {' +
       'display: inline-flex !important;' +
       'align-items: center !important;' +
@@ -3062,6 +3811,8 @@
       'white-space: nowrap;' +
       'pointer-events: none;' +
       '}' +
+      '#matchBox2 .backupPlay2 .eventicon .tm-lv-subout-num,' +
+      '#matchBox2 .backupPlay2 .eventicon .tm-lv-subout-name,' +
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num,' +
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout-name {' +
       'display: block !important;' +
@@ -3076,6 +3827,7 @@
       'font-weight: 400 !important;' +
       'line-height: 14px !important;' +
       '}' +
+      '#matchBox2 .backupPlay2 .eventicon .tm-lv-subout-num,' +
       '#matchBox2 .backupPlay .eventicon .tm-lv-subout-num {' +
       'margin-right: 2px !important;' +
       '}' +
@@ -3118,6 +3870,178 @@
       'display: block;' +
       'width: 14px;' +
       'height: 14px;' +
+      '}' +
+      '.tm-lv-goal-btn {' +
+      'position: absolute;' +
+      'left: calc(50% + 72px);' +
+      'top: 50%;' +
+      'transform: translateY(-50%);' +
+      'z-index: 8;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'justify-content: center;' +
+      'width: 22px;' +
+      'height: 22px;' +
+      'margin: 0;' +
+      'padding: 0;' +
+      'border: 1px solid #cbd5e1;' +
+      'border-radius: 6px;' +
+      'background: #fff;' +
+      'color: #64748b;' +
+      'cursor: pointer;' +
+      'user-select: none;' +
+      'line-height: 22px;' +
+      'font-size: 14px;' +
+      '}' +
+      '.tm-lv-goal-btn:hover {' +
+      'border-color: #94a3b8;' +
+      'color: #1e293b;' +
+      '}' +
+      '.tm-lv-goal-btn.tm-lv-goal-on {' +
+      'background: #f0fdf4;' +
+      'border-color: #166534;' +
+      'color: #166534;' +
+      '}' +
+      '.tm-lv-goal-btn.tm-lv-goal-league {' +
+      'background: #eff6ff;' +
+      'border-color: #1d4ed8;' +
+      'color: #1d4ed8;' +
+      '}' +
+      '.tm-lv-goal-btn.tm-lv-goal-loading {' +
+      'opacity: 0.55;' +
+      'cursor: progress;' +
+      '}' +
+      '.tm-lv-pitch-btn {' +
+      'position: absolute;' +
+      'left: calc(50% + 98px);' +
+      'top: 50%;' +
+      'transform: translateY(-50%);' +
+      'z-index: 8;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'justify-content: center;' +
+      'width: 22px;' +
+      'height: 22px;' +
+      'margin: 0;' +
+      'padding: 0;' +
+      'border: 1px solid #cbd5e1;' +
+      'border-radius: 6px;' +
+      'background: #fff;' +
+      'color: #64748b;' +
+      'cursor: pointer;' +
+      'user-select: none;' +
+      'line-height: 0;' +
+      '}' +
+      '.tm-lv-pitch-btn:hover {' +
+      'border-color: #94a3b8;' +
+      'color: #1e293b;' +
+      '}' +
+      '.tm-lv-pitch-btn.tm-lv-pitch-on {' +
+      'background: #eff6ff;' +
+      'border-color: #1d4ed8;' +
+      'color: #1d4ed8;' +
+      '}' +
+      '.tm-lv-pitch-btn svg {' +
+      'display: block;' +
+      'width: 14px;' +
+      'height: 14px;' +
+      '}' +
+      '#matchBox2 .plays > .tm-lv-goal-sum {' +
+      'position: absolute;' +
+      'top: 8px;' +
+      'z-index: 8;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'margin: 0;' +
+      'padding: 1px 6px 1px 3px;' +
+      'border-radius: 10px;' +
+      'background: rgba(255,255,255,0.92);' +
+      'color: #166534;' +
+      'font-size: 13px;' +
+      'font-weight: 700;' +
+      'line-height: 16px;' +
+      'white-space: nowrap;' +
+      'pointer-events: none;' +
+      'box-shadow: 0 1px 2px rgba(15,23,42,0.16);' +
+      '}' +
+      '#matchBox2 .plays > .tm-lv-goal-sum-home {' +
+      'left: 10px;' +
+      '}' +
+      '#matchBox2 .plays > .tm-lv-goal-sum-away {' +
+      'right: 10px;' +
+      '}' +
+      '#matchBox2 .plays > .tm-lv-goal-sum span {' +
+      'display: inline !important;' +
+      'position: static !important;' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'min-height: 0 !important;' +
+      '}' +
+      '#matchBox2 .plays .playBox .play span > .tm-lv-goal {' +
+      'position: absolute !important;' +
+      'left: 50% !important;' +
+      'top: 0 !important;' +
+      'z-index: 6;' +
+      'transform: translate(-50%, -88%);' +
+      'display: inline-flex !important;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'width: auto !important;' +
+      'height: 16px !important;' +
+      'min-width: 0 !important;' +
+      'min-height: 0 !important;' +
+      'padding: 0 4px 0 1px;' +
+      'border-radius: 8px;' +
+      'background: rgba(255,255,255,0.94);' +
+      'color: #166534;' +
+      'font-size: 12px;' +
+      'font-weight: 700;' +
+      'font-style: normal;' +
+      'line-height: 16px !important;' +
+      'vertical-align: top !important;' +
+      'white-space: nowrap;' +
+      'pointer-events: none;' +
+      'box-shadow: 0 1px 2px rgba(15,23,42,0.18);' +
+      '}' +
+      '#matchBox2 .plays .playBox .play .tm-lv-goal span {' +
+      'display: inline !important;' +
+      'position: static !important;' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'min-height: 0 !important;' +
+      'vertical-align: baseline !important;' +
+      '}' +
+      '#matchBox2 .backupPlay .tm-lv-goal,' +
+      '#matchBox2 .hurtPlay .tm-lv-goal {' +
+      'display: inline-flex !important;' +
+      'position: static !important;' +
+      'flex: 0 0 auto;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'min-width: 0 !important;' +
+      'min-height: 0 !important;' +
+      'margin: 0 4px 0 1px;' +
+      'padding: 0;' +
+      'color: #166534;' +
+      'font-size: 12px;' +
+      'font-weight: 700;' +
+      'line-height: 16px !important;' +
+      'vertical-align: middle;' +
+      'white-space: nowrap;' +
+      'pointer-events: none;' +
+      '}' +
+      '#matchBox2 .backupPlay .tm-lv-goal span,' +
+      '#matchBox2 .hurtPlay .tm-lv-goal span {' +
+      'display: inline !important;' +
+      'position: static !important;' +
+      'width: auto !important;' +
+      'height: auto !important;' +
+      'min-height: 0 !important;' +
+      'line-height: 16px !important;' +
+      'vertical-align: baseline !important;' +
       '}' +
       '#matchBox2 .plays .play .tm-lv-nat {' +
       'display: block;' +
@@ -3504,7 +4428,7 @@
 
     observedBox = box;
     lineupObserver = new MutationObserver(function (records) {
-      if (refreshing) return;
+      if (pitchSuppress || refreshing) return;
       let relevant = false;
       for (let i = 0; i < records.length; i++) {
         const t = records[i].target;
@@ -3540,19 +4464,28 @@
 
   function refresh() {
     try {
+      const box = document.getElementById('matchBox2');
+      capturePlayOrig(box);
+      restoreOriginalLineup(box);
       stampCoachNewPage(document);
       const stats = computeStats();
       if (!stats) {
         hidePanel();
+        placeSubsOnPitch(box);
         ensureNatToggle();
-        renderNationality(document.getElementById('matchBox2'));
+        ensurePitchSubsToggle();
+        renderNationality(box);
+        refreshGoalMarks(false);
         return;
       }
 
       mountPanel(stats);
+      placeSubsOnPitch(box);
       renderStarterMetrics();
       ensureNatToggle();
+      ensurePitchSubsToggle();
       renderNationality(document.getElementById('matchBox2'));
+      refreshGoalMarks(false);
       annotateAllHoverAges(document.getElementById('matchBox2'));
       annotateSubOut(document.getElementById('matchBox2'));
       bindLineupObserver(document.getElementById('matchBox2'));
@@ -3582,6 +4515,9 @@
     metricModeKey = loadMetricModeKey();
     valueWithAge = loadValueWithAge();
     showNat = loadShowNat();
+    showGoals = loadShowGoals();
+    goalLeagueOnly = showGoals && loadGoalLeagueOnly();
+    showPitchSubs = loadPitchSubs();
     if (isRememberedNational()) {
       nationalForced = true;
       nationalMatch = true;
