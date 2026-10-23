@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.18
+// @version      2.16.21
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.18";
+  var SCRIPT_VERSION = "2.16.21";
 
   // src/storage-keys.js
   var KEYS = {
@@ -472,6 +472,11 @@
     const NAV_BREAKER_LOG_KEY = "tm_hty_nav_breaker_log";
     const NAV_BREAKER_UNTIL_KEY = "tm_hty_nav_breaker_until";
     const PAGE_RELOAD_COOLDOWN_MS = 12e4;
+    const MARKET_STALL_MS = 6e4;
+    const MARKET_STALL_RELOAD_MAX = 2;
+    const MARKET_STALL_RELOAD_TTL_MS = 18e5;
+    const MARKET_STALL_RELOAD_KEY = "tm_hty_market_stall_reloads";
+    const MARKET_STALL_MIN_TEXT = 24;
     const WAF_RECOVERY_COOLDOWN_MS = 3e5;
     const NAV_SUPPRESS_NO_INPLAY_MS = 12e4;
     const WAF_RECOVERY_KEY = "tm_hty_inplay_waf_recovery_at";
@@ -480,6 +485,11 @@
     const TAB_CATEGORY_NAV_KEY_PREFIX = "tm_hty_inplay_tab_nav_at_";
     const TAB_TG_NAV_COOLDOWN_MS = TAB_CATEGORY_NAV_COOLDOWN_MS;
     const TAB_TG_NAV_KEY = "tm_hty_inplay_tab_tg_nav_at";
+    const CATEGORY_TAB_DWELL_KEY = "tm_hty_inplay_tab_dwell";
+    const CATEGORY_TAB_DWELL_MS = 2e4;
+    const CATEGORY_TAB_RESOLVED_KEY = "tm_hty_inplay_tab_resolved";
+    const CATEGORY_TAB_RESOLVED_MS = 9e4;
+    const QUALIFIED_MATCH_SCAN_GRACE_MS = 12e3;
     const USER_MANUAL_MATCH_GRACE_MS = 9e4;
     const USER_MANUAL_MATCH_ID_KEY = "tm_hty_inplay_manual_match_id";
     const USER_MANUAL_MATCH_AT_KEY = "tm_hty_inplay_manual_match_at";
@@ -576,6 +586,8 @@
     let navSuppressedUntil = 0;
     let lastBlockedHandleAt = 0;
     let lastPageReloadAt = 0;
+    let marketStallSince = 0;
+    let marketStallGaveUp = false;
     function getMatchIdFromUrl(href) {
       const url = String(href || window.location.href || "");
       const m = url.match(/\/sportEvents\/(?:inplay|incoming)\/football\/match\/(\d+)/i);
@@ -803,12 +815,16 @@
     let strategyList = [];
     let strategyTrigger = "";
     let strategyStatus = "loading";
+    let strategyLoadSeq = 0;
+    let strategyLoadFlight = null;
+    let strategyLoadFlightMatch = "";
     let strategyError = "";
     let strategyTimer = null;
     let routeWatchTimer = null;
     let lastWatchedUrl = window.location.href;
     let lastWatchedCategoryTab = "";
     let scriptCategoryTabSwitchAt = 0;
+    let lastCategoryHoldLogAt = 0;
     let userManualCategoryTabAt = 0;
     let userManualCategoryTab = "";
     let userManualMatchId = "";
@@ -1272,8 +1288,11 @@
       })) return true;
       const inflight = typeof getBetInFlight === "function" ? getBetInFlight() : null;
       if (inflight && inflight.phase !== "prepare") return true;
+      if (isCurrentMatchOddsBelowThresholdOnly()) return false;
       if (!currentMatchHasRuleMeetSignal()) return false;
-      if (!lastMatchScanAt) return true;
+      if (strategyStatus !== "ok" || !strategyList.length || !lastMatchScanAt) return true;
+      if (hasUnresolvedSpecialCategoryWork()) return true;
+      if (countPendingRuleMeetForNav(strategyList) > 0 && Date.now() - lastMatchScanAt < QUALIFIED_MATCH_SCAN_GRACE_MS) return true;
       if (lastScanButtonCount === 0 && Date.now() - lastMatchScanAt < 2e4) return true;
       return false;
     }
@@ -2589,20 +2608,145 @@
     function hasPendingSpecialCategoryPlateScan() {
       return hasPendingTgCategoryPlateScan() || hasPending1stCategoryPlateScan();
     }
+    function readJsonSessionStore(key) {
+      try {
+        const raw = JSON.parse(sessionStorage.getItem(key) || "{}");
+        return raw && typeof raw === "object" ? raw : {};
+      } catch (e) {
+        return {};
+      }
+    }
+    function touchCategoryTabDwell(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!matchId || !isScriptManagedCategoryTab(t)) return;
+      const store = readJsonSessionStore(CATEGORY_TAB_DWELL_KEY);
+      const mid = String(matchId);
+      const slot = store[mid] && typeof store[mid] === "object" ? store[mid] : {};
+      const age = slot.at ? Date.now() - Number(slot.at) : 0;
+      if (slot.tab !== t || age > CATEGORY_TAB_RESOLVED_MS) {
+        slot.tab = t;
+        slot.at = Date.now();
+        store[mid] = slot;
+        try {
+          sessionStorage.setItem(CATEGORY_TAB_DWELL_KEY, JSON.stringify(store));
+        } catch (e) {
+        }
+      }
+    }
+    function categoryTabDwellExceeded(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!matchId) return false;
+      const store = readJsonSessionStore(CATEGORY_TAB_DWELL_KEY);
+      const slot = store[String(matchId)];
+      if (!slot || slot.tab !== t || !slot.at) return false;
+      return Date.now() - Number(slot.at) >= CATEGORY_TAB_DWELL_MS;
+    }
+    function markCategoryTabResolved(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!matchId || !isScriptManagedCategoryTab(t)) return;
+      const store = readJsonSessionStore(CATEGORY_TAB_RESOLVED_KEY);
+      const now = Date.now();
+      Object.keys(store).forEach(function(id) {
+        const tabs = store[id];
+        if (!tabs || typeof tabs !== "object") {
+          delete store[id];
+          return;
+        }
+        Object.keys(tabs).forEach(function(k) {
+          if (now - Number(tabs[k] || 0) > CATEGORY_TAB_RESOLVED_MS) delete tabs[k];
+        });
+        if (!Object.keys(tabs).length) delete store[id];
+      });
+      const mid = String(matchId);
+      if (!store[mid] || typeof store[mid] !== "object") store[mid] = {};
+      if (store[mid][t] && now - Number(store[mid][t]) < CATEGORY_TAB_RESOLVED_MS) return;
+      store[mid][t] = now;
+      try {
+        sessionStorage.setItem(CATEGORY_TAB_RESOLVED_KEY, JSON.stringify(store));
+      } catch (e) {
+      }
+      console.log("[hty-inplay] \u5206\u7C7B\u5DF2\u5904\u7406\uFF0C\u77ED\u65F6\u4E0D\u518D\u56DE\u8DF3", mid, t);
+    }
+    function isCategoryTabResolved(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!matchId || !t) return false;
+      const store = readJsonSessionStore(CATEGORY_TAB_RESOLVED_KEY);
+      const at = store[String(matchId)] && store[String(matchId)][t];
+      return !!at && Date.now() - Number(at) < CATEGORY_TAB_RESOLVED_MS;
+    }
+    function currentCategoryTabHasReadyBet() {
+      const cur = getActiveMarketCategoryTab();
+      return strategyStates.some(function(st) {
+        if (!st || !st.strategy) return false;
+        const ready = st.actionable || st.hit && st.execStatus === "pending" && !st.dedupBlocked;
+        if (!ready) return false;
+        const tab = categoryTabForStrategyMarket(st.strategy.market);
+        if (!tab) return !isScriptManagedCategoryTab(cur);
+        return tab === cur;
+      });
+    }
+    function categoryTabStillNeedsPlate(tab) {
+      const t = String(tab || "").toLowerCase();
+      return strategyList.some(function(item) {
+        if (categoryTabForStrategyMarket(item.market) !== t) return false;
+        return strategyNeedsPlateScan(item);
+      });
+    }
+    function hasUnresolvedSpecialCategoryWork() {
+      if (hasPending1stCategoryPlateScan() && !isCategoryTabResolved(MARKET_CATEGORY_1ST)) return true;
+      if (hasPendingTgCategoryPlateScan() && !isCategoryTabResolved(MARKET_CATEGORY_TG)) return true;
+      return false;
+    }
+    function shouldHoldCategoryTab(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!isScriptManagedCategoryTab(t)) return false;
+      if (getActiveMarketCategoryTab() !== t) return false;
+      if (isCategoryTabResolved(t)) return false;
+      if (currentCategoryTabHasReadyBet()) return true;
+      if (!categoryTabStillNeedsPlate(t)) return false;
+      return !categoryTabDwellExceeded(t);
+    }
+    function abandonCategoryTabIfDue(tab) {
+      const t = String(tab || "").toLowerCase();
+      if (!isScriptManagedCategoryTab(t) || getActiveMarketCategoryTab() !== t) return;
+      if (isCategoryTabResolved(t) || isBetSessionLocked() || currentCategoryTabHasReadyBet()) return;
+      const hasStrategies = strategyList.some(function(item) {
+        return categoryTabForStrategyMarket(item.market) === t;
+      });
+      if (!hasStrategies) return;
+      if (categoryTabStillNeedsPlate(t) && !categoryTabDwellExceeded(t)) return;
+      markCategoryTabResolved(t);
+    }
     function resolveNeededCategoryTab(forAutoBet, requiredTab) {
       const explicit = String(requiredTab || "").toLowerCase();
-      if (explicit && isScriptManagedCategoryTab(explicit)) return explicit;
-      if (forAutoBet) return "";
+      const explicitOk = !!(explicit && isScriptManagedCategoryTab(explicit));
+      if (forAutoBet) return explicitOk ? explicit : "";
       if (isUserManualCategoryTabActive()) return "";
+      if (isBetSessionLocked()) return "";
+      if (currentCategoryTabHasReadyBet()) return "";
+      const cur = getActiveMarketCategoryTab();
+      if (isScriptManagedCategoryTab(cur)) touchCategoryTabDwell(cur);
+      if (shouldHoldCategoryTab(cur)) {
+        const otherPending = cur !== MARKET_CATEGORY_1ST && hasPending1stCategoryPlateScan() && !isCategoryTabResolved(MARKET_CATEGORY_1ST) || cur !== MARKET_CATEGORY_TG && hasPendingTgCategoryPlateScan() && !isCategoryTabResolved(MARKET_CATEGORY_TG);
+        if (otherPending && Date.now() - lastCategoryHoldLogAt > 8e3) {
+          lastCategoryHoldLogAt = Date.now();
+          console.log("[hty-inplay] \u5F53\u524D\u5206\u7C7B\u672A\u5B8C\u6210\uFF0C\u7981\u6B62\u5BF9\u8DF3", cur);
+        }
+        return "";
+      }
+      abandonCategoryTabIfDue(cur);
+      if (explicitOk) {
+        if (explicit === cur || isCategoryTabResolved(explicit)) return "";
+        return explicit;
+      }
       if (targetOption && targetOption.strategy) {
         const fromTarget = categoryTabForStrategyMarket(targetOption.strategy.market);
-        if (fromTarget) return fromTarget;
+        if (fromTarget && fromTarget !== cur && !isCategoryTabResolved(fromTarget)) return fromTarget;
       }
-      const cur = getActiveMarketCategoryTab();
-      if (hasPending1stCategoryPlateScan() && cur !== MARKET_CATEGORY_1ST) {
+      if (hasPending1stCategoryPlateScan() && cur !== MARKET_CATEGORY_1ST && !isCategoryTabResolved(MARKET_CATEGORY_1ST)) {
         return MARKET_CATEGORY_1ST;
       }
-      if (hasPendingTgCategoryPlateScan() && cur !== MARKET_CATEGORY_TG) {
+      if (hasPendingTgCategoryPlateScan() && cur !== MARKET_CATEGORY_TG && !isCategoryTabResolved(MARKET_CATEGORY_TG)) {
         return MARKET_CATEGORY_TG;
       }
       return "";
@@ -3555,11 +3699,12 @@
       });
       if (pendingAfter.length && (!firstPlateCount || pendingTeamOu.length || pending1st.length)) {
         let switchedCategory = false;
-        if (!isUserManualCategoryTabActive()) {
-          if (pending1st.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_1ST) {
+        const curCategory = getActiveMarketCategoryTab();
+        if (!isUserManualCategoryTabActive() && !isBetSessionLocked() && !currentCategoryTabHasReadyBet() && !shouldHoldCategoryTab(curCategory)) {
+          if (pending1st.length && curCategory !== MARKET_CATEGORY_1ST && !isCategoryTabResolved(MARKET_CATEGORY_1ST)) {
             await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_1ST);
             switchedCategory = true;
-          } else if (pendingTeamOu.length && getActiveMarketCategoryTab() !== MARKET_CATEGORY_TG) {
+          } else if (pendingTeamOu.length && curCategory !== MARKET_CATEGORY_TG && !isCategoryTabResolved(MARKET_CATEGORY_TG)) {
             await ensureMarketCategoryTab(true, false, MARKET_CATEGORY_TG);
             switchedCategory = true;
           }
@@ -3604,6 +3749,7 @@
       }
       syncOddsBlockedNavFromStates();
       syncCurrentMatchPendingWorkCache();
+      abandonCategoryTabIfDue(getActiveMarketCategoryTab());
       if (matchId) {
         const navMeet = countPendingRuleMeetForNav(strategyList);
         if (navMeet > 0) {
@@ -3827,6 +3973,13 @@
       }
       lastScanError = "";
       try {
+        if (isMarketBoardEmpty()) {
+          if (!placing && betResult !== "placing") {
+            betStep = "\u76D8\u53E3\u533A\u4ECD\u662F\u52A0\u8F7D\u9AA8\u67B6\uFF0C\u7B49\u5F85\u6062\u590D";
+          }
+          updatePanelStatus();
+          return targetOption;
+        }
         await ensureMarketView(force || hasPendingSpecialCategoryPlateScan());
         await ensureMarketCategoryTab(
           (force || hasPendingSpecialCategoryPlateScan()) && !isUserManualCategoryTabActive()
@@ -3866,7 +4019,7 @@
           await handleMatchEnded();
           return null;
         }
-        await ensureMarketView();
+        if (!isMarketBoardEmpty()) await ensureMarketView();
         const option = await refreshTargetOption(true);
         if (option) return option;
         await sleep(1500);
@@ -3875,6 +4028,84 @@
     }
     function isPageReady() {
       return !!document.querySelector(PAGE_READY_SEL);
+    }
+    function isMarketBoardEmpty() {
+      if (!isOnMatchBetPage()) return false;
+      if (countOddsButtons() > 0) return false;
+      const root = document.querySelector(PAGE_READY_SEL);
+      if (!root) return true;
+      const text = (root.innerText || root.textContent || "").replace(/\s+/g, "");
+      return text.length < MARKET_STALL_MIN_TEXT;
+    }
+    function readMarketStallReloads() {
+      try {
+        const raw = JSON.parse(sessionStorage.getItem(MARKET_STALL_RELOAD_KEY) || "{}");
+        return raw && typeof raw === "object" ? raw : {};
+      } catch (e) {
+        return {};
+      }
+    }
+    function marketStallReloadCount(id) {
+      const slot = readMarketStallReloads()[String(id)];
+      if (!slot) return 0;
+      if (Date.now() - Number(slot.at || 0) > MARKET_STALL_RELOAD_TTL_MS) return 0;
+      return Number(slot.n || 0);
+    }
+    function bumpMarketStallReload(id) {
+      const store = readMarketStallReloads();
+      const now = Date.now();
+      Object.keys(store).forEach(function(k) {
+        if (!store[k] || now - Number(store[k].at || 0) > MARKET_STALL_RELOAD_TTL_MS) delete store[k];
+      });
+      const prev = store[String(id)];
+      const n = prev && now - Number(prev.at || 0) <= MARKET_STALL_RELOAD_TTL_MS ? Number(prev.n || 0) : 0;
+      store[String(id)] = { n: n + 1, at: now };
+      try {
+        sessionStorage.setItem(MARKET_STALL_RELOAD_KEY, JSON.stringify(store));
+      } catch (e) {
+      }
+    }
+    function maybeReloadStalledMarket() {
+      if (!isOnMatchBetPage() || !matchId) {
+        marketStallSince = 0;
+        return false;
+      }
+      if (document.hidden || pageHidden || placing || reportSyncing || matchEndedHandling) return false;
+      if (isCurrentMatchEnded() || isMatchEndedModalVisible() || isBetSessionLocked()) {
+        marketStallSince = 0;
+        return false;
+      }
+      if (userManualBrowseAt && Date.now() - userManualBrowseAt < 8e3) return false;
+      if (!isMarketBoardEmpty()) {
+        marketStallSince = 0;
+        marketStallGaveUp = false;
+        return false;
+      }
+      if (!marketStallSince) {
+        marketStallSince = Date.now();
+        setBetStep("\u76D8\u53E3\u533A\u4ECD\u662F\u52A0\u8F7D\u9AA8\u67B6\uFF0C\u6EE1 1 \u5206\u949F\u5C06\u5F3A\u5236\u5237\u65B0");
+      }
+      if (Date.now() - marketStallSince < MARKET_STALL_MS) return false;
+      const used = marketStallReloadCount(matchId);
+      if (used >= MARKET_STALL_RELOAD_MAX) {
+        if (!marketStallGaveUp) {
+          marketStallGaveUp = true;
+          console.warn("[hty-inplay] \u76D8\u53E3\u9AA8\u67B6\u8D85\u8FC7\u81EA\u52A8\u5237\u65B0\u6B21\u6570", matchId, used);
+          setBetStep("\u76D8\u53E3\u533A\u957F\u65F6\u95F4\u672A\u6E32\u67D3\uFF0C\u81EA\u52A8\u5237\u65B0\u5DF2\u505C\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762");
+          renderPanel(true);
+        }
+        return false;
+      }
+      if (Date.now() - lastPageReloadAt < PAGE_RELOAD_COOLDOWN_MS) return false;
+      lastPageReloadAt = Date.now();
+      bumpMarketStallReload(matchId);
+      console.warn("[hty-inplay] \u76D8\u53E3\u533A\u9AA8\u67B6\u5361\u4F4F\uFF0C\u5F3A\u5236\u5237\u65B0", matchId, used + 1);
+      setBetStep("\u76D8\u53E3\u533A\u5361\u4F4F\uFF0C\u6B63\u5728\u5F3A\u5236\u5237\u65B0\u2026");
+      renderPanel(true);
+      withPageNavAllow(function() {
+        window.location.reload();
+      });
+      return true;
     }
     function matchPageUrl() {
       return inplayMatchUrl(matchId);
@@ -5266,6 +5497,12 @@
             }
           },
           {
+            name: "market-stall-reload",
+            run: async function() {
+              return maybeReloadStalledMarket();
+            }
+          },
+          {
             name: "stranded-recover",
             run: async function() {
               if (!(matchId && isStrandedSportEventsPage())) return false;
@@ -5301,7 +5538,7 @@
           {
             name: "strategy-odds-bet",
             run: async function() {
-              if (heartbeatTick % 2 === 0) {
+              if (heartbeatTick % 2 === 0 || strategyStatus === "loading" && matchId) {
                 await loadStrategies(true, true);
               }
               if (!shouldRunHeavyDomWork() || !panelReady || !strategyList.length || placing) {
@@ -5359,9 +5596,15 @@
       lastPanelKey = "";
       lastStatusPanelKey = "";
       lastOddsSignature = "";
+      marketStallSince = 0;
+      marketStallGaveUp = false;
       targetOption = null;
       strategyList = [];
       strategyTrigger = "";
+      strategyStatus = "loading";
+      strategyError = "";
+      strategyLoadFlight = null;
+      strategyLoadFlightMatch = "";
       lastMatchScanAt = 0;
       loadActiveMatches(true);
       loadStrategies(false);
@@ -7851,7 +8094,9 @@
       lastStrategyHitKey = "";
     }
     function fetchAlertStrategies(id) {
-      return new Promise(function(resolve, reject) {
+      if (!id) return Promise.reject(new Error("\u5F53\u524D\u9875\u65E0\u8D5B\u4E8BID"));
+      let timer = null;
+      const req = new Promise(function(resolve, reject) {
         GM_xmlhttpRequest({
           method: "GET",
           url: ALERT_API + "?match_id=" + encodeURIComponent(id),
@@ -7876,6 +8121,14 @@
           }
         });
       });
+      const timeout = new Promise(function(_, reject) {
+        timer = setTimeout(function() {
+          reject(new Error("\u7B56\u7565\u63A5\u53E3\u8BF7\u6C42\u8D85\u65F6"));
+        }, 16e3);
+      });
+      return Promise.race([req, timeout]).finally(function() {
+        if (timer) clearTimeout(timer);
+      });
     }
     function strategyRenderKey() {
       if (strategyStatus === "err") {
@@ -7899,9 +8152,33 @@
       }).join(";");
       return strategyStatus + "|" + strategyTrigger + "|" + strategyList.length + "|" + rows;
     }
-    async function loadStrategies(silent, skipMatchesLoad) {
-      const isSilent = !!silent;
+    function strategyLoadStillCurrent(seq, forMatch) {
+      return seq === strategyLoadSeq && String(matchId || "") === String(forMatch || "");
+    }
+    function publishStrategyList(forMatch) {
+      const curMeet = countPendingRuleMeetForNav(strategyList);
+      if (curMeet > 0) {
+        matchRuleMeetCache[String(forMatch)] = { meetCount: curMeet, at: Date.now() };
+      } else {
+        delete matchRuleMeetCache[String(forMatch)];
+      }
+      syncCurrentMatchPendingWorkCache();
+      lastMatchesListKey = "";
+      lastStrategyListKey = "";
+      lastStrategyHitKey = "";
+      renderPanel(true);
+    }
+    async function loadStrategiesBody(seq, forMatch, isSilent, skipMatchesLoad) {
       if (!skipMatchesLoad) void loadActiveMatches(isSilent);
+      if (!forMatch) {
+        if (!strategyLoadStillCurrent(seq, forMatch)) return;
+        strategyStatus = "ok";
+        strategyError = "";
+        strategyList = [];
+        strategyTrigger = "";
+        renderPanel(true);
+        return;
+      }
       if (!isSilent && !strategyList.length) {
         strategyStatus = "loading";
         strategyError = "";
@@ -7909,48 +8186,48 @@
       }
       let reconciled = false;
       try {
-        const payload = await fetchAlertStrategies(matchId);
+        const payload = await fetchAlertStrategies(forMatch);
+        if (!strategyLoadStillCurrent(seq, forMatch)) return;
         strategyList = Array.isArray(payload.data) ? payload.data : [];
         strategyTrigger = payload.trigger != null ? String(payload.trigger) : "";
         reconciled = reconcileLocalExecutedWithApi();
-        await syncPendingExecutedStrategyStatuses();
-        await syncAbortedStrategyStatuses();
         strategyStatus = "ok";
         strategyError = "";
-        const curMeet = countPendingRuleMeetForNav(strategyList);
-        if (curMeet > 0) {
-          matchRuleMeetCache[String(matchId)] = { meetCount: curMeet, at: Date.now() };
-        } else {
-          delete matchRuleMeetCache[String(matchId)];
-        }
-        syncCurrentMatchPendingWorkCache();
-        lastMatchesListKey = "";
         if (reconciled) {
           lastStrategyListKey = "";
           lastStrategyHitKey = "";
         }
+        publishStrategyList(forMatch);
       } catch (err) {
+        if (!strategyLoadStillCurrent(seq, forMatch)) return;
         if (!isSilent || !strategyList.length) {
           strategyList = [];
           strategyTrigger = "";
         }
         strategyStatus = "err";
         strategyError = err && err.message ? err.message : "\u52A0\u8F7D\u5931\u8D25";
-      }
-      const strategyChanged = strategyRenderKey() !== lastStrategyListKey;
-      if (strategyChanged || reconciled) {
+        lastStrategyListKey = "";
         renderPanel(true);
-      } else if (!isSilent) {
-        renderPanel();
+        return;
       }
       if (panelReady && strategyList.length) {
         syncOddsObserverState();
       }
       try {
+        await syncPendingExecutedStrategyStatuses();
+        await syncAbortedStrategyStatuses();
+        if (strategyLoadStillCurrent(seq, forMatch)) publishStrategyList(forMatch);
+      } catch (err) {
+        console.warn("[hty-inplay] \u7B56\u7565\u72B6\u6001\u8865\u4F20\u5931\u8D25", err);
+      }
+      if (!strategyLoadStillCurrent(seq, forMatch)) return;
+      try {
         await refreshTargetOption(true);
+        if (!strategyLoadStillCurrent(seq, forMatch)) return;
         renderPanel(true, false);
         maybeTriggerAutoBet(false);
       } catch (err) {
+        if (!strategyLoadStillCurrent(seq, forMatch)) return;
         lastScanError = err && err.message ? err.message : "\u626B\u63CF\u5931\u8D25";
         betStep = "\u626B\u63CF\u5F02\u5E38";
         renderPanel(true);
@@ -7964,6 +8241,20 @@
           setBetStep("\u672C\u573A\u76D8\u53E3\u4EF7\u4E0D\u8DB3\u9608\u503C\uFF0C\u7B49\u5F85\u5176\u5B83\u8FBE\u6807\u6BD4\u8D5B\u6216\u8D54\u7387\u56DE\u5347");
         }
       }
+    }
+    function loadStrategies(silent, skipMatchesLoad) {
+      const forMatch = String(matchId || "");
+      if (strategyLoadFlight && strategyLoadFlightMatch === forMatch) {
+        return strategyLoadFlight;
+      }
+      const seq = ++strategyLoadSeq;
+      const isSilent = !!silent;
+      strategyLoadFlightMatch = forMatch;
+      const job = loadStrategiesBody(seq, forMatch, isSilent, !!skipMatchesLoad);
+      strategyLoadFlight = job;
+      return job.finally(function() {
+        if (strategyLoadFlight === job) strategyLoadFlight = null;
+      });
     }
     function scheduleStrategyPoll() {
       scheduleHeartbeat();
@@ -8062,6 +8353,14 @@
       const statusEl = panel.querySelector(".tm-hty-strategy-status");
       const listEl = panel.querySelector(".tm-hty-strategy-list");
       if (!statusEl || !listEl) return;
+      if (!matchId) {
+        statusEl.textContent = "\u6253\u5F00\u6BD4\u8D5B\u540E\u52A0\u8F7D";
+        statusEl.dataset.kind = "info";
+        listEl.innerHTML = "";
+        lastStrategyListKey = "";
+        lastStrategyHitKey = "";
+        return;
+      }
       const listKey = strategyRenderKey();
       const hitKey = strategyHitRenderKey();
       if (listKey === lastStrategyListKey && hitKey === lastStrategyHitKey) return;
@@ -9939,7 +10238,7 @@
           }
           return;
         }
-        if (!isPageReady()) {
+        if (!isPageReady() || isMarketBoardEmpty()) {
           schedulePoll();
           return;
         }
@@ -10171,6 +10470,7 @@
       setupRouteWatcher();
       setupManualCartPanelWatch();
       loadActiveMatches(false);
+      if (matchId) loadStrategies(false);
       scheduleStrategyPoll();
       renderPanel(true);
       applyQuantPanelRouteMode();

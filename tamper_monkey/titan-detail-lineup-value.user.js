@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.89
-// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。
+// @version      1.8.95
+// @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。对比首发图中间显示两队首发/上场身价、均龄、主教练和比分；拼成相对本场标出是否换帅、是否变阵。对比图上的进球按钮与本页相同：点击显示全部赛事进球，右击只显示相同联赛。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
 // @run-at       document-end
@@ -19,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.89';
+  const SCRIPT_VERSION = '1.8.95';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -612,18 +612,23 @@
   }
 
   function syncGoalToggle() {
-    const btn = document.querySelector('.tm-lv-goal-btn');
-    if (!btn) return;
-    btn.classList.toggle('tm-lv-goal-on', showGoals && !goalLeagueOnly);
-    btn.classList.toggle('tm-lv-goal-league', showGoals && goalLeagueOnly);
-    btn.classList.toggle('tm-lv-goal-loading', goalLoading);
-    let title = '点击显示全部赛事进球，右击只显示本场相同联赛';
-    if (!hasPageLineup()) title = '本场暂无首发。点击选主队、客队近场比赛，拼成首发图显示在本页';
-    else if (goalLoading) title = '正在读取进球';
-    else if (showGoals && goalLeagueOnly) title = '当前只显示相同联赛进球，右击隐藏；点击改为全部赛事';
-    else if (showGoals) title = '当前显示全部赛事进球，点击隐藏；右击改为相同联赛';
-    btn.title = title;
-    btn.setAttribute('aria-pressed', showGoals ? 'true' : 'false');
+    const buttons = document.querySelectorAll('.tm-lv-goal-btn');
+    if (!buttons.length) return;
+    buttons.forEach(function (btn) {
+      btn.classList.toggle('tm-lv-goal-on', showGoals && !goalLeagueOnly);
+      btn.classList.toggle('tm-lv-goal-league', showGoals && goalLeagueOnly);
+      btn.classList.toggle('tm-lv-goal-loading', goalLoading);
+      const inCmp = btn.classList.contains('tm-lv-cmp-goal');
+      let title = inCmp
+        ? '点击在对比首发图显示全部赛事进球，右击只显示相同联赛'
+        : '点击显示全部赛事进球，右击只显示本场相同联赛';
+      if (!inCmp && !hasPageLineup()) title = '本场暂无首发。点击选主队、客队近场比赛，拼成首发图显示在本页';
+      else if (goalLoading) title = '正在读取进球';
+      else if (showGoals && goalLeagueOnly) title = '当前只显示相同联赛进球，右击隐藏；点击改为全部赛事';
+      else if (showGoals) title = '当前显示全部赛事进球，点击隐藏；右击改为相同联赛';
+      btn.title = title;
+      btn.setAttribute('aria-pressed', showGoals ? 'true' : 'false');
+    });
   }
 
   function renderGoalMarks() {
@@ -680,6 +685,7 @@
     ensureGoalToggle();
     if (!showGoals) {
       renderGoalMarks();
+      maybeRepaintCmpGoals();
       return;
     }
     const ids = matchTeamIds();
@@ -697,6 +703,7 @@
       parts[5] === 'both';
     if (samePack) {
       renderGoalMarks();
+      maybeRepaintCmpGoals();
       return;
     }
     if (goalLoading) return;
@@ -708,6 +715,7 @@
         if (req !== goalReq || !showGoals) return;
         goalLoading = false;
         renderGoalMarks();
+        maybeRepaintCmpGoals();
       })
       .catch(function (err) {
         if (req !== goalReq) return;
@@ -716,6 +724,7 @@
         saveShowGoals();
         syncGoalToggle();
         renderGoalMarks();
+        maybeRepaintCmpGoals();
         if (alertOnError) alert((err && err.message) || '读取球员进球失败');
       });
   }
@@ -1161,6 +1170,96 @@
     return m ? m[1] : '';
   }
 
+  function cmpCoachFrom(el) {
+    const a = el && el.querySelector('a.coach');
+    if (!a) {
+      const m = String((el && el.textContent) || '').match(/主教练[:：]\s*([^)）]+)/);
+      return { name: m ? m[1].replace(/\s+/g, '') : '', href: '' };
+    }
+    const title = String(a.getAttribute('title') || '').replace(/\s+/g, '');
+    const text = String(a.textContent || '').replace(/\s+/g, '');
+    const fromText = text.match(/主教练[:：]\s*([^)）]+)/);
+    let href = String(a.getAttribute('href') || '').trim();
+    if (href.indexOf('//') === 0) href = 'https:' + href;
+    return { name: title || (fromText ? fromText[1] : ''), href: href };
+  }
+
+  function cmpMoneyUnit(doc) {
+    const blob = doc && doc.body ? doc.body.textContent || '' : '';
+    if (blob.indexOf('万欧元') !== -1) return '万欧元';
+    if (blob.indexOf('万英镑') !== -1 || blob.indexOf('万英磅') !== -1) return '万英镑';
+    if (blob.indexOf('万美元') !== -1 || blob.indexOf('万美金') !== -1) return '万美元';
+    return '万欧元';
+  }
+
+  function normCoachName(name) {
+    return String(name || '')
+      .replace(/主教练[:：]/g, '')
+      .replace(/[()（）\s.·•・]/g, '')
+      .toLowerCase();
+  }
+
+  function coachChanged(past, cur) {
+    const a = normCoachName(past);
+    const b = normCoachName(cur);
+    return !!(a && b && a !== b);
+  }
+
+  function currentCmpCoach(side) {
+    return cmpCoachFrom(document.querySelector(side === 'home' ? '.homeN' : '.guestN'));
+  }
+
+  function currentCmpScore() {
+    const el = document.getElementById('headVs');
+    const text = String((el && el.textContent) || '').replace(/\s+/g, '');
+    const m = text.match(/(\d+)\s*[-:：]\s*(\d+)/);
+    return m ? m[1] + '-' + m[2] : '';
+  }
+
+  let pageLineupSnap = null;
+
+  function rememberPageLineup() {
+    if (pageLineupSnap) return;
+    const box = document.getElementById('matchBox2');
+    if (box && box.dataset.tmLvSynth === '1') return;
+    const homeCoach = currentCmpCoach('home');
+    const awayCoach = currentCmpCoach('away');
+    const homeForm = currentCmpForm('home');
+    const awayForm = currentCmpForm('away');
+    if (!homeCoach.name && !awayCoach.name && !homeForm && !awayForm && !hasPageLineup()) return;
+    pageLineupSnap = {
+      homeForm: homeForm,
+      awayForm: awayForm,
+      homeCoach: homeCoach,
+      awayCoach: awayCoach,
+      score: currentCmpScore(),
+    };
+  }
+
+  /** 拼成写进本页之后，本场阵型和教练以打开对比前的页面为准。 */
+  function baseCmpSide(side) {
+    const box = document.getElementById('matchBox2');
+    if (box && box.dataset.tmLvSynth === '1' && pageLineupSnap) {
+      if (side === 'home') {
+        return {
+          form: pageLineupSnap.homeForm || '',
+          coach: pageLineupSnap.homeCoach || { name: '', href: '' },
+          score: pageLineupSnap.score || '',
+        };
+      }
+      return {
+        form: pageLineupSnap.awayForm || '',
+        coach: pageLineupSnap.awayCoach || { name: '', href: '' },
+        score: pageLineupSnap.score || '',
+      };
+    }
+    return {
+      form: currentCmpForm(side),
+      coach: currentCmpCoach(side),
+      score: currentCmpScore(),
+    };
+  }
+
   function cmpPlayerFromScope(scope) {
     const a = scope.querySelector('.name a, a[href*="/player/"]');
     const href = (a && a.getAttribute('href')) || '';
@@ -1179,6 +1278,7 @@
       img: img,
       value: vm ? parseFloat(vm[1]) : null,
       bday: birthdayFromText(blob),
+      subIn: !!scope.querySelector('img[src*="bf_img2/4.png"]'),
     };
   }
 
@@ -1424,8 +1524,10 @@
   function cmpRowButtonHtml(side, row) {
     const pack = cmpLineupCache[row.id];
     const form = pack ? (row.venue === 'away' ? pack.awayForm : pack.homeForm) : '';
-    const cur = currentCmpForm(side);
-    const changed = !!(form && cur && form !== cur);
+    const pastCoach = pack ? (row.venue === 'away' ? pack.awayCoach : pack.homeCoach) : null;
+    const base = baseCmpSide(side);
+    const changed = !!(form && base.form && form !== base.form);
+    const coachCh = coachChanged(pastCoach && pastCoach.name, base.coach && base.coach.name);
     const selected = cmpSelected && cmpSelected[side] === row.id;
     return (
       '<button type="button" class="tm-lv-cmp-row' +
@@ -1441,12 +1543,13 @@
       '</span><b class="tm-lv-cmp-matchup">' +
       cmpMatchupHtml(row) +
       '</b>' +
-      (form
+      (form || coachCh
         ? '<span class="tm-lv-cmp-formchip' +
-          (changed ? ' tm-lv-cmp-formchip-on' : '') +
+          (changed || coachCh ? ' tm-lv-cmp-formchip-on' : '') +
           '">' +
           escHtml(form) +
           (changed ? ' 变阵' : '') +
+          (coachCh ? ' 换帅' : '') +
           '</span>'
         : '') +
       '</button>'
@@ -1490,6 +1593,9 @@
     return {
       homeForm: cmpFormation(doc.querySelector('.homeN')),
       awayForm: cmpFormation(doc.querySelector('.guestN')),
+      homeCoach: cmpCoachFrom(doc.querySelector('.homeN')),
+      awayCoach: cmpCoachFrom(doc.querySelector('.guestN')),
+      unit: cmpMoneyUnit(doc),
       home: home,
       away: away,
       homeCols: homeCols,
@@ -1500,11 +1606,11 @@
   }
 
   function loadCmpLineup(id) {
-    if (cmpLineupCache[id] && cmpLineupCache[id].v === 2) return Promise.resolve(cmpLineupCache[id]);
+    if (cmpLineupCache[id] && cmpLineupCache[id].v === 3) return Promise.resolve(cmpLineupCache[id]);
     return gmGetText('https://live.titan007.com/detail/' + id + 'cn.htm?lineup=1').then(function (html) {
       const parsed = parseDetailLineup(html);
       if (!parsed.home.length && !parsed.away.length) parsed.empty = true;
-      parsed.v = 2;
+      parsed.v = 3;
       cmpLineupCache[id] = parsed;
       return parsed;
     });
@@ -1620,6 +1726,41 @@
     return money + '/' + ageText;
   }
 
+  function cmpGoalCount(p) {
+    if (!showGoals || !goalPack || !p || !p.id) return 0;
+    const map = goalLeagueOnly ? goalPack.leagueById || {} : goalPack.byId || {};
+    const goals = map[String(p.id)];
+    return goals > 0 ? goals : 0;
+  }
+
+  function cmpGoalBadge(p) {
+    const goals = cmpGoalCount(p);
+    if (!goals) return '';
+    return '<u class="tm-lv-cmp-gmark" title="' + goals + '球">' + BALL_ICON + '<span>' + goals + '</span></u>';
+  }
+
+  function cmpGoalSums() {
+    if (!showGoals || !goalPack) return '';
+    const home = goalLeagueOnly ? goalPack.homeLeague : goalPack.homeTotal;
+    const away = goalLeagueOnly ? goalPack.awayLeague : goalPack.awayTotal;
+    const comp = goalLeagueOnly ? goalPack.leagueName || '相同联赛' : '全部赛事';
+    return (
+      '<span class="tm-lv-cmp-gsum tm-lv-cmp-gsum-h" title="' +
+      escHtml(comp + '总进球') +
+      '">' +
+      BALL_ICON +
+      '<span>' +
+      home +
+      '</span></span><span class="tm-lv-cmp-gsum tm-lv-cmp-gsum-a" title="' +
+      escHtml(comp + '总进球') +
+      '">' +
+      BALL_ICON +
+      '<span>' +
+      away +
+      '</span></span>'
+    );
+  }
+
   function cmpPitchCard(p, mark) {
     const img = p.img || PITCH_NOPHOTO;
     const tag = mark.tag ? '<em>' + escHtml(mark.tag) + '</em>' : '';
@@ -1628,7 +1769,9 @@
       mark.cls +
       '" title="' +
       escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
-      '"><i>' +
+      '">' +
+      cmpGoalBadge(p) +
+      '<i>' +
       escHtml(p.num || '') +
       '</i><div class="tm-lv-cmp-av"><img class="tm-lv-cmp-photo-img" alt="" src="' +
       escHtml(img) +
@@ -1651,7 +1794,9 @@
       mark.cls +
       '" title="' +
       escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
-      '"><i>' +
+      '">' +
+      cmpGoalBadge(p) +
+      '<i>' +
       escHtml(p.num || '') +
       '</i><span><b>' +
       escHtml(p.name || '') +
@@ -1660,6 +1805,205 @@
       '<small>' +
       escHtml(cmpMetricText(p)) +
       '</small></span></div>'
+    );
+  }
+
+  function cmpSumValues(list) {
+    let sum = 0;
+    let n = 0;
+    (list || []).forEach(function (p) {
+      if (!Number.isFinite(p.value)) return;
+      sum += p.value;
+      n += 1;
+    });
+    return n ? sum : NaN;
+  }
+
+  function cmpAgeStat(list) {
+    const asOf = matchAsOfDate();
+    let sum = 0;
+    let n = 0;
+    (list || []).forEach(function (p) {
+      const age = calcAge(p.bday, asOf);
+      if (!Number.isFinite(age)) return;
+      sum += age;
+      n += 1;
+    });
+    return { avg: n ? sum / n : null, n: n };
+  }
+
+  function cmpOnField(starters, bench) {
+    return (starters || []).concat(
+      (bench || []).filter(function (p) {
+        return p.subIn;
+      })
+    );
+  }
+
+  function cmpCoachHtml(coach, changed, curName) {
+    const name = (coach && coach.name) || '';
+    if (!name) return '';
+    const tip = changed ? (curName ? '换帅，本场 ' + curName : '与本场主教练不同') : '';
+    const mark = changed ? ' class="tm-lv-cmp-diff" title="' + escHtml(tip) + '"' : '';
+    if (coach.href) {
+      return (
+        '<a' +
+        mark +
+        ' href="' +
+        escHtml(coach.href) +
+        '" target="_blank" rel="noopener noreferrer">' +
+        escHtml(name) +
+        '</a>'
+      );
+    }
+    if (!changed) return escHtml(name);
+    return '<em class="tm-lv-cmp-diff" title="' + escHtml(tip) + '">' + escHtml(name) + '</em>';
+  }
+
+  function cmpFormHtml(form, changed, curForm) {
+    if (!form) return '';
+    if (!changed) return escHtml(form);
+    const tip = curForm ? '变阵，本场 ' + curForm : '与本场阵型不同';
+    return '<em class="tm-lv-cmp-diff" title="' + escHtml(tip) + '">' + escHtml(form) + '</em>';
+  }
+
+  function cmpScoreHtml(score, title) {
+    return '<span title="' + escHtml(title || '') + '">' + escHtml(score || '-') + '</span>';
+  }
+
+  function cmpSumLine(label, homeVal, awayVal, homeUnit, awayUnit) {
+    const mark = frameRatioMark(homeVal, awayVal);
+    const markHtml = mark.text ? '<span class="tm-lv-cmp-sum-x">' + escHtml(mark.text) + '</span>' : '';
+    return (
+      '<span class="tm-lv-cmp-sum"><b>' +
+      escHtml(label) +
+      '</b><span class="tm-lv-cmp-sum-h">' +
+      escHtml(formatMoney(homeVal, homeUnit || '万欧元')) +
+      '</span>' +
+      (mark.side === 'h' ? markHtml : '') +
+      '<span class="tm-lv-cmp-sum-sep">vs</span><span class="tm-lv-cmp-sum-a">' +
+      escHtml(formatMoney(awayVal, awayUnit || '万欧元')) +
+      '</span>' +
+      (mark.side === 'a' ? markHtml : '') +
+      '</span>'
+    );
+  }
+
+  function cmpPairLine(label, homeHtml, awayHtml) {
+    return (
+      '<span class="tm-lv-cmp-sum"><b>' +
+      escHtml(label) +
+      '</b><span class="tm-lv-cmp-sum-h">' +
+      homeHtml +
+      '</span><span class="tm-lv-cmp-sum-sep">vs</span><span class="tm-lv-cmp-sum-a">' +
+      awayHtml +
+      '</span></span>'
+    );
+  }
+
+  function cmpMidHtml(home, away, flags) {
+    home = home || {};
+    away = away || {};
+    const homeXi = home.starters || [];
+    const awayXi = away.starters || [];
+    const hasPlayers = homeXi.length || awayXi.length;
+    if (!hasPlayers && !(home.score || away.score)) return '';
+    const homeUnit = home.unit || '万欧元';
+    const awayUnit = away.unit || homeUnit;
+    let html = '<div class="tm-lv-cmp-mid">';
+    if (hasPlayers) {
+      html += cmpSumLine('首发', cmpSumValues(homeXi), cmpSumValues(awayXi), homeUnit, awayUnit);
+      html += cmpSumLine(
+        '上场',
+        cmpSumValues(cmpOnField(homeXi, home.bench)),
+        cmpSumValues(cmpOnField(awayXi, away.bench)),
+        homeUnit,
+        awayUnit
+      );
+      html +=
+        '<span class="tm-lv-cmp-sum"><b>均龄</b><span class="tm-lv-cmp-sum-h">' +
+        escHtml(formatAvgAge(cmpAgeStat(homeXi))) +
+        '</span><span class="tm-lv-cmp-sum-sep">vs</span><span class="tm-lv-cmp-sum-a">' +
+        escHtml(formatAvgAge(cmpAgeStat(awayXi))) +
+        '</span></span>';
+    }
+    if (flags && flags.singleScore) {
+      html +=
+        '<span class="tm-lv-cmp-sum"><b>比分</b><span class="tm-lv-cmp-sum-mid">' +
+        escHtml(home.score || away.score || '-') +
+        '</span></span>';
+    } else {
+      html += cmpPairLine('比分', cmpScoreHtml(home.score, home.scoreTitle), cmpScoreHtml(away.score, away.scoreTitle));
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /** 教练在底边中线两侧，阵型在教练名下面。主队靠中线右对齐，客队左对齐。 */
+  function cmpCoachLineHtml(home, away, flags) {
+    home = home || {};
+    away = away || {};
+    flags = flags || {};
+    function side(meta, kind) {
+      const formOn = kind === 'home' ? flags.homeForm : flags.awayForm;
+      const curForm = kind === 'home' ? flags.homeCurForm : flags.awayCurForm;
+      const coachOn = kind === 'home' ? flags.homeCoach : flags.awayCoach;
+      const coach = cmpCoachHtml(meta.coach, coachOn, meta.curCoach);
+      const form = cmpFormHtml(meta.form, formOn, curForm);
+      if (!coach && !form) return '';
+      return (coach ? '<b class="nm">' + coach + '</b>' : '') + (form ? '<b class="fm">' + form + '</b>' : '');
+    }
+    const h = side(home, 'home');
+    const a = side(away, 'away');
+    if (!h && !a) return '';
+    return '<div class="tm-lv-cmp-coachline"><span class="h">' + h + '</span><span class="a">' + a + '</span></div>';
+  }
+
+  /** 左半场从左到右是门将到前锋；右半场相反。归成门将/后卫/中场/前锋。 */
+  function cmpLinesFromCols(cols, isHome) {
+    const ordered = (cols || []).slice();
+    if (!isHome) ordered.reverse();
+    const g = {
+      gk: { val: 0, n: 0 },
+      def: { val: 0, n: 0 },
+      mid: { val: 0, n: 0 },
+      fw: { val: 0, n: 0 },
+    };
+    function add(key, players) {
+      (players || []).forEach(function (p) {
+        if (!Number.isFinite(p.value)) return;
+        g[key].val += p.value;
+        g[key].n += 1;
+      });
+    }
+    if (!ordered.length) return g;
+    add('gk', ordered[0].players);
+    if (ordered.length === 1) return g;
+    add('fw', ordered[ordered.length - 1].players);
+    if (ordered.length === 2) return g;
+    if (ordered.length === 3) {
+      add('def', ordered[1].players);
+      return g;
+    }
+    add('def', ordered[1].players);
+    for (let i = 2; i < ordered.length - 1; i++) add('mid', ordered[i].players);
+    return g;
+  }
+
+  function cmpCornerBarsHtml(home, away) {
+    home = home || {};
+    away = away || {};
+    const maxTotal = Math.max(frameLineTotal(home.lines), frameLineTotal(away.lines), 1);
+    const h = frameCornerInner(home.lines, '', home.unit || '万欧元', maxTotal, false);
+    const a = frameCornerInner(away.lines, '', away.unit || '万欧元', maxTotal, true);
+    if (!h && !a) return '';
+    return (
+      (h
+        ? '<div class="tm-lv-cmp-corner tm-lv-cmp-corner-h" title="' + escHtml(h.title) + '">' + h.svg + '</div>'
+        : '') +
+      (a
+        ? '<div class="tm-lv-cmp-corner tm-lv-cmp-corner-a" title="' + escHtml(a.title) + '">' + a.svg + '</div>'
+        : '')
     );
   }
 
@@ -1676,10 +2020,51 @@
     return { cls: 'miss', tag: '没上' };
   }
 
+  let cmpGoalSig = '';
+
+  function cmpGoalSignature() {
+    return [
+      showGoals ? '1' : '0',
+      goalLeagueOnly ? 'L' : 'A',
+      goalLoading ? '1' : '0',
+      goalPack ? goalPack.key : '',
+    ].join('|');
+  }
+
+  function noteCmpGoalPaint() {
+    cmpGoalSig = cmpGoalSignature();
+  }
+
+  function maybeRepaintCmpGoals() {
+    const modal = document.getElementById('tm-lv-cmp');
+    if (!modal || modal.hidden) return;
+    if (!cmpSelected || !cmpSelected.home || !cmpSelected.away) return;
+    const sig = cmpGoalSignature();
+    if (sig === cmpGoalSig) return;
+    cmpGoalSig = sig;
+    renderCmpBoard();
+  }
+
+  function currentSideMeta(side) {
+    const base = baseCmpSide(side);
+    const box = document.getElementById('matchBox2');
+    return {
+      starters: currentCmpXi(side),
+      bench: currentCmpBench(side),
+      form: base.form,
+      coach: base.coach,
+      score: base.score,
+      scoreTitle: '本场比分',
+      unit: detectUnit(box || document.body),
+      lines: cmpLinesFromCols(currentCmpColumns(side), side === 'home'),
+    };
+  }
+
   function renderCmpBoard() {
     const modal = document.getElementById('tm-lv-cmp');
     const board = modal && modal.querySelector('.tm-lv-cmp-board');
     if (!board || !cmpPack) return;
+    rememberPageLineup();
     const pickedBoth = cmpSelected && cmpSelected.home && cmpSelected.away;
     if (!pickedBoth) {
       board.innerHTML = '<p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p>';
@@ -1700,9 +2085,14 @@
       const pack = cmpLineupCache[id];
       const venue = row && row.venue === 'away' ? 'away' : 'home';
       const pastForm = pack ? (venue === 'away' ? pack.awayForm : pack.homeForm) : '';
-      const curForm = currentCmpForm(side);
-      const changed = !!(pastForm && curForm && pastForm !== curForm);
+      const pastCoach = pack ? (venue === 'away' ? pack.awayCoach : pack.homeCoach) : null;
+      const base = baseCmpSide(side);
+      const formCh = !!(pastForm && base.form && pastForm !== base.form);
+      const coachCh = coachChanged(pastCoach && pastCoach.name, base.coach && base.coach.name);
       const when = row && row.when ? formatCmpWhen(row.when) : '';
+      const cap2 =
+        (formCh ? '<em class="tm-lv-cmp-flag">变阵</em> 本场' + escHtml(base.form) : '') +
+        (coachCh ? ' <em class="tm-lv-cmp-flag">换帅</em> 本场' + escHtml((base.coach && base.coach.name) || '') : '');
       const cap =
         '<div class="tm-lv-cmp-cap"><div>' +
         escHtml(when) +
@@ -1710,18 +2100,48 @@
         (row ? cmpMatchupHtml(row) : escHtml(cmpPack[side].name)) +
         (pastForm ? ' ' + escHtml(pastForm) : '') +
         '</div><div class="tm-lv-cmp-cap2">' +
-        (changed ? '变阵 本场' + escHtml(curForm) : '') +
+        cap2 +
         '</div></div>';
+      const meta = pack
+        ? {
+            starters: (venue === 'away' ? pack.away : pack.home) || [],
+            bench: (venue === 'away' ? pack.awayBench : pack.homeBench) || [],
+            form: pastForm,
+            coach: pastCoach || { name: '', href: '' },
+            score: (row && row.score) || '',
+            scoreTitle: row ? cmpMatchupText(row) : '',
+            unit: pack.unit || '万欧元',
+            formChanged: formCh,
+            coachChanged: coachCh,
+            curForm: base.form || '',
+            curCoach: (base.coach && base.coach.name) || '',
+          }
+        : null;
       if (!pack) {
-        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">正在读取阵容…</div>', news: '', bench: '', pastSet: {} };
+        return {
+          cap: cap,
+          pitch: '<div class="tm-lv-cmp-wait">正在读取阵容…</div>',
+          news: '',
+          bench: '',
+          pastSet: {},
+          meta: null,
+        };
       }
       let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
       cols = cols.slice();
       if ((side === 'home' && venue === 'away') || (side === 'away' && venue === 'home')) cols.reverse();
+      if (meta) meta.lines = cmpLinesFromCols(cols, side === 'home');
       const pastXi = (venue === 'away' ? pack.away : pack.home) || [];
       const pastBench = (venue === 'away' ? pack.awayBench : pack.homeBench) || [];
       if (!pastXi.length) {
-        return { cap: cap, pitch: '<div class="tm-lv-cmp-wait">这场没有首发</div>', news: '', bench: '', pastSet: {} };
+        return {
+          cap: cap,
+          pitch: '<div class="tm-lv-cmp-wait">这场没有首发</div>',
+          news: '',
+          bench: '',
+          pastSet: {},
+          meta: meta,
+        };
       }
       const curXi = currentCmpXi(side);
       const curBench = currentCmpBench(side);
@@ -1768,7 +2188,7 @@
             })
             .join('')
         : '<span class="tm-lv-cmp-empty">那场没有替补</span>';
-      return { cap: cap, pitch: pitch, news: news, bench: bench, pastSet: pastSet };
+      return { cap: cap, pitch: pitch, news: news, bench: bench, pastSet: pastSet, meta: meta };
     }
     const home = sideBlock('home');
     const away = sideBlock('away');
@@ -1792,9 +2212,11 @@
         })
         .join('');
     }
-    function fieldHtml(homeInner, awayInner) {
+    function fieldHtml(homeInner, awayInner, overlay) {
       return (
-        '<div class="tm-lv-cmp-scale"><div class="tm-lv-cmp-field"><div class="tm-lv-cmp-half tm-lv-cmp-half-home">' +
+        '<div class="tm-lv-cmp-scale"><div class="tm-lv-cmp-field">' +
+        (overlay || '') +
+        '<div class="tm-lv-cmp-half tm-lv-cmp-half-home">' +
         homeInner +
         '</div><div class="tm-lv-cmp-half tm-lv-cmp-half-away">' +
         awayInner +
@@ -1817,13 +2239,19 @@
       if (!hasPast || !player.id || pastSet[player.id]) return plain;
       return { cls: 'new', tag: '新' };
     }
+    const curHomeMeta = currentSideMeta('home');
+    const curAwayMeta = currentSideMeta('away');
     const curField = fieldHtml(
       colsHtml(curHomeCols, function (player) {
         return cmpPitchCard(player, curXiMark(player, home.pastSet));
       }),
       colsHtml(curAwayCols, function (player) {
         return cmpPitchCard(player, curXiMark(player, away.pastSet));
-      })
+      }),
+      cmpMidHtml(curHomeMeta, curAwayMeta, { singleScore: true }) +
+        cmpCoachLineHtml(curHomeMeta, curAwayMeta, {}) +
+        cmpCornerBarsHtml(curHomeMeta, curAwayMeta) +
+        cmpGoalSums()
     );
     const curBench = benchHtml(
       currentCmpBench('home')
@@ -1860,7 +2288,26 @@
       home.cap +
       away.cap +
       '</div></div>' +
-      fieldHtml(home.pitch, away.pitch) +
+      fieldHtml(
+        home.pitch,
+        away.pitch,
+        (function () {
+          const flags = {
+            homeCoach: !!(home.meta && home.meta.coachChanged),
+            awayCoach: !!(away.meta && away.meta.coachChanged),
+            homeForm: !!(home.meta && home.meta.formChanged),
+            awayForm: !!(away.meta && away.meta.formChanged),
+            homeCurForm: (home.meta && home.meta.curForm) || '',
+            awayCurForm: (away.meta && away.meta.curForm) || '',
+          };
+          return (
+            cmpMidHtml(home.meta, away.meta, flags) +
+            cmpCoachLineHtml(home.meta, away.meta, flags) +
+            cmpCornerBarsHtml(home.meta, away.meta) +
+            cmpGoalSums()
+          );
+        })()
+      ) +
       benchHtml(home.bench, away.bench) +
       '<div class="tm-lv-cmp-fresh"><div>' +
       (home.news ? '<b>本场新首发</b>' + home.news : '') +
@@ -1869,6 +2316,8 @@
       '</div></div>' +
       '</section></div>';
     fitCmpField(board);
+    noteCmpGoalPaint();
+    syncGoalToggle();
     if (pageAcceptsSynth()) applyCmpSynthToPage();
   }
 
@@ -1961,16 +2410,42 @@
     let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
     cols = cols.slice();
     if ((side === 'home' && venue === 'away') || (side === 'away' && venue === 'home')) cols.reverse();
+    const coach = venue === 'away' ? pack.awayCoach : pack.homeCoach;
     return {
       cols: cols,
       form: venue === 'away' ? pack.awayForm : pack.homeForm,
       bench: (venue === 'away' ? pack.awayBench : pack.homeBench) || [],
+      starters: (venue === 'away' ? pack.away : pack.home) || [],
+      coach: coach || { name: '', href: '' },
+      score: row.score || '',
+      scoreTitle: cmpMatchupText(row),
+      unit: pack.unit || '万欧元',
       teamId: cmpPack[side].teamId || '',
     };
   }
 
+  function coachLinkHtml(coach) {
+    if (!coach || !coach.name) return '';
+    const label = '(主教练: ' + coach.name + ')';
+    if (!coach.href) return escHtml(label);
+    return (
+      '<a class="coach" target="_blank" rel="noopener noreferrer" title="' +
+      escHtml(coach.name) +
+      '" href="' +
+      escHtml(coach.href) +
+      '">' +
+      escHtml(label) +
+      '</a>'
+    );
+  }
+
+  function synthFlagHtml(on, text) {
+    return on ? ' <em class="tm-lv-synth-flag">' + escHtml(text) + '</em>' : '';
+  }
+
   function applyCmpSynthToPage() {
     if (!cmpSelected || !cmpSelected.home || !cmpSelected.away) return;
+    rememberPageLineup();
     const home = cmpSelectedSideCols('home');
     const away = cmpSelectedSideCols('away');
     if (!home || !away || !home.cols.length || !away.cols.length) return;
@@ -1991,25 +2466,32 @@
       if (homeBench) homeBench.innerHTML = synthBenchHtml(home.bench, home.teamId);
       if (guestBench) guestBench.innerHTML = synthBenchHtml(away.bench, away.teamId);
       box.dataset.tmLvSynth = '1';
+      const snap = pageLineupSnap || {};
+      const homeFormCh = !!(home.form && snap.homeForm && home.form !== snap.homeForm);
+      const awayFormCh = !!(away.form && snap.awayForm && away.form !== snap.awayForm);
+      const homeCoachCh = coachChanged(home.coach && home.coach.name, snap.homeCoach && snap.homeCoach.name);
+      const awayCoachCh = coachChanged(away.coach && away.coach.name, snap.awayCoach && snap.awayCoach.name);
       const homeN = document.querySelector('.homeN');
       const guestN = document.querySelector('.guestN');
-      if (homeN && home.form) {
-        const a = homeN.querySelector('a');
-        const coach = (homeN.textContent || '').match(/\(主教练[^)]*\)/);
+      if (homeN) {
+        const a = homeN.querySelector('a:not(.coach)');
         homeN.innerHTML =
           (a ? a.outerHTML : escHtml(cmpPack.home.name)) +
           ' ' +
-          escHtml(home.form) +
-          (coach ? coach[0] : '');
+          escHtml(home.form || '') +
+          synthFlagHtml(homeFormCh, '变阵') +
+          coachLinkHtml(home.coach) +
+          synthFlagHtml(homeCoachCh, '换帅');
       }
-      if (guestN && away.form) {
-        const a = guestN.querySelector('a');
-        const coach = (guestN.textContent || '').match(/\(主教练[^)]*\)/);
+      if (guestN) {
+        const a = guestN.querySelector('a:not(.coach)');
         guestN.innerHTML =
-          (coach ? coach[0] : '') +
+          coachLinkHtml(away.coach) +
+          synthFlagHtml(awayCoachCh, '换帅') +
           (a ? a.outerHTML : escHtml(cmpPack.away.name)) +
           ' ' +
-          escHtml(away.form);
+          escHtml(away.form || '') +
+          synthFlagHtml(awayFormCh, '变阵');
       }
     } finally {
       refreshing = prevRefreshing;
@@ -2155,7 +2637,9 @@
     modal.innerHTML =
       '<div class="tm-lv-cmp-mask"></div>' +
       '<div class="tm-lv-cmp-box" role="dialog" aria-label="近6场首发对比">' +
-      '<header><b>近6场首发对比</b><span>上表、下表可分别切主客场；下表仅同联赛。左边是本场，右边是选中比赛拼成的阵容。</span><button type="button" class="tm-lv-cmp-x">关闭</button></header>' +
+      '<header><b>近6场首发对比</b><span>上表、下表可分别切主客场；下表仅同联赛。左边是本场，右边是选中比赛拼成的阵容。拼成图中间对照身价、均龄、主教练、比分，并标出是否换帅、是否变阵。</span><button type="button" class="tm-lv-goal-btn tm-lv-cmp-goal" aria-label="显示进球">' +
+      BALL_ICON +
+      '</button><button type="button" class="tm-lv-cmp-x">关闭</button></header>' +
       '<div class="tm-lv-cmp-board"><p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p></div>' +
       '<div class="tm-lv-cmp-cols">' +
       '<section data-side="home"><div class="tm-lv-cmp-head"><h3>主队</h3><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn" data-venue="away">客场</button></div></div><div class="tm-lv-cmp-core"></div><div class="tm-lv-cmp-list"></div><div class="tm-lv-cmp-league-block"><div class="tm-lv-cmp-league-head"><h4 class="tm-lv-cmp-league-h">同联赛</h4><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-league-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn" data-league-venue="away">客场</button></div></div><div class="tm-lv-cmp-league"></div></div></section>' +
@@ -2185,6 +2669,14 @@
       true
     );
     modal.addEventListener('click', function (e) {
+      const goalBtn = e.target.closest && e.target.closest('.tm-lv-cmp-goal');
+      if (goalBtn) {
+        e.preventDefault();
+        if (goalLoading) return;
+        if (showGoals && !goalLeagueOnly) applyGoalMode(false, false);
+        else applyGoalMode(true, false);
+        return;
+      }
       const leagueVenueBtn = e.target.closest && e.target.closest('[data-league-venue]');
       if (leagueVenueBtn) {
         const sec = leagueVenueBtn.closest('[data-side]');
@@ -2202,6 +2694,15 @@
       selectCmpRow(btn.getAttribute('data-side'), btn.getAttribute('data-id'));
     });
     modal.addEventListener('contextmenu', function (e) {
+      const goalBtn = e.target.closest && e.target.closest('.tm-lv-cmp-goal');
+      if (goalBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (goalLoading) return;
+        if (showGoals && goalLeagueOnly) applyGoalMode(false, false);
+        else applyGoalMode(true, true);
+        return;
+      }
       const btn = e.target.closest && e.target.closest('.tm-lv-cmp-row');
       if (!btn) return;
       const id = btn.getAttribute('data-id');
@@ -2216,6 +2717,7 @@
   function openCmpModal() {
     const modal = ensureCmpModal();
     modal.hidden = false;
+    syncGoalToggle();
     lockCmpPage();
     hideCmpChrome();
     const board = modal.querySelector('.tm-lv-cmp-board');
@@ -5546,11 +6048,11 @@
       '.tm-lv-cmp-caps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }' +
       '.tm-lv-cmp-cap { font-size: 12px; line-height: 16px; color: #334155; }' +
       '.tm-lv-cmp-cap > div:first-child { white-space: nowrap; }' +
-      '.tm-lv-cmp-cap2 { color: #9a3412; min-height: 16px; }' +
+      '.tm-lv-cmp-cap2 { color: #334155; min-height: 16px; }' +
       '.tm-lv-cmp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }' +
       '.tm-lv-cmp-pane { min-width: 0; }' +
       '.tm-lv-cmp-pane h4 { height: 20px; margin: 0 0 2px; font-size: 14px; line-height: 20px; }' +
-      '.tm-lv-cmp-capslot { height: 48px; overflow: hidden; margin-bottom: 4px; }' +
+      '.tm-lv-cmp-capslot { height: 64px; overflow: hidden; margin-bottom: 4px; }' +
       '.tm-lv-cmp-pane .tm-lv-cmp-caps { grid-template-columns: 1fr 1fr; gap: 4px; margin: 0; }' +
       '.tm-lv-cmp-scale { position: relative; width: 100%; overflow: hidden; }' +
       '.tm-lv-cmp-field {' +
@@ -5611,7 +6113,188 @@
       '.tm-lv-cmp-bc.new em { color: #166534; }' +
       '.tm-lv-cmp-bc small { display: block; font-size: 11px; line-height: 14px; }' +
       '.tm-lv-cmp-bc-home small { color: #15803d; }' +
-      '.tm-lv-cmp-bc-away small { color: #0369a1; }';
+      '.tm-lv-cmp-bc-away small { color: #0369a1; }' +
+      '.tm-lv-cmp-box header .tm-lv-cmp-goal {' +
+      'position: static;' +
+      'left: auto;' +
+      'top: auto;' +
+      'transform: none;' +
+      'flex: none;' +
+      '}' +
+      '.tm-lv-cmp-flag {' +
+      'display: inline-block;' +
+      'margin-left: 3px;' +
+      'padding: 0 4px;' +
+      'border-radius: 3px;' +
+      'background: #ffedd5;' +
+      'color: #9a3412;' +
+      'font-style: normal;' +
+      'font-weight: 700;' +
+      'font-size: 11px;' +
+      'line-height: 16px;' +
+      '}' +
+      '.tm-lv-cmp-same {' +
+      'margin-left: 3px;' +
+      'color: #64748b;' +
+      'font-style: normal;' +
+      'font-weight: 600;' +
+      '}' +
+      '.tm-lv-cmp-mid {' +
+      'position: absolute;' +
+      'z-index: 6;' +
+      'top: 21px;' +
+      'left: 50%;' +
+      'transform: translateX(-50%);' +
+      'display: flex;' +
+      'flex-direction: column;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'max-width: 560px;' +
+      'padding: 4px 8px;' +
+      'border: 1px solid rgba(226,232,240,.95);' +
+      'border-radius: 6px;' +
+      'background: rgba(255,255,255,.94);' +
+      'box-shadow: 0 1px 4px rgba(15,23,42,.12);' +
+      'font-size: 12px;' +
+      'line-height: 16px;' +
+      'pointer-events: none;' +
+      '}' +
+      '.tm-lv-cmp-sum { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }' +
+      '.tm-lv-cmp-sum b { font-weight: 600; color: #475569; }' +
+      '.tm-lv-cmp-sum-h, .tm-lv-cmp-sum-a, .tm-lv-cmp-sum-mid { font-size: 14px; font-weight: 700; line-height: 1.2; }' +
+      '.tm-lv-cmp-sum-h { color: #15803d; }' +
+      '.tm-lv-cmp-sum-a, .tm-lv-cmp-sum-mid { color: #0369a1; }' +
+      '.tm-lv-cmp-sum-mid { color: #0f172a; }' +
+      '.tm-lv-cmp-sum-sep { color: #94a3b8; font-size: 12px; font-weight: 600; }' +
+      '.tm-lv-cmp-sum-x { color: #dc2626; font-weight: 700; }' +
+      '.tm-lv-cmp-mid a { pointer-events: auto; color: inherit; text-decoration: none; }' +
+      '.tm-lv-cmp-mid a:hover { text-decoration: underline; }' +
+      '.tm-lv-cmp-coachline,' +
+      '#tm-lv-coachline {' +
+      'position: absolute;' +
+      'left: 0;' +
+      'right: 0;' +
+      'top: 489px;' +
+      'height: 0;' +
+      'z-index: 7;' +
+      'margin: 0;' +
+      'padding: 0;' +
+      'pointer-events: none;' +
+      'font-size: 13px;' +
+      'font-weight: 700;' +
+      'line-height: 18px;' +
+      '}' +
+      '.tm-lv-cmp-coachline > span,' +
+      '#tm-lv-coachline > span {' +
+      'position: absolute;' +
+      'bottom: 0;' +
+      'display: flex;' +
+      'flex-direction: column;' +
+      'gap: 0;' +
+      'padding: 1px 6px 2px;' +
+      'border-radius: 3px;' +
+      'background: rgba(255,255,255,.92);' +
+      'white-space: nowrap;' +
+      '}' +
+      '.tm-lv-cmp-coachline > .h,' +
+      '#tm-lv-coachline > .h { right: calc(50% + 10px); align-items: flex-end; color: #166534; text-align: right; }' +
+      '.tm-lv-cmp-coachline > .a,' +
+      '#tm-lv-coachline > .a { left: calc(50% + 10px); align-items: flex-start; color: #075985; text-align: left; }' +
+      '.tm-lv-cmp-coachline .nm,' +
+      '#tm-lv-coachline .nm,' +
+      '.tm-lv-cmp-coachline .fm,' +
+      '#tm-lv-coachline .fm { font-weight: 700; line-height: 16px; }' +
+      '.tm-lv-cmp-coachline .fm,' +
+      '#tm-lv-coachline .fm { font-size: 12px; }' +
+      '.tm-lv-cmp-coachline a,' +
+      '#tm-lv-coachline a { pointer-events: auto; color: inherit; text-decoration: none; }' +
+      '.tm-lv-cmp-coachline a:hover,' +
+      '#tm-lv-coachline a:hover { text-decoration: underline; }' +
+      '.tm-lv-cmp-coachline .tm-lv-cmp-diff,' +
+      '#tm-lv-coachline .tm-lv-cmp-diff {' +
+      'display: inline-block;' +
+      'padding: 0 4px;' +
+      'border-radius: 3px;' +
+      'background: #ffedd5;' +
+      'color: #9a3412;' +
+      'font-style: normal;' +
+      'pointer-events: auto;' +
+      'cursor: help;' +
+      '}' +
+      'a.tm-lv-cmp-diff { cursor: pointer; }' +
+      '.tm-lv-cmp-corner {' +
+      'position: absolute;' +
+      'bottom: 2px;' +
+      'z-index: 6;' +
+      'width: 32%;' +
+      'height: 16px;' +
+      'pointer-events: auto;' +
+      '}' +
+      '.tm-lv-cmp-corner-h { right: calc(50% + 16px); }' +
+      '.tm-lv-cmp-corner-a { left: calc(50% + 16px); }' +
+      '.tm-lv-cmp-corner svg { display: block; width: 100%; height: 16px; border-radius: 3px; }' +
+      '.tm-lv-cmp-gsum {' +
+      'position: absolute;' +
+      'top: 8px;' +
+      'z-index: 6;' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'padding: 1px 6px 1px 3px;' +
+      'border-radius: 10px;' +
+      'background: rgba(255,255,255,.92);' +
+      'color: #166534;' +
+      'font-size: 13px;' +
+      'font-weight: 700;' +
+      'line-height: 16px;' +
+      'box-shadow: 0 1px 2px rgba(15,23,42,.16);' +
+      '}' +
+      '.tm-lv-cmp-gsum-h { left: 8px; }' +
+      '.tm-lv-cmp-gsum-a { right: 8px; }' +
+      '.tm-lv-cmp-gmark {' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'padding: 0 4px 0 1px;' +
+      'border-radius: 8px;' +
+      'background: rgba(255,255,255,.94);' +
+      'color: #166534;' +
+      'font-size: 12px;' +
+      'font-weight: 700;' +
+      'font-style: normal;' +
+      'line-height: 16px;' +
+      'text-decoration: none;' +
+      'box-shadow: 0 1px 2px rgba(15,23,42,.18);' +
+      '}' +
+      '.tm-lv-cmp-pl > .tm-lv-cmp-gmark {' +
+      'position: absolute;' +
+      'left: 50%;' +
+      'top: 0;' +
+      'z-index: 4;' +
+      'transform: translate(-50%, -70%);' +
+      '}' +
+      '.tm-lv-cmp-bc > .tm-lv-cmp-gmark { margin-right: 2px; }' +
+      '.tm-lv-synth-flag {' +
+      'display: inline-block;' +
+      'margin-left: 3px;' +
+      'padding: 0 4px;' +
+      'border-radius: 3px;' +
+      'background: #ffedd5;' +
+      'color: #9a3412;' +
+      'font-style: normal;' +
+      'font-weight: 700;' +
+      'font-size: 12px;' +
+      'line-height: 16px;' +
+      '}' +
+      '.tm-lv-synth-same {' +
+      'margin-left: 3px;' +
+      'color: #64748b;' +
+      'font-style: normal;' +
+      'font-weight: 600;' +
+      'font-size: 12px;' +
+      '}' +
+      '#tm-lineup-value-panel.tm-lv-frame .tm-lv-sum-soft .tm-lv-sum-h,' +
+      '#tm-lineup-value-panel.tm-lv-frame .tm-lv-sum-soft .tm-lv-sum-a { font-size: 13px; }';
     (document.body || document.head || document.documentElement).appendChild(style);
   }
 
@@ -5674,12 +6357,90 @@
     );
   }
 
+  function framePairLine(label, homeHtml, awayHtml) {
+    return (
+      '<span class="tm-lv-sum tm-lv-sum-soft"><b>' +
+      escHtml(label) +
+      '</b><span class="tm-lv-sum-h">' +
+      homeHtml +
+      '</span><span class="tm-lv-sum-sep">vs</span><span class="tm-lv-sum-a">' +
+      awayHtml +
+      '</span></span>'
+    );
+  }
+
+  /** 拼成阵容写进本页后，中场白框只保留比分。教练和阵型在底边中线两侧。 */
+  function synthFrameExtraHtml() {
+    const box = document.getElementById('matchBox2');
+    if (!box || box.dataset.tmLvSynth !== '1') return '';
+    const home = cmpSelectedSideCols('home');
+    const away = cmpSelectedSideCols('away');
+    if (!home || !away) return '';
+    return framePairLine(
+      '比分',
+      '<span title="' + escHtml(home.scoreTitle || '') + '">' + escHtml(home.score || '-') + '</span>',
+      '<span title="' + escHtml(away.scoreTitle || '') + '">' + escHtml(away.score || '-') + '</span>'
+    );
+  }
+
+  function synthCoachLineInner() {
+    const box = document.getElementById('matchBox2');
+    if (!box || box.dataset.tmLvSynth !== '1') return '';
+    const home = cmpSelectedSideCols('home');
+    const away = cmpSelectedSideCols('away');
+    if (!home || !away) return '';
+    const snap = pageLineupSnap || {};
+    const homeCoachName = (home.coach && home.coach.name) || '';
+    const awayCoachName = (away.coach && away.coach.name) || '';
+    const curHomeCoach = (snap.homeCoach && snap.homeCoach.name) || '';
+    const curAwayCoach = (snap.awayCoach && snap.awayCoach.name) || '';
+    const flags = {
+      homeCoach: coachChanged(homeCoachName, curHomeCoach),
+      awayCoach: coachChanged(awayCoachName, curAwayCoach),
+      homeForm: !!(home.form && snap.homeForm && home.form !== snap.homeForm),
+      awayForm: !!(away.form && snap.awayForm && away.form !== snap.awayForm),
+      homeCurForm: snap.homeForm || '',
+      awayCurForm: snap.awayForm || '',
+    };
+    const line = cmpCoachLineHtml(
+      { form: home.form, coach: home.coach, curCoach: curHomeCoach },
+      { form: away.form, coach: away.coach, curCoach: curAwayCoach },
+      flags
+    );
+    const m = line.match(/^<div class="tm-lv-cmp-coachline">(.*)<\/div>$/);
+    return m ? m[1] : '';
+  }
+
+  function mountPitchCoachLine() {
+    const pitch = document.querySelector('#matchBox2 .plays');
+    if (!pitch) return;
+    const html = synthCoachLineInner();
+    let el = document.getElementById('tm-lv-coachline');
+    if (!html) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tm-lv-coachline';
+      el.className = 'tm-lv-coachline';
+      pitch.appendChild(el);
+    } else if (el.parentNode !== pitch) {
+      pitch.appendChild(el);
+    }
+    if (el.getAttribute('data-html') !== html) {
+      el.innerHTML = html;
+      el.setAttribute('data-html', html);
+    }
+  }
+
   function frameStripInnerHtml(stats) {
     const names = teamNames();
     return (
       frameSumHtml('首发', 'starter', stats, names) +
       frameSumHtml('上场', 'onField', stats, names) +
       ageLineHtml(stats, names) +
+      synthFrameExtraHtml() +
       '<span class="tm-lv-force-nat" role="button" tabindex="0" title="' +
       escHtml(FORCE_NAT_TITLE) +
       '">国家队</span>'
@@ -5988,6 +6749,7 @@
         ensureGoalToggle();
         renderNationality(box);
         refreshGoalMarks(false);
+        mountPitchCoachLine();
         return;
       }
 
@@ -6004,6 +6766,7 @@
       bindLineupObserver(document.getElementById('matchBox2'));
       bindEventObserver();
       refreshNationalClubMode();
+      mountPitchCoachLine();
     } catch (err) {
       console.warn('[Titan007 阵容身价统计]', err);
     }
