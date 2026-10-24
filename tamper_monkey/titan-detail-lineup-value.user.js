@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.95
+// @version      1.8.100
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。对比首发图中间显示两队首发/上场身价、均龄、主教练和比分；拼成相对本场标出是否换帅、是否变阵。对比图上的进球按钮与本页相同：点击显示全部赛事进球，右击只显示相同联赛。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -19,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.95';
+  const SCRIPT_VERSION = '1.8.100';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -737,6 +737,7 @@
     if (!showGoals) {
       goalReq += 1;
       renderGoalMarks();
+      maybeRepaintCmpGoals();
       return;
     }
     refreshGoalMarks(true);
@@ -1263,7 +1264,14 @@
   function cmpPlayerFromScope(scope) {
     const a = scope.querySelector('.name a, a[href*="/player/"]');
     const href = (a && a.getAttribute('href')) || '';
-    const idm = href.match(/\/player\/\d+\/(\d+)\.html/i);
+    let idm = href.match(/\/player\/\d+\/(\d+)\.html/i) || href.match(/playerid=(\d+)/i);
+    if (!idm && scope.getAttribute) {
+      idm = String(scope.getAttribute('onmouseover') || '').match(/setImgUrl\((\d+)\)/);
+    }
+    if (!idm) {
+      const tagged = scope.querySelector('[id^="playerImg_"], [id^="playerTech_"]');
+      idm = tagged && String(tagged.id || '').match(/(\d+)/);
+    }
     const numEl = scope.querySelector('.num, .name i');
     const name = a ? String(a.textContent || '').replace(/\s+/g, ' ').trim() : '';
     const imgEl = scope.querySelector('.headpic img');
@@ -1403,10 +1411,11 @@
     return false;
   }
 
-  function recentCmpMatches(rows, teamId, mode, leagueVenue) {
+  function recentCmpMatches(rows, teamId, mode, leagueVenue, oppId) {
     const asOf = matchAsOfDate();
     const curId = String((pageWin && pageWin.scheduleID) || '');
     const tid = String(teamId || '');
+    const oid = String(oppId || '');
     const out = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -1416,7 +1425,10 @@
       const homeId = String(row[1] || '');
       const awayId = String(row[2] || '');
       let venue = '';
-      if (mode === 'league') {
+      if (mode === 'h2h') {
+        if (!oid || homeId !== tid || awayId !== oid) continue;
+        venue = 'home';
+      } else if (mode === 'league') {
         if (!rowMatchesCurrentLeague(row)) continue;
         if (homeId === tid) venue = 'home';
         else if (awayId === tid) venue = 'away';
@@ -1459,6 +1471,26 @@
     return recentCmpMatches(rows, teamId, venue === 'away' ? 'away' : 'home');
   }
 
+  /** 本场主队作主、客队作客的历史交锋。两队赛程合并去重，近6场。 */
+  function recentH2hMatches(homeRows, awayRows, homeId, awayId) {
+    const seen = {};
+    const rows = [];
+    function push(list) {
+      (list || []).forEach(function (row) {
+        const id = row && String(row[0] || '');
+        if (!id || seen[id]) return;
+        seen[id] = 1;
+        rows.push(row);
+      });
+    }
+    push(homeRows);
+    push(awayRows);
+    rows.sort(function (a, b) {
+      return String(b[3] || '').localeCompare(String(a[3] || ''));
+    });
+    return recentCmpMatches(rows, homeId, 'h2h', '', awayId);
+  }
+
   function currentLeagueTitle() {
     return shortLeagueLabel(matchLeagueName()) || matchLeagueName() || '同联赛';
   }
@@ -1469,6 +1501,17 @@
     const all = (info.rows || []).concat(info.leagueRows || []);
     for (let i = 0; i < all.length; i++) {
       if (all[i].id === id) return all[i];
+    }
+    const h2h = cmpPack.h2h || [];
+    for (let j = 0; j < h2h.length; j++) {
+      if (h2h[j].id !== id) continue;
+      const copy = {};
+      const src = h2h[j];
+      Object.keys(src).forEach(function (key) {
+        copy[key] = src[key];
+      });
+      copy.venue = side === 'away' ? 'away' : 'home';
+      return copy;
     }
     return null;
   }
@@ -1521,6 +1564,56 @@
     );
   }
 
+  function cmpLeagueStyle(name) {
+    const n = String(name || '').replace(/\s+/g, '');
+    const rules = [
+      [/欧协|欧会|协会联|Conference/i, '#dcfce7', '#166534'],
+      [/欧联|欧罗巴|Europa/i, '#ffedd5', '#c2410c'],
+      [/欧冠|冠军杯|Champions/i, '#fef3c7', '#1e3a8a'],
+      [/欧国联|国家联赛/i, '#e0e7ff', '#3730a3'],
+      [/世俱杯|世俱/i, '#fef3c7', '#92400e'],
+      [/意乙|意大利乙/i, '#e0f2fe', '#0369a1'],
+      [/意甲|意大利甲|SerieA/i, '#dbeafe', '#1d4ed8'],
+      [/意杯|意大利杯|CoppaItalia/i, '#ccfbf1', '#0f766e'],
+      [/英超|PremierLeague/i, '#ede9fe', '#6d28d9'],
+      [/英冠|Championship/i, '#fee2e2', '#b91c1c'],
+      [/英甲/i, '#fef9c3', '#a16207'],
+      [/英乙/i, '#ffedd5', '#9a3412'],
+      [/足总杯|社区盾/i, '#fee2e2', '#991b1b'],
+      [/英联杯|联赛杯|卡拉宝/i, '#dcfce7', '#15803d'],
+      [/西乙|西班牙乙/i, '#ffedd5', '#ea580c'],
+      [/西甲|西班牙甲|LaLiga/i, '#fff7ed', '#c2410c'],
+      [/国王杯/i, '#fef9c3', '#a16207'],
+      [/德乙|德国乙/i, '#fecaca', '#9f1239'],
+      [/德甲|德国甲|Bundesliga/i, '#fee2e2', '#dc2626'],
+      [/德国杯/i, '#f1f5f9', '#334155'],
+      [/法乙|法国乙/i, '#e0e7ff', '#4338ca'],
+      [/法甲|法国甲|Ligue1/i, '#fef9c3', '#854d0e'],
+      [/法国杯/i, '#dbeafe', '#1e40af'],
+      [/荷甲|荷兰甲|Eredivisie/i, '#ffedd5', '#ea580c'],
+      [/葡超|葡萄牙/i, '#dcfce7', '#166534'],
+      [/苏超/i, '#dcfce7', '#14532d'],
+      [/比甲/i, '#fef9c3', '#a16207'],
+      [/土超/i, '#fee2e2', '#b91c1c'],
+      [/中超/i, '#fee2e2', '#dc2626'],
+      [/日职|J联赛|J1/i, '#ffe4e6', '#be123c'],
+      [/韩K|K联赛/i, '#fee2e2', '#9f1239'],
+      [/美职|MLS/i, '#dbeafe', '#1d4ed8'],
+      [/巴甲/i, '#dcfce7', '#166534'],
+      [/阿甲/i, '#e0f2fe', '#0284c7'],
+      [/澳超/i, '#ffedd5', '#c2410c'],
+      [/沙特/i, '#dcfce7', '#15803d'],
+    ];
+    for (let i = 0; i < rules.length; i++) {
+      if (rules[i][0].test(n)) return 'background:' + rules[i][1] + ';color:' + rules[i][2];
+    }
+    return 'background:#f1f5f9;color:#334155';
+  }
+
+  function cmpLeagueHtml(name) {
+    return '<span class="tm-lv-cmp-lg" style="' + cmpLeagueStyle(name) + '">' + escHtml(name) + '</span>';
+  }
+
   function cmpRowButtonHtml(side, row) {
     const pack = cmpLineupCache[row.id];
     const form = pack ? (row.venue === 'away' ? pack.awayForm : pack.homeForm) : '';
@@ -1538,9 +1631,9 @@
       side +
       '"><span class="tm-lv-cmp-when">' +
       escHtml(formatCmpWhen(row.when)) +
-      '</span><span class="tm-lv-cmp-lg">' +
-      escHtml(row.league) +
-      '</span><b class="tm-lv-cmp-matchup">' +
+      '</span>' +
+      cmpLeagueHtml(row.league) +
+      '<b class="tm-lv-cmp-matchup">' +
       cmpMatchupHtml(row) +
       '</b>' +
       (form || coachCh
@@ -1553,6 +1646,46 @@
           '</span>'
         : '') +
       '</button>'
+    );
+  }
+
+  function cmpH2hChip(pack, venue, side) {
+    if (!pack) return '';
+    const form = venue === 'away' ? pack.awayForm : pack.homeForm;
+    const pastCoach = venue === 'away' ? pack.awayCoach : pack.homeCoach;
+    const base = baseCmpSide(side);
+    const changed = !!(form && base.form && form !== base.form);
+    const coachCh = coachChanged(pastCoach && pastCoach.name, base.coach && base.coach.name);
+    if (!form && !coachCh) return '';
+    return (
+      '<span class="tm-lv-cmp-formchip' +
+      (changed || coachCh ? ' tm-lv-cmp-formchip-on' : '') +
+      '">' +
+      escHtml(form) +
+      (changed ? ' 变阵' : '') +
+      (coachCh ? ' 换帅' : '') +
+      '</span>'
+    );
+  }
+
+  function cmpH2hButtonHtml(row) {
+    const pack = cmpLineupCache[row.id];
+    const selected = cmpSelected && cmpSelected.home === row.id && cmpSelected.away === row.id;
+    return (
+      '<button type="button" class="tm-lv-cmp-row' +
+      (selected ? ' tm-lv-cmp-on' : '') +
+      '" data-h2h="1" data-id="' +
+      row.id +
+      '"><span class="tm-lv-cmp-when">' +
+      escHtml(formatCmpWhen(row.when)) +
+      '</span>' +
+      cmpLeagueHtml(row.league) +
+      '<b class="tm-lv-cmp-matchup">' +
+      cmpMatchupHtml(row) +
+      '</b><span class="tm-lv-cmp-h2h-chips">' +
+      cmpH2hChip(pack, 'home', 'home') +
+      cmpH2hChip(pack, 'away', 'away') +
+      '</span></button>'
     );
   }
 
@@ -1606,11 +1739,11 @@
   }
 
   function loadCmpLineup(id) {
-    if (cmpLineupCache[id] && cmpLineupCache[id].v === 3) return Promise.resolve(cmpLineupCache[id]);
+    if (cmpLineupCache[id] && cmpLineupCache[id].v === 4) return Promise.resolve(cmpLineupCache[id]);
     return gmGetText('https://live.titan007.com/detail/' + id + 'cn.htm?lineup=1').then(function (html) {
       const parsed = parseDetailLineup(html);
       if (!parsed.home.length && !parsed.away.length) parsed.empty = true;
-      parsed.v = 3;
+      parsed.v = 4;
       cmpLineupCache[id] = parsed;
       return parsed;
     });
@@ -2091,7 +2224,9 @@
       const coachCh = coachChanged(pastCoach && pastCoach.name, base.coach && base.coach.name);
       const when = row && row.when ? formatCmpWhen(row.when) : '';
       const cap2 =
-        (formCh ? '<em class="tm-lv-cmp-flag">变阵</em> 本场' + escHtml(base.form) : '') +
+        (formCh
+          ? '<em class="tm-lv-cmp-flag">变阵</em> 本场<b class="tm-lv-cmp-curform">' + escHtml(base.form) + '</b>'
+          : '') +
         (coachCh ? ' <em class="tm-lv-cmp-flag">换帅</em> 本场' + escHtml((base.coach && base.coach.name) || '') : '');
       const cap =
         '<div class="tm-lv-cmp-cap"><div>' +
@@ -2566,7 +2701,28 @@
       }
       renderCmpCores(side);
     });
+    const h2hList = modal.querySelector('.tm-lv-cmp-h2h');
+    if (h2hList) {
+      const h2h = cmpPack.h2h || [];
+      if (!h2h.length) {
+        h2hList.innerHTML = '<p class="tm-lv-cmp-empty">没有更早的同主客交锋。</p>';
+      } else {
+        h2hList.innerHTML = h2h
+          .map(function (row) {
+            return cmpH2hButtonHtml(row);
+          })
+          .join('');
+      }
+    }
     renderCmpBoard();
+  }
+
+  function scrollCmpToCompare() {
+    if (!cmpSelected || !cmpSelected.home || !cmpSelected.away) return;
+    const modal = document.getElementById('tm-lv-cmp');
+    const box = modal && modal.querySelector('.tm-lv-cmp-box');
+    if (!box || box.scrollTop < 24) return;
+    box.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function prefetchCmpRows(rows) {
@@ -2604,12 +2760,34 @@
     prefetchCmpRows(info.leagueRows);
   }
 
+  function selectH2hRow(id) {
+    const modal = document.getElementById('tm-lv-cmp');
+    if (!modal || !cmpPack || !id) return;
+    if (!cmpSelected) cmpSelected = { home: null, away: null };
+    const on = cmpSelected.home === id && cmpSelected.away === id;
+    cmpSelected.home = on ? null : id;
+    cmpSelected.away = on ? null : id;
+    renderCmpLists();
+    if (!on) scrollCmpToCompare();
+    if (on || cmpLineupCache[id]) return;
+    loadCmpLineup(id)
+      .then(function () {
+        if (!document.getElementById('tm-lv-cmp') || document.getElementById('tm-lv-cmp').hidden) return;
+        renderCmpLists();
+      })
+      .catch(function () {
+        const board = modal.querySelector('.tm-lv-cmp-board');
+        if (board) board.innerHTML = '<p class="tm-lv-cmp-empty">读取那场阵容失败。</p>';
+      });
+  }
+
   function selectCmpRow(side, id) {
     const modal = document.getElementById('tm-lv-cmp');
     if (!modal || !cmpPack) return;
     if (!cmpSelected) cmpSelected = { home: null, away: null };
     cmpSelected[side] = cmpSelected[side] === id ? null : id;
     renderCmpLists();
+    scrollCmpToCompare();
     const selectedId = cmpSelected[side];
     if (!selectedId || cmpLineupCache[selectedId]) return;
     loadCmpLineup(selectedId)
@@ -2625,7 +2803,12 @@
 
   function ensureCmpModal() {
     let modal = document.getElementById('tm-lv-cmp');
-    if (modal && !modal.querySelector('[data-league-venue]')) {
+    if (
+      modal &&
+      (!modal.querySelector('[data-league-venue]') ||
+        !modal.querySelector('.tm-lv-cmp-h2h') ||
+        !modal.querySelector('.tm-lv-cmp-tools'))
+    ) {
       modal.remove();
       modal = null;
     }
@@ -2637,14 +2820,16 @@
     modal.innerHTML =
       '<div class="tm-lv-cmp-mask"></div>' +
       '<div class="tm-lv-cmp-box" role="dialog" aria-label="近6场首发对比">' +
-      '<header><b>近6场首发对比</b><span>上表、下表可分别切主客场；下表仅同联赛。左边是本场，右边是选中比赛拼成的阵容。拼成图中间对照身价、均龄、主教练、比分，并标出是否换帅、是否变阵。</span><button type="button" class="tm-lv-goal-btn tm-lv-cmp-goal" aria-label="显示进球">' +
+      '<header><b>近6场首发对比</b><span>上表、下表可分别切主客场；下表仅同联赛。底部是同主客交锋，点一场会同时选中两边。左边是本场，右边是选中比赛拼成的阵容。拼成图中间对照身价、均龄、主教练、比分，并标出是否换帅、是否变阵。</span><button type="button" class="tm-lv-cmp-x">关闭</button></header>' +
+      '<div class="tm-lv-cmp-tools"><button type="button" class="tm-lv-goal-btn tm-lv-cmp-goal" aria-label="显示进球">' +
       BALL_ICON +
-      '</button><button type="button" class="tm-lv-cmp-x">关闭</button></header>' +
+      '<span>进球</span></button><span class="tm-lv-cmp-goal-hint">左击：全部赛事进球。右击：只显示本场相同联赛。</span></div>' +
       '<div class="tm-lv-cmp-board"><p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p></div>' +
       '<div class="tm-lv-cmp-cols">' +
       '<section data-side="home"><div class="tm-lv-cmp-head"><h3>主队</h3><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn" data-venue="away">客场</button></div></div><div class="tm-lv-cmp-core"></div><div class="tm-lv-cmp-list"></div><div class="tm-lv-cmp-league-block"><div class="tm-lv-cmp-league-head"><h4 class="tm-lv-cmp-league-h">同联赛</h4><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-league-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn" data-league-venue="away">客场</button></div></div><div class="tm-lv-cmp-league"></div></div></section>' +
       '<section data-side="away"><div class="tm-lv-cmp-head"><h3>客队</h3><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn" data-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-venue="away">客场</button></div></div><div class="tm-lv-cmp-core"></div><div class="tm-lv-cmp-list"></div><div class="tm-lv-cmp-league-block"><div class="tm-lv-cmp-league-head"><h4 class="tm-lv-cmp-league-h">同联赛</h4><div class="tm-lv-cmp-venue"><button type="button" class="tm-lv-cmp-venue-btn" data-league-venue="home">主场</button><button type="button" class="tm-lv-cmp-venue-btn tm-lv-cmp-on" data-league-venue="away">客场</button></div></div><div class="tm-lv-cmp-league"></div></div></section>' +
       '</div>' +
+      '<div class="tm-lv-cmp-h2h-block"><div class="tm-lv-cmp-league-head"><h4 class="tm-lv-cmp-h2h-h">同主客交锋 · 近6场</h4><span>本场主队作主、客队作客。点一场，两边都用这场首发。</span></div><div class="tm-lv-cmp-h2h"></div></div>' +
       '</div>';
     document.body.appendChild(modal);
     modal.addEventListener(
@@ -2691,6 +2876,10 @@
       }
       const btn = e.target.closest && e.target.closest('.tm-lv-cmp-row');
       if (!btn) return;
+      if (btn.getAttribute('data-h2h') === '1') {
+        selectH2hRow(btn.getAttribute('data-id'));
+        return;
+      }
       selectCmpRow(btn.getAttribute('data-side'), btn.getAttribute('data-id'));
     });
     modal.addEventListener('contextmenu', function (e) {
@@ -2722,7 +2911,7 @@
     hideCmpChrome();
     const board = modal.querySelector('.tm-lv-cmp-board');
     if (board) board.innerHTML = '<p class="tm-lv-cmp-empty">左右各选一场后，才并排显示本场和拼成的首发图。</p>';
-    modal.querySelectorAll('.tm-lv-cmp-list, .tm-lv-cmp-league').forEach(function (el) {
+    modal.querySelectorAll('.tm-lv-cmp-list, .tm-lv-cmp-league, .tm-lv-cmp-h2h').forEach(function (el) {
       el.innerHTML = '<p class="tm-lv-cmp-empty">正在读取赛程…</p>';
     });
     modal.querySelectorAll('.tm-lv-cmp-core').forEach(function (el) {
@@ -2764,6 +2953,7 @@
             rows: recentCmpMatches(awayRows, away.id, 'away'),
             leagueRows: recentCmpMatches(awayRows, away.id, 'league', 'away'),
           },
+          h2h: recentH2hMatches(homeRows, awayRows, home.id, away.id),
         };
         renderCmpLists();
         return prefetchCmpRows(
@@ -2771,12 +2961,13 @@
             .concat(cmpPack.away.rows)
             .concat(cmpPack.home.leagueRows)
             .concat(cmpPack.away.leagueRows)
+            .concat(cmpPack.h2h || [])
         );
       })
       .catch(function (err) {
         if (req !== cmpReq) return;
         const msg = (err && err.message) || '读取赛程失败';
-        modal.querySelectorAll('.tm-lv-cmp-list, .tm-lv-cmp-league').forEach(function (el) {
+        modal.querySelectorAll('.tm-lv-cmp-list, .tm-lv-cmp-league, .tm-lv-cmp-h2h').forEach(function (el) {
           el.innerHTML = '<p class="tm-lv-cmp-empty">' + escHtml(msg) + '</p>';
         });
       });
@@ -5964,6 +6155,26 @@
       'color: #334155;' +
       '}' +
       '.tm-lv-cmp-league-block .tm-lv-cmp-venue-btn.tm-lv-cmp-on { background: #0369a1; }' +
+      '.tm-lv-cmp-h2h-block {' +
+      'width: min(760px, calc(100% - 24px));' +
+      'margin: 0 auto 14px;' +
+      'padding: 10px;' +
+      'border: 1px solid #94a3b8;' +
+      'border-radius: 10px;' +
+      'background: #f8fafc;' +
+      '}' +
+      '.tm-lv-cmp-h2h-block .tm-lv-cmp-league-head span {' +
+      'color: #64748b;' +
+      'font-size: 12px;' +
+      '}' +
+      '.tm-lv-cmp-h2h-chips { display: inline-flex; gap: 4px; justify-content: flex-end; }' +
+      '.tm-lv-cmp-lg {' +
+      'display: inline-block;' +
+      'padding: 0 6px;' +
+      'border-radius: 4px;' +
+      'font-weight: 700;' +
+      'line-height: 18px;' +
+      '}' +
       '.tm-lv-cmp-row {' +
       'display: grid;' +
       'grid-template-columns: max-content max-content minmax(0, 1fr) max-content;' +
@@ -6114,12 +6325,37 @@
       '.tm-lv-cmp-bc small { display: block; font-size: 11px; line-height: 14px; }' +
       '.tm-lv-cmp-bc-home small { color: #15803d; }' +
       '.tm-lv-cmp-bc-away small { color: #0369a1; }' +
-      '.tm-lv-cmp-box header .tm-lv-cmp-goal {' +
+      '.tm-lv-cmp-tools {' +
+      'display: flex;' +
+      'align-items: center;' +
+      'gap: 10px;' +
+      'padding: 8px 14px;' +
+      'border-bottom: 1px solid #e2e8f0;' +
+      'background: #fff;' +
+      '}' +
+      '.tm-lv-cmp-goal-hint { color: #64748b; font-size: 12px; }' +
+      '.tm-lv-cmp .tm-lv-goal-btn {' +
       'position: static;' +
       'left: auto;' +
       'top: auto;' +
       'transform: none;' +
-      'flex: none;' +
+      'width: auto;' +
+      'height: 26px;' +
+      'padding: 0 8px;' +
+      'gap: 4px;' +
+      'line-height: 24px;' +
+      '}' +
+      '.tm-lv-cmp .tm-lv-goal-btn span { font-size: 12px; font-weight: 700; }' +
+      '.tm-lv-cmp-curform {' +
+      'display: inline-block;' +
+      'margin-left: 3px;' +
+      'padding: 0 5px;' +
+      'border-radius: 3px;' +
+      'background: #fde047;' +
+      'color: #422006;' +
+      'font-weight: 800;' +
+      'line-height: 16px;' +
+      'box-shadow: 0 0 0 1px #eab308, 0 0 8px rgba(250,204,21,.95);' +
       '}' +
       '.tm-lv-cmp-flag {' +
       'display: inline-block;' +
