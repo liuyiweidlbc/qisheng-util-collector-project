@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.100
+// @version      1.8.105
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。对比首发图中间显示两队首发/上场身价、均龄、主教练和比分；拼成相对本场标出是否换帅、是否变阵。对比图上的进球按钮与本页相同：点击显示全部赛事进球，右击只显示相同联赛。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -19,13 +19,14 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.100';
+  const SCRIPT_VERSION = '1.8.105';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
   const GOAL_STORAGE_KEY = 'tm-lv-show-goals';
   const GOAL_LEAGUE_KEY = 'tm-lv-goal-league';
   const PITCH_SUBS_KEY = 'tm-lv-pitch-subs';
+  const PITCH_VALUE_KEY = 'tm-lv-pitch-value';
   const BALL_ICON = '⚽';
   const PITCH_SUBS_ICON =
     '<svg viewBox="0 0 24 24" aria-hidden="true">' +
@@ -62,6 +63,7 @@
   let showGoals = false;
   let goalLeagueOnly = false;
   let showPitchSubs = true;
+  let showPitchValue = false;
   let pitchSuppress = 0;
   let goalLoading = false;
   let goalPack = null;
@@ -816,6 +818,19 @@
   function savePitchSubs() {
     try {
       localStorage.setItem(PITCH_SUBS_KEY, showPitchSubs ? '1' : '0');
+    } catch (e) {}
+  }
+
+  function loadPitchValue() {
+    try {
+      return localStorage.getItem(PITCH_VALUE_KEY) === '1';
+    } catch (e) {}
+    return false;
+  }
+
+  function savePitchValue() {
+    try {
+      localStorage.setItem(PITCH_VALUE_KEY, showPitchValue ? '1' : '0');
     } catch (e) {}
   }
 
@@ -2092,7 +2107,18 @@
     return '<div class="tm-lv-cmp-coachline"><span class="h">' + h + '</span><span class="a">' + a + '</span></div>';
   }
 
-  /** 左半场从左到右是门将到前锋；右半场相反。归成门将/后卫/中场/前锋。 */
+  /** 源数据按当时半场从左到右。换到另一侧时，列顺序和每列上下都要翻，左右边路才对着。 */
+  function orientCmpCols(cols, side, venue) {
+    const list = (cols || []).slice();
+    const flip = (side === 'home' && venue === 'away') || (side === 'away' && venue === 'home');
+    if (!flip) return list;
+    return list.reverse().map(function (col) {
+      return {
+        top: col.top,
+        players: (col.players || []).slice().reverse(),
+      };
+    });
+  }
   function cmpLinesFromCols(cols, isHome) {
     const ordered = (cols || []).slice();
     if (!isHome) ordered.reverse();
@@ -2262,9 +2288,7 @@
           meta: null,
         };
       }
-      let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
-      cols = cols.slice();
-      if ((side === 'home' && venue === 'away') || (side === 'away' && venue === 'home')) cols.reverse();
+      let cols = orientCmpCols(venue === 'away' ? pack.awayCols : pack.homeCols, side, venue);
       if (meta) meta.lines = cmpLinesFromCols(cols, side === 'home');
       const pastXi = (venue === 'away' ? pack.away : pack.home) || [];
       const pastBench = (venue === 'away' ? pack.awayBench : pack.homeBench) || [];
@@ -2542,9 +2566,7 @@
     const pack = cmpLineupCache[id];
     if (!pack || !row) return null;
     const venue = row.venue === 'away' ? 'away' : 'home';
-    let cols = (venue === 'away' ? pack.awayCols : pack.homeCols) || [];
-    cols = cols.slice();
-    if ((side === 'home' && venue === 'away') || (side === 'away' && venue === 'home')) cols.reverse();
+    const cols = orientCmpCols(venue === 'away' ? pack.awayCols : pack.homeCols, side, venue);
     const coach = venue === 'away' ? pack.awayCoach : pack.homeCoach;
     return {
       cols: cols,
@@ -2600,6 +2622,9 @@
       guestRoot.innerHTML = synthColsHtml(away.cols, away.teamId);
       if (homeBench) homeBench.innerHTML = synthBenchHtml(home.bench, home.teamId);
       if (guestBench) guestBench.innerHTML = synthBenchHtml(away.bench, away.teamId);
+      if (backup && ((home.bench && home.bench.length) || (away.bench && away.bench.length))) {
+        backup.style.display = 'block';
+      }
       box.dataset.tmLvSynth = '1';
       const snap = pageLineupSnap || {};
       const homeFormCh = !!(home.form && snap.homeForm && home.form !== snap.homeForm);
@@ -4403,6 +4428,7 @@
       '<span class="tm-lv-title">阵容身价对比</span>' +
       '<div class="tm-lv-head-actions">' +
       '<span class="tm-lv-mode" role="button" tabindex="0">身价</span>' +
+      '<span class="tm-lv-pitch-value" role="button" tabindex="0" title="在首发图显示身价、上场、年龄和各线身价条">上图</span>' +
       '<span class="tm-lv-force-nat" role="button" tabindex="0" title="' +
       escHtml(FORCE_NAT_TITLE) +
       '">国家队</span>' +
@@ -5766,6 +5792,59 @@
       'height: 16px;' +
       'border-radius: 3px;' +
       '}' +
+      '#tm-lv-pitch-sum {' +
+      'position: absolute;' +
+      'top: 21px;' +
+      'left: 50%;' +
+      'transform: translateX(-50%);' +
+      'z-index: 20;' +
+      'display: flex;' +
+      'flex-direction: column;' +
+      'align-items: center;' +
+      'gap: 1px;' +
+      'max-width: 560px;' +
+      'padding: 2px 6px;' +
+      'border: 1px solid rgba(226,232,240,.95);' +
+      'border-radius: 4px;' +
+      'background: rgba(255,255,255,.92);' +
+      'box-shadow: 0 1px 3px rgba(15,23,42,.12);' +
+      'pointer-events: none;' +
+      'font-size: 10px;' +
+      'line-height: 14px;' +
+      '}' +
+      '#tm-lv-pitch-sum .tm-lv-sum { display: flex; align-items: baseline; gap: 3px; white-space: nowrap; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum b { font-weight: 600; color: #475569; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum-h,' +
+      '#tm-lv-pitch-sum .tm-lv-sum-a { font-size: 12px; font-weight: 700; line-height: 14px; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum-h { color: #15803d; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum-a { color: #0369a1; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum-sep { color: #94a3b8; font-size: 10px; font-weight: 600; }' +
+      '#tm-lv-pitch-sum .tm-lv-sum-x,' +
+      '#tm-lv-pitch-sum .tm-lv-sum-x-h,' +
+      '#tm-lv-pitch-sum .tm-lv-sum-x-a { color: #dc2626; font-size: 10px; font-weight: 700; }' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-pitch-value {' +
+      'display: inline-flex;' +
+      'align-items: center;' +
+      'justify-content: center;' +
+      'padding: 1px 7px;' +
+      'border-radius: 999px;' +
+      'border: 1px solid #86efac;' +
+      'background: #f0fdf4;' +
+      'color: #166534;' +
+      'font-size: 11px;' +
+      'font-weight: 700;' +
+      'line-height: 16px;' +
+      'cursor: pointer;' +
+      '}' +
+      '#' +
+      PANEL_ID +
+      ' .tm-lv-pitch-value.tm-lv-on {' +
+      'background: #166534;' +
+      'border-color: #166534;' +
+      'color: #fff;' +
+      '}' +
       '#matchBox2 .backupPlay2 .eventicon:has(.tm-lv-subout),' +
       '#matchBox2 .backupPlay .eventicon:has(.tm-lv-subout) {' +
       'width: auto !important;' +
@@ -6576,12 +6655,14 @@
     return base + ' ' + formatAvgAge(stat) + '（' + stat.n + '人，按比赛日计算）';
   }
 
-  function ageLineHtml(stats, names) {
+  function ageLineHtml(stats, names, label) {
     const home = stats.home && stats.home.age;
     const away = stats.away && stats.away.age;
     return (
       '<span class="tm-lv-sum tm-lv-ages" title="首发平均年龄，按比赛日计算，无生日的不计">' +
-      '<b>均龄</b><span class="tm-lv-sum-h" title="' +
+      '<b>' +
+      escHtml(label || '均龄') +
+      '</b><span class="tm-lv-sum-h" title="' +
       escHtml(ageTip(home, names.home)) +
       '">' +
       escHtml(formatAvgAge(home)) +
@@ -6844,6 +6925,79 @@
     });
   }
 
+  function syncPitchValueBtn() {
+    const btn = document.querySelector('#' + PANEL_ID + ' .tm-lv-pitch-value');
+    if (!btn) return;
+    btn.classList.toggle('tm-lv-on', showPitchValue);
+    btn.title = showPitchValue
+      ? '首发图正在显示身价、上场、年龄和各线身价条，点击隐藏'
+      : '在首发图显示身价、上场、年龄和各线身价条';
+  }
+
+  function bindPitchValueBtn(panel) {
+    const btn = panel && panel.querySelector('.tm-lv-pitch-value');
+    if (!btn || btn.getAttribute('data-tm-bound')) return;
+    btn.setAttribute('data-tm-bound', '1');
+    function toggle(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      showPitchValue = !showPitchValue;
+      savePitchValue();
+      syncPitchValueOverlay(computeStats());
+    }
+    btn.addEventListener('click', toggle);
+    btn.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      toggle(e);
+    });
+    syncPitchValueBtn();
+  }
+
+  function pitchValueInnerHtml(stats) {
+    const names = teamNames();
+    return (
+      frameSumHtml('身价', 'starter', stats, names) +
+      frameSumHtml('上场', 'onField', stats, names) +
+      ageLineHtml(stats, names, '年龄') +
+      synthFrameExtraHtml()
+    );
+  }
+
+  function clearPitchValueOverlay() {
+    const box = document.getElementById('tm-lv-pitch-sum');
+    if (box) box.remove();
+    if (inFrame) return;
+    const homeBar = document.getElementById('tm-lv-corner-h');
+    const awayBar = document.getElementById('tm-lv-corner-a');
+    if (homeBar) homeBar.remove();
+    if (awayBar) awayBar.remove();
+  }
+
+  function syncPitchValueOverlay(stats) {
+    syncPitchValueBtn();
+    const pitch = document.querySelector('#matchBox2 .plays');
+    if (inFrame || !showPitchValue || !stats || !pitch) {
+      clearPitchValueOverlay();
+      return;
+    }
+    const html = pitchValueInnerHtml(stats);
+    let el = document.getElementById('tm-lv-pitch-sum');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tm-lv-pitch-sum';
+      pitch.appendChild(el);
+    } else if (el.parentNode !== pitch) {
+      pitch.appendChild(el);
+    }
+    if (el.getAttribute('data-html') !== html) {
+      el.innerHTML = html;
+      el.setAttribute('data-html', html);
+    }
+    mountFrameCorners(stats, pitch);
+  }
+
   function mountFrameStrip(stats) {
     const pitch = document.querySelector('#matchBox2 .plays');
     const host = pitch || document.getElementById('matchBox2');
@@ -6895,14 +7049,17 @@
         (document.body || document.documentElement).appendChild(panel);
         bindPanelToggle(panel);
         bindPanelModeChip(panel);
+        bindPitchValueBtn(panel);
       } else if (panel.parentNode !== document.body && document.body) {
         document.body.appendChild(panel);
         bindPanelToggle(panel);
         bindPanelModeChip(panel);
+        bindPitchValueBtn(panel);
       } else {
         const unitEl = panel.querySelector('.tm-lv-unit');
         if (unitEl) unitEl.textContent = '单位：' + formatUnitLabel(stats.unit);
         bindPanelModeChip(panel);
+        bindPitchValueBtn(panel);
       }
 
       const body = panel.querySelector('.tm-lv-body');
@@ -6939,8 +7096,16 @@
       for (let i = 0; i < records.length; i++) {
         const t = records[i].target;
         if (!t) continue;
-        if (t.id === PANEL_ID) continue;
-        if (t.closest && t.closest('#' + PANEL_ID)) continue;
+        if (t.id === PANEL_ID || t.id === 'tm-lv-pitch-sum' || t.id === 'tm-lv-corner-h' || t.id === 'tm-lv-corner-a') continue;
+        if (
+          t.closest &&
+          (t.closest('#' + PANEL_ID) ||
+            t.closest('#tm-lv-pitch-sum') ||
+            t.closest('#tm-lv-corner-h') ||
+            t.closest('#tm-lv-corner-a'))
+        ) {
+          continue;
+        }
         if (isMetricMutation(records[i])) continue;
         relevant = true;
         break;
@@ -6986,6 +7151,7 @@
         renderNationality(box);
         refreshGoalMarks(false);
         mountPitchCoachLine();
+        syncPitchValueOverlay(null);
         return;
       }
 
@@ -7003,6 +7169,7 @@
       bindEventObserver();
       refreshNationalClubMode();
       mountPitchCoachLine();
+      syncPitchValueOverlay(stats);
     } catch (err) {
       console.warn('[Titan007 阵容身价统计]', err);
     }
@@ -7030,6 +7197,7 @@
     showGoals = loadShowGoals();
     goalLeagueOnly = showGoals && loadGoalLeagueOnly();
     showPitchSubs = loadPitchSubs();
+    showPitchValue = loadPitchValue();
     if (isRememberedNational()) {
       nationalForced = true;
       nationalMatch = true;
