@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Titan007 阵容身价统计
 // @namespace    https://titan007.com/
-// @version      1.8.105
+// @version      1.8.106
 // @description  在 detail 阵容页解析并展示两队总身价、首发身价、上场身价（首发+换入替补）、首发平均年龄，并显示主客身价倍数与各线（门将/后卫/中场/前锋）身价；首发/替补标注身价·年龄·身高，点击循环；国家队比赛可再切到俱乐部名；悬停球员卡片在生日右侧显示年龄；「预计阵容」或「首发阵容」旁小图标点击切换显示球员国籍（取自悬停提示），右侧足球图标点击后在有进球球员上方显示进球图标和进球数，替补和伤停标在姓名后面，两队总进球显示在首发图左上角和右上角；换人开关默认把已换上的替补放到首发位置，可切回网页原始首发并记住；收起为小方块，Esc 打开/折叠；进球换人图标移到头像旁；点击主教练在新页面打开。右侧快捷栏在「球员身价」上方增加「主教练」（F2，先客后主）。嵌入窗口从主教练标题行开始。首发/上场身价在中场线最上方；主队、客队各线身价细堆叠条分别在首发图左下角、右下角。替补换入箭头右侧用浅色标出被换下球员的号码和名字。对比首发图中间显示两队首发/上场身价、均龄、主教练和比分；拼成相对本场标出是否换帅、是否变阵。对比图上的进球按钮与本页相同：点击显示全部赛事进球，右击只显示相同联赛。
 // @match        https://live.titan007.com/detail/*
 // @match        http://live.titan007.com/detail/*
@@ -19,7 +19,7 @@
 
   const PANEL_ID = 'tm-lineup-value-panel';
   const STYLE_ID = 'tm-lineup-value-style';
-  const SCRIPT_VERSION = '1.8.105';
+  const SCRIPT_VERSION = '1.8.106';
   const METRIC_STORAGE_KEY = 'tm-lv-starter-metric-mode';
   const VALUE_AGE_STORAGE_KEY = 'tm-lv-starter-value-with-age';
   const NAT_STORAGE_KEY = 'tm-lv-show-nat';
@@ -1296,6 +1296,7 @@
     const vm = blob.match(/身价[：:]\s*(\d+(?:\.\d+)?)/);
     return {
       id: idm ? idm[1] : '',
+      href: href,
       name: name,
       num: numEl ? String(numEl.textContent || '').replace(/\s+/g, '') : '',
       img: img,
@@ -1754,11 +1755,11 @@
   }
 
   function loadCmpLineup(id) {
-    if (cmpLineupCache[id] && cmpLineupCache[id].v === 4) return Promise.resolve(cmpLineupCache[id]);
+    if (cmpLineupCache[id] && cmpLineupCache[id].v === 5) return Promise.resolve(cmpLineupCache[id]);
     return gmGetText('https://live.titan007.com/detail/' + id + 'cn.htm?lineup=1').then(function (html) {
       const parsed = parseDetailLineup(html);
       if (!parsed.home.length && !parsed.away.length) parsed.empty = true;
-      parsed.v = 4;
+      parsed.v = 5;
       cmpLineupCache[id] = parsed;
       return parsed;
     });
@@ -1909,15 +1910,44 @@
     );
   }
 
-  function cmpPitchCard(p, mark) {
+  function cmpPlayerHref(p, teamId) {
+    let href = String((p && p.href) || '').trim();
+    if (href.indexOf('//') === 0) href = 'https:' + href;
+    else if (href.charAt(0) === '/') href = 'https://info.titan007.com' + href;
+    if (/^https?:/i.test(href) && /\/player\//i.test(href)) return href;
+    const id = p && p.id;
+    if (id && teamId) return 'https://info.titan007.com/cn/team/player/' + teamId + '/' + id + '.html';
+    return /^https?:/i.test(href) ? href : '';
+  }
+
+  function cmpCardEdges(p, teamId, cls, title) {
+    const url = cmpPlayerHref(p, teamId);
+    if (!url) {
+      return {
+        open: '<div class="' + cls + '" title="' + title + '">',
+        close: '</div>',
+      };
+    }
+    return {
+      open:
+        '<a class="' +
+        cls +
+        ' tm-lv-cmp-plink" href="' +
+        escHtml(url) +
+        '" target="_blank" rel="noopener noreferrer" title="' +
+        title +
+        '">',
+      close: '</a>',
+    };
+  }
+
+  function cmpPitchCard(p, mark, teamId) {
     const img = p.img || PITCH_NOPHOTO;
     const tag = mark.tag ? '<em>' + escHtml(mark.tag) + '</em>' : '';
+    const title = escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p));
+    const edge = cmpCardEdges(p, teamId, 'tm-lv-cmp-pl ' + mark.cls, title);
     return (
-      '<div class="tm-lv-cmp-pl ' +
-      mark.cls +
-      '" title="' +
-      escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
-      '">' +
+      edge.open +
       cmpGoalBadge(p) +
       '<i>' +
       escHtml(p.num || '') +
@@ -1929,20 +1959,16 @@
       escHtml(cmpMetricText(p)) +
       '</span>' +
       tag +
-      '</div>'
+      edge.close
     );
   }
 
-  function cmpBenchCard(p, mark, side) {
+  function cmpBenchCard(p, mark, side, teamId) {
     const tag = mark.tag ? '<em>' + escHtml(mark.tag) + '</em>' : '';
+    const title = escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p));
+    const edge = cmpCardEdges(p, teamId, 'tm-lv-cmp-bc tm-lv-cmp-bc-' + side + ' ' + mark.cls, title);
     return (
-      '<div class="tm-lv-cmp-bc tm-lv-cmp-bc-' +
-      side +
-      ' ' +
-      mark.cls +
-      '" title="' +
-      escHtml((mark.tag ? mark.tag + ' ' : '') + cmpName(p)) +
-      '">' +
+      edge.open +
       cmpGoalBadge(p) +
       '<i>' +
       escHtml(p.num || '') +
@@ -1952,7 +1978,8 @@
       tag +
       '<small>' +
       escHtml(cmpMetricText(p)) +
-      '</small></span></div>'
+      '</small></span>' +
+      edge.close
     );
   }
 
@@ -1992,20 +2019,23 @@
     const name = (coach && coach.name) || '';
     if (!name) return '';
     const tip = changed ? (curName ? '换帅，本场 ' + curName : '与本场主教练不同') : '';
-    const mark = changed ? ' class="tm-lv-cmp-diff" title="' + escHtml(tip) + '"' : '';
+    const diff = changed ? ' tm-lv-cmp-diff' : '';
+    const title = escHtml(tip || name);
     if (coach.href) {
       return (
-        '<a' +
-        mark +
-        ' href="' +
+        '<a class="nm coach' +
+        diff +
+        '" title="' +
+        title +
+        '" href="' +
         escHtml(coach.href) +
         '" target="_blank" rel="noopener noreferrer">' +
         escHtml(name) +
         '</a>'
       );
     }
-    if (!changed) return escHtml(name);
-    return '<em class="tm-lv-cmp-diff" title="' + escHtml(tip) + '">' + escHtml(name) + '</em>';
+    if (!changed) return '<b class="nm">' + escHtml(name) + '</b>';
+    return '<em class="nm tm-lv-cmp-diff" title="' + title + '">' + escHtml(name) + '</em>';
   }
 
   function cmpFormHtml(form, changed, curForm) {
@@ -2099,7 +2129,7 @@
       const coach = cmpCoachHtml(meta.coach, coachOn, meta.curCoach);
       const form = cmpFormHtml(meta.form, formOn, curForm);
       if (!coach && !form) return '';
-      return (coach ? '<b class="nm">' + coach + '</b>' : '') + (form ? '<b class="fm">' + form + '</b>' : '');
+      return coach + (form ? '<b class="fm">' + form + '</b>' : '');
     }
     const h = side(home, 'home');
     const a = side(away, 'away');
@@ -2304,6 +2334,7 @@
       }
       const curXi = currentCmpXi(side);
       const curBench = currentCmpBench(side);
+      const teamId = (cmpPack[side] && cmpPack[side].teamId) || '';
       const hurt = currentCmpHurt(side);
       const curXiSet = cmpIdSet(curXi);
       const curBenchSet = cmpIdSet(curBench);
@@ -2323,7 +2354,7 @@
             'px">' +
             col.players
               .map(function (player) {
-                return cmpPitchCard(player, cmpXiMark(player, curXiSet, hurtSet));
+                return cmpPitchCard(player, cmpXiMark(player, curXiSet, hurtSet), teamId);
               })
               .join('') +
             '</div>'
@@ -2336,14 +2367,14 @@
       const news = added.length
         ? added
             .map(function (player) {
-              return cmpBenchCard(player, { cls: 'new', tag: '新' }, side);
+              return cmpBenchCard(player, { cls: 'new', tag: '新' }, side, teamId);
             })
             .join('')
         : '';
       const bench = pastBench.length
         ? pastBench
             .map(function (player) {
-              return cmpBenchCard(player, cmpBenchMark(player, curXiSet, curBenchSet, hurtSet), side);
+              return cmpBenchCard(player, cmpBenchMark(player, curXiSet, curBenchSet, hurtSet), side, teamId);
             })
             .join('')
         : '<span class="tm-lv-cmp-empty">那场没有替补</span>';
@@ -2402,10 +2433,10 @@
     const curAwayMeta = currentSideMeta('away');
     const curField = fieldHtml(
       colsHtml(curHomeCols, function (player) {
-        return cmpPitchCard(player, curXiMark(player, home.pastSet));
+        return cmpPitchCard(player, curXiMark(player, home.pastSet), cmpPack.home.teamId);
       }),
       colsHtml(curAwayCols, function (player) {
-        return cmpPitchCard(player, curXiMark(player, away.pastSet));
+        return cmpPitchCard(player, curXiMark(player, away.pastSet), cmpPack.away.teamId);
       }),
       cmpMidHtml(curHomeMeta, curAwayMeta, { singleScore: true }) +
         cmpCoachLineHtml(curHomeMeta, curAwayMeta, {}) +
@@ -2415,12 +2446,12 @@
     const curBench = benchHtml(
       currentCmpBench('home')
         .map(function (player) {
-          return cmpBenchCard(player, plain, 'home');
+          return cmpBenchCard(player, plain, 'home', cmpPack.home.teamId);
         })
         .join(''),
       currentCmpBench('away')
         .map(function (player) {
-          return cmpBenchCard(player, plain, 'away');
+          return cmpBenchCard(player, plain, 'away', cmpPack.away.teamId);
         })
         .join('')
     );
@@ -6356,6 +6387,9 @@
       '.tm-lv-cmp-col { position: absolute; }' +
       '.tm-lv-cmp-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #14532d; font-size: 14px; }' +
       '.tm-lv-cmp-pl { position: relative; width: 100px; height: 80px; margin: 0 0 15px; text-align: center; box-sizing: border-box; }' +
+      'a.tm-lv-cmp-pl, a.tm-lv-cmp-bc { color: inherit; text-decoration: none; cursor: pointer; }' +
+      'a.tm-lv-cmp-pl { display: block; }' +
+      'a.tm-lv-cmp-pl:hover > b, a.tm-lv-cmp-bc:hover b { text-decoration: underline; }' +
       '.tm-lv-cmp-col > .tm-lv-cmp-pl:last-child { margin-bottom: 0; }' +
       '.tm-lv-cmp-pl > i {' +
       'position: absolute; left: 25px; top: -3px; z-index: 2; width: 18px; height: 18px;' +
@@ -6522,7 +6556,7 @@
       '.tm-lv-cmp-coachline .fm,' +
       '#tm-lv-coachline .fm { font-size: 12px; }' +
       '.tm-lv-cmp-coachline a,' +
-      '#tm-lv-coachline a { pointer-events: auto; color: inherit; text-decoration: none; }' +
+      '#tm-lv-coachline a { pointer-events: auto; color: inherit; text-decoration: none; cursor: pointer; }' +
       '.tm-lv-cmp-coachline a:hover,' +
       '#tm-lv-coachline a:hover { text-decoration: underline; }' +
       '.tm-lv-cmp-coachline .tm-lv-cmp-diff,' +
