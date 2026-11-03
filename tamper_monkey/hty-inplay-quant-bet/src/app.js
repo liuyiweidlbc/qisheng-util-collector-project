@@ -2250,7 +2250,19 @@ export function bootApp() {
   
       function isCartOpen() {
           const root = getSportCartRoot();
-          return isElementVisible(root);
+          if (isElementVisible(root)) return true;
+          const markers = [
+              '[data-testid="sport-cart-clear-btn"]',
+              '[data-testid="sport-cart-ticket-list"]',
+              '[data-testid="sport-cart-content"]',
+              '[data-testid="SportCartBetDetailCard"]',
+              '[data-testid="sport-cart-bet-button"]',
+          ];
+          for (let i = 0; i < markers.length; i++) {
+              const el = document.querySelector(markers[i]);
+              if (el && isElementVisible(el)) return true;
+          }
+          return false;
       }
   
       async function ensureBetCartVisible() {
@@ -2268,13 +2280,27 @@ export function bootApp() {
       }
   
       function findKeypadButton(cart, key) {
-          if (!cart) return null;
-          const buttons = cart.querySelectorAll('button');
-          for (let i = 0; i < buttons.length; i++) {
-              const btn = buttons[i];
-              if ((btn.textContent || '').trim() === key && !btn.disabled) return btn;
+          const root = (cart && isElementVisible(cart)) ? cart : (getSportCartRoot() || document.body);
+          if (!root) return null;
+          const want = String(key);
+          const nodes = root.querySelectorAll('button, [role="button"], div, span');
+          let best = null;
+          let bestArea = Infinity;
+          for (let i = 0; i < nodes.length; i++) {
+              const el = nodes[i];
+              if (el.disabled) continue;
+              if (!isElementVisible(el)) continue;
+              const t = (el.textContent || '').replace(/\s+/g, '');
+              if (t !== want) continue;
+              const rect = el.getBoundingClientRect();
+              if (rect.width < 28 || rect.height < 28 || rect.width > 180 || rect.height > 96) continue;
+              const area = rect.width * rect.height;
+              if (area < bestArea) {
+                  bestArea = area;
+                  best = el;
+              }
           }
-          return null;
+          return best;
       }
   
       async function focusBetInput(cart) {
@@ -2297,7 +2323,7 @@ export function bootApp() {
               const btn = findKeypadButton(cart, ch);
               if (!btn) throw new Error('键盘缺少按键 ' + ch);
               setBetStep('点击键盘 ' + ch);
-              safeClick(btn);
+              clickOddsButtonAtPoint(btn);
               await humanDelay(180, 380);
           }
       }
@@ -2463,18 +2489,39 @@ export function bootApp() {
       }
   
       function getSportCartFloatBtn() {
-          return document.querySelector('[data-testid="sport-cart-float-btn"]');
+          const byTest = document.querySelector('[data-testid="sport-cart-float-btn"]');
+          if (byTest && isElementVisible(byTest)) return byTest;
+          const host = document.getElementById('sport-cart');
+          if (host) {
+              const inner = host.querySelector('.cursor-pointer') || host.querySelector('button');
+              if (inner && isElementVisible(inner)) return inner;
+              if (isElementVisible(host)) return host;
+          }
+          const badges = document.querySelectorAll('#sport-cart small, #fixed-button-group small');
+          for (let i = 0; i < badges.length; i++) {
+              const t = (badges[i].textContent || '').trim();
+              if (!/^[1-9]\d?$/.test(t)) continue;
+              const btn = badges[i].closest('.cursor-pointer') || badges[i].closest('#sport-cart');
+              if (btn && isElementVisible(btn)) return btn;
+          }
+          return byTest || host || null;
+      }
+  
+      function readCartBadgeCount(root) {
+          if (!root) return 0;
+          const nodes = root.querySelectorAll('small, span, sup');
+          for (let i = 0; i < nodes.length; i++) {
+              const t = (nodes[i].textContent || '').trim();
+              if (/^[1-9]\d?$/.test(t)) return parseInt(t, 10);
+          }
+          return 0;
       }
   
       function getSportCartItemCount() {
-          const floatBtn = getSportCartFloatBtn();
-          if (!floatBtn) return 0;
-          const texts = floatBtn.querySelectorAll('span, div, small, strong');
-          for (let i = 0; i < texts.length; i++) {
-              const t = (texts[i].textContent || '').trim();
-              if (/^[1-9]\d{0,1}$/.test(t)) return parseInt(t, 10);
-          }
-          return 0;
+          const host = document.getElementById('sport-cart');
+          const fromHost = readCartBadgeCount(host);
+          if (fromHost) return fromHost;
+          return readCartBadgeCount(getSportCartFloatBtn());
       }
   
       async function openBetDrawer() {
@@ -2484,8 +2531,7 @@ export function bootApp() {
           for (let i = 0; i < 4; i++) {
               if (isCartOpen()) return true;
               if (floatBtn && isElementVisible(floatBtn)) {
-                  await humanScrollTo(floatBtn);
-                  robustClick(floatBtn);
+                  clickOddsButtonAtPoint(floatBtn);
                   await humanDelay(500, 900);
               }
               if (isCartOpen()) return true;
@@ -2514,7 +2560,8 @@ export function bootApp() {
       }
   
       function findCartClearAllButton() {
-          const byId = document.querySelector('[data-testid="sport-cart-clear-all-btn"]')
+          const byId = document.querySelector('[data-testid="sport-cart-clear-btn"]')
+              || document.querySelector('[data-testid="sport-cart-clear-all-btn"]')
               || document.querySelector('[data-testid="SportCartClearAllBtn"]');
           if (byId && isElementVisible(byId)) return byId;
           const cart = getSportCartRoot();
@@ -2550,10 +2597,16 @@ export function bootApp() {
           return false;
       }
   
-      /** 悬浮球数字表示已有手动注单。先清空，再加入本次量化选项。 */
+      function cartHasClosedMarket() {
+          const cart = getSportCartRoot();
+          if (!cart || !isElementVisible(cart)) return false;
+          return /盘口关闭|已关闭|盘口无效/.test(cart.textContent || '');
+      }
+  
+      /** 悬浮球数字或「盘口关闭」的旧项都要先清掉，再加入本次量化选项。 */
       async function clearExistingBetSlip() {
           if (isBetSubmittedDrawerVisible()) return true;
-          if (cartTicketCount() <= 0 && !isCartOpen()) return true;
+          if (cartTicketCount() <= 0 && !cartHasClosedMarket() && !isCartOpen()) return true;
   
           setBetStep('投注单已有选项，先清除');
           renderPanel(true);
@@ -2563,7 +2616,7 @@ export function bootApp() {
           }
   
           for (let i = 0; i < 5; i++) {
-              if (cartTicketCount() <= 0) return true;
+              if (cartTicketCount() <= 0 && !cartHasClosedMarket()) return true;
               const allBtn = findCartClearAllButton();
               if (allBtn) {
                   setBetStep('清除已有投注单');
@@ -2593,7 +2646,7 @@ export function bootApp() {
                   await sleep(300);
               }
           }
-          return cartTicketCount() <= 0;
+          return cartTicketCount() <= 0 && !cartHasClosedMarket();
       }
   
       async function ensureMarketView(force) {
@@ -10864,8 +10917,13 @@ export function bootApp() {
               if (!cleared) throw new Error('投注单未清空');
   
               setBetStep('定位赔率按钮');
-              let opened = false;
+              let opened = isCartOpen();
               for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+                  if (isCartOpen()) {
+                      opened = true;
+                      break;
+                  }
+                  const countBefore = cartTicketCount();
                   const liveBtn = await ensureButtonVisible(option);
                   if (!liveBtn) throw new Error('页面上找不到对应赔率按钮');
                   option.button = liveBtn;
@@ -10884,13 +10942,15 @@ export function bootApp() {
                   renderPanel(true);
                   clickOddsButtonAtPoint(btn);
                   await humanDelay(450, 800);
-                  opened = !!(await waitForSettled(function () {
-                      return cartTicketCount() > 0 && isCartOpen();
-                  }, attempt === 2 ? 4000 : 1800, 200));
-                  if (!opened && cartTicketCount() > 0) {
+                  opened = !!(await waitForSettled(isCartOpen, attempt === 2 ? 2500 : 1500, 200));
+                  if (opened) break;
+                  const countNow = cartTicketCount();
+                  if (countNow > 0 || countNow > countBefore) {
                       setBetStep('赔率已选中，打开投注单');
                       renderPanel(true);
-                      opened = await openBetDrawer();
+                      if (!isCartOpen()) opened = await openBetDrawer();
+                      else opened = true;
+                      break;
                   }
               }
               if (!opened) throw new Error('投注单未打开');

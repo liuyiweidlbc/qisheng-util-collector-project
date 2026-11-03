@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.24
+// @version      2.16.28
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.24";
+  var SCRIPT_VERSION = "2.16.28";
 
   // src/storage-keys.js
   var KEYS = {
@@ -2411,7 +2411,19 @@
     }
     function isCartOpen() {
       const root = getSportCartRoot();
-      return isElementVisible(root);
+      if (isElementVisible(root)) return true;
+      const markers = [
+        '[data-testid="sport-cart-clear-btn"]',
+        '[data-testid="sport-cart-ticket-list"]',
+        '[data-testid="sport-cart-content"]',
+        '[data-testid="SportCartBetDetailCard"]',
+        '[data-testid="sport-cart-bet-button"]'
+      ];
+      for (let i = 0; i < markers.length; i++) {
+        const el = document.querySelector(markers[i]);
+        if (el && isElementVisible(el)) return true;
+      }
+      return false;
     }
     async function ensureBetCartVisible() {
       if (!isCartOpen()) return false;
@@ -2427,13 +2439,27 @@
       return isCartOpen();
     }
     function findKeypadButton(cart, key) {
-      if (!cart) return null;
-      const buttons = cart.querySelectorAll("button");
-      for (let i = 0; i < buttons.length; i++) {
-        const btn = buttons[i];
-        if ((btn.textContent || "").trim() === key && !btn.disabled) return btn;
+      const root = cart && isElementVisible(cart) ? cart : getSportCartRoot() || document.body;
+      if (!root) return null;
+      const want = String(key);
+      const nodes = root.querySelectorAll('button, [role="button"], div, span');
+      let best = null;
+      let bestArea = Infinity;
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        if (el.disabled) continue;
+        if (!isElementVisible(el)) continue;
+        const t = (el.textContent || "").replace(/\s+/g, "");
+        if (t !== want) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 28 || rect.height < 28 || rect.width > 180 || rect.height > 96) continue;
+        const area = rect.width * rect.height;
+        if (area < bestArea) {
+          bestArea = area;
+          best = el;
+        }
       }
-      return null;
+      return best;
     }
     async function focusBetInput(cart) {
       const inputArea = cart && cart.querySelector('[data-testid="SportCartBetInput"]') || document.querySelector('[data-testid="SportCartBetInput"]');
@@ -2451,7 +2477,7 @@
         const btn = findKeypadButton(cart, ch);
         if (!btn) throw new Error("\u952E\u76D8\u7F3A\u5C11\u6309\u952E " + ch);
         setBetStep("\u70B9\u51FB\u952E\u76D8 " + ch);
-        safeClick(btn);
+        clickOddsButtonAtPoint(btn);
         await humanDelay(180, 380);
       }
     }
@@ -2594,17 +2620,37 @@
       throw new Error("\u8D54\u7387\u591A\u6B21\u53D8\u52A8\uFF0C\u63D0\u4EA4\u672A\u5B8C\u6210");
     }
     function getSportCartFloatBtn() {
-      return document.querySelector('[data-testid="sport-cart-float-btn"]');
+      const byTest = document.querySelector('[data-testid="sport-cart-float-btn"]');
+      if (byTest && isElementVisible(byTest)) return byTest;
+      const host = document.getElementById("sport-cart");
+      if (host) {
+        const inner = host.querySelector(".cursor-pointer") || host.querySelector("button");
+        if (inner && isElementVisible(inner)) return inner;
+        if (isElementVisible(host)) return host;
+      }
+      const badges = document.querySelectorAll("#sport-cart small, #fixed-button-group small");
+      for (let i = 0; i < badges.length; i++) {
+        const t = (badges[i].textContent || "").trim();
+        if (!/^[1-9]\d?$/.test(t)) continue;
+        const btn = badges[i].closest(".cursor-pointer") || badges[i].closest("#sport-cart");
+        if (btn && isElementVisible(btn)) return btn;
+      }
+      return byTest || host || null;
     }
-    function getSportCartItemCount() {
-      const floatBtn = getSportCartFloatBtn();
-      if (!floatBtn) return 0;
-      const texts = floatBtn.querySelectorAll("span, div, small, strong");
-      for (let i = 0; i < texts.length; i++) {
-        const t = (texts[i].textContent || "").trim();
-        if (/^[1-9]\d{0,1}$/.test(t)) return parseInt(t, 10);
+    function readCartBadgeCount(root) {
+      if (!root) return 0;
+      const nodes = root.querySelectorAll("small, span, sup");
+      for (let i = 0; i < nodes.length; i++) {
+        const t = (nodes[i].textContent || "").trim();
+        if (/^[1-9]\d?$/.test(t)) return parseInt(t, 10);
       }
       return 0;
+    }
+    function getSportCartItemCount() {
+      const host = document.getElementById("sport-cart");
+      const fromHost = readCartBadgeCount(host);
+      if (fromHost) return fromHost;
+      return readCartBadgeCount(getSportCartFloatBtn());
     }
     async function openBetDrawer() {
       if (isCartOpen()) return true;
@@ -2612,8 +2658,7 @@
       for (let i = 0; i < 4; i++) {
         if (isCartOpen()) return true;
         if (floatBtn && isElementVisible(floatBtn)) {
-          await humanScrollTo(floatBtn);
-          robustClick(floatBtn);
+          clickOddsButtonAtPoint(floatBtn);
           await humanDelay(500, 900);
         }
         if (isCartOpen()) return true;
@@ -2638,7 +2683,7 @@
       return Math.max(badge, visible);
     }
     function findCartClearAllButton() {
-      const byId = document.querySelector('[data-testid="sport-cart-clear-all-btn"]') || document.querySelector('[data-testid="SportCartClearAllBtn"]');
+      const byId = document.querySelector('[data-testid="sport-cart-clear-btn"]') || document.querySelector('[data-testid="sport-cart-clear-all-btn"]') || document.querySelector('[data-testid="SportCartClearAllBtn"]');
       if (byId && isElementVisible(byId)) return byId;
       const cart = getSportCartRoot();
       if (!cart) return null;
@@ -2669,9 +2714,14 @@
       }
       return false;
     }
+    function cartHasClosedMarket() {
+      const cart = getSportCartRoot();
+      if (!cart || !isElementVisible(cart)) return false;
+      return /盘口关闭|已关闭|盘口无效/.test(cart.textContent || "");
+    }
     async function clearExistingBetSlip() {
       if (isBetSubmittedDrawerVisible()) return true;
-      if (cartTicketCount() <= 0 && !isCartOpen()) return true;
+      if (cartTicketCount() <= 0 && !cartHasClosedMarket() && !isCartOpen()) return true;
       setBetStep("\u6295\u6CE8\u5355\u5DF2\u6709\u9009\u9879\uFF0C\u5148\u6E05\u9664");
       renderPanel(true);
       if (!isCartOpen()) {
@@ -2679,7 +2729,7 @@
         await humanDelay(300, 600);
       }
       for (let i = 0; i < 5; i++) {
-        if (cartTicketCount() <= 0) return true;
+        if (cartTicketCount() <= 0 && !cartHasClosedMarket()) return true;
         const allBtn = findCartClearAllButton();
         if (allBtn) {
           setBetStep("\u6E05\u9664\u5DF2\u6709\u6295\u6CE8\u5355");
@@ -2709,7 +2759,7 @@
           await sleep(300);
         }
       }
-      return cartTicketCount() <= 0;
+      return cartTicketCount() <= 0 && !cartHasClosedMarket();
     }
     async function ensureMarketView(force) {
       const now = Date.now();
@@ -10122,8 +10172,13 @@
           const cleared = await clearExistingBetSlip();
           if (!cleared) throw new Error("\u6295\u6CE8\u5355\u672A\u6E05\u7A7A");
           setBetStep("\u5B9A\u4F4D\u8D54\u7387\u6309\u94AE");
-          let opened = false;
+          let opened = isCartOpen();
           for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+            if (isCartOpen()) {
+              opened = true;
+              break;
+            }
+            const countBefore = cartTicketCount();
             const liveBtn = await ensureButtonVisible(option);
             if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
             option.button = liveBtn;
@@ -10144,13 +10199,15 @@
             renderPanel(true);
             clickOddsButtonAtPoint(btn);
             await humanDelay(450, 800);
-            opened = !!await waitForSettled(function() {
-              return cartTicketCount() > 0 && isCartOpen();
-            }, attempt === 2 ? 4e3 : 1800, 200);
-            if (!opened && cartTicketCount() > 0) {
+            opened = !!await waitForSettled(isCartOpen, attempt === 2 ? 2500 : 1500, 200);
+            if (opened) break;
+            const countNow = cartTicketCount();
+            if (countNow > 0 || countNow > countBefore) {
               setBetStep("\u8D54\u7387\u5DF2\u9009\u4E2D\uFF0C\u6253\u5F00\u6295\u6CE8\u5355");
               renderPanel(true);
-              opened = await openBetDrawer();
+              if (!isCartOpen()) opened = await openBetDrawer();
+              else opened = true;
+              break;
             }
           }
           if (!opened) throw new Error("\u6295\u6CE8\u5355\u672A\u6253\u5F00");
