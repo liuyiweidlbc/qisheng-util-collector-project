@@ -2482,6 +2482,101 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         return isCartOpen();
     }
 
+    function cartTicketCount() {
+        const badge = getSportCartItemCount();
+        const items = document.querySelectorAll(
+            '[data-testid="sport-cart-clear-item-btn"], [data-testid="SportCartClearItemBtn"]'
+        );
+        let visible = 0;
+        for (let i = 0; i < items.length; i++) {
+            if (isElementVisible(items[i])) visible++;
+        }
+        return Math.max(badge, visible);
+    }
+
+    function findCartClearAllButton() {
+        const byId = document.querySelector('[data-testid="sport-cart-clear-all-btn"]')
+            || document.querySelector('[data-testid="SportCartClearAllBtn"]');
+        if (byId && isElementVisible(byId)) return byId;
+        const cart = getSportCartRoot();
+        if (!cart) return null;
+        const nodes = cart.querySelectorAll('button, [role="button"]');
+        for (let i = 0; i < nodes.length; i++) {
+            const btn = nodes[i];
+            if (!isElementVisible(btn)) continue;
+            const label = (btn.getAttribute('aria-label') || '') +
+                (btn.getAttribute('title') || '') +
+                (btn.textContent || '');
+            if (/清除|清空|删除全部|clear\s*all/i.test(label)) return btn;
+        }
+        return null;
+    }
+
+    async function dismissCartClearConfirm() {
+        const labels = ['确定', '确认', '清除', '清空', '删除'];
+        const roots = getModalCandidateRoots();
+        for (let i = 0; i < roots.length; i++) {
+            const root = roots[i];
+            const tid = (root.getAttribute && root.getAttribute('data-testid')) || '';
+            if (tid === 'SportCart' || /cart-overlay|SportCart/i.test(tid)) continue;
+            const text = root.textContent || '';
+            if (!/清除|清空|删除|移除|注单/.test(text)) continue;
+            const btn = findConfirmInRoot(root, labels);
+            if (btn) {
+                robustClick(btn);
+                await humanDelay(300, 600);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 悬浮球数字表示已有手动注单。先清空，再加入本次量化选项。 */
+    async function clearExistingBetSlip() {
+        if (isBetSubmittedDrawerVisible()) return true;
+        if (cartTicketCount() <= 0 && !isCartOpen()) return true;
+
+        setBetStep('投注单已有选项，先清除');
+        renderPanel(true);
+        if (!isCartOpen()) {
+            await openBetDrawer();
+            await humanDelay(300, 600);
+        }
+
+        for (let i = 0; i < 5; i++) {
+            if (cartTicketCount() <= 0) return true;
+            const allBtn = findCartClearAllButton();
+            if (allBtn) {
+                setBetStep('清除已有投注单');
+                renderPanel(true);
+                robustClick(allBtn);
+                await humanDelay(300, 600);
+                await dismissCartClearConfirm();
+                await humanDelay(400, 700);
+                continue;
+            }
+            const items = document.querySelectorAll(
+                '[data-testid="sport-cart-clear-item-btn"], [data-testid="SportCartClearItemBtn"]'
+            );
+            let removed = false;
+            for (let j = 0; j < items.length; j++) {
+                if (!isElementVisible(items[j])) continue;
+                robustClick(items[j]);
+                removed = true;
+                await humanDelay(250, 500);
+                await dismissCartClearConfirm();
+                break;
+            }
+            if (!removed && !isCartOpen()) {
+                await openBetDrawer();
+                await humanDelay(300, 600);
+            } else if (!removed) {
+                await sleep(300);
+            }
+        }
+        return cartTicketCount() <= 0;
+    }
+
     async function ensureMarketView(force) {
         const now = Date.now();
         let oddsCount = countOddsButtons();
@@ -10745,11 +10840,12 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
         let betAttemptAt = 0;
         try {
+            setBetStep('检查已有投注单');
+            const cleared = await clearExistingBetSlip();
+            if (!cleared) throw new Error('投注单未清空');
+
             setBetStep('定位赔率按钮');
-            let opened = isCartOpen();
-            if (!opened && getSportCartItemCount() > 0) {
-                opened = await openBetDrawer();
-            }
+            let opened = false;
             for (let attempt = 0; attempt < 3 && !opened; attempt++) {
                 const liveBtn = await ensureButtonVisible(option);
                 if (!liveBtn) throw new Error('页面上找不到对应赔率按钮');
@@ -10769,8 +10865,10 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 renderPanel(true);
                 clickOddsButtonAtPoint(btn);
                 await humanDelay(450, 800);
-                opened = !!(await waitForSettled(isCartOpen, attempt === 2 ? 4000 : 1800, 200));
-                if (!opened && getSportCartItemCount() > 0) {
+                opened = !!(await waitForSettled(function () {
+                    return cartTicketCount() > 0 && isCartOpen();
+                }, attempt === 2 ? 4000 : 1800, 200));
+                if (!opened && cartTicketCount() > 0) {
                     setBetStep('赔率已选中，打开投注单');
                     renderPanel(true);
                     opened = await openBetDrawer();

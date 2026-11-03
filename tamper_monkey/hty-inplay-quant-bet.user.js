@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.23
+// @version      2.16.24
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.23";
+  var SCRIPT_VERSION = "2.16.24";
 
   // src/storage-keys.js
   var KEYS = {
@@ -2625,6 +2625,91 @@
         await humanDelay(600, 1100);
       }
       return isCartOpen();
+    }
+    function cartTicketCount() {
+      const badge = getSportCartItemCount();
+      const items = document.querySelectorAll(
+        '[data-testid="sport-cart-clear-item-btn"], [data-testid="SportCartClearItemBtn"]'
+      );
+      let visible = 0;
+      for (let i = 0; i < items.length; i++) {
+        if (isElementVisible(items[i])) visible++;
+      }
+      return Math.max(badge, visible);
+    }
+    function findCartClearAllButton() {
+      const byId = document.querySelector('[data-testid="sport-cart-clear-all-btn"]') || document.querySelector('[data-testid="SportCartClearAllBtn"]');
+      if (byId && isElementVisible(byId)) return byId;
+      const cart = getSportCartRoot();
+      if (!cart) return null;
+      const nodes = cart.querySelectorAll('button, [role="button"]');
+      for (let i = 0; i < nodes.length; i++) {
+        const btn = nodes[i];
+        if (!isElementVisible(btn)) continue;
+        const label = (btn.getAttribute("aria-label") || "") + (btn.getAttribute("title") || "") + (btn.textContent || "");
+        if (/清除|清空|删除全部|clear\s*all/i.test(label)) return btn;
+      }
+      return null;
+    }
+    async function dismissCartClearConfirm() {
+      const labels = ["\u786E\u5B9A", "\u786E\u8BA4", "\u6E05\u9664", "\u6E05\u7A7A", "\u5220\u9664"];
+      const roots = getModalCandidateRoots();
+      for (let i = 0; i < roots.length; i++) {
+        const root = roots[i];
+        const tid = root.getAttribute && root.getAttribute("data-testid") || "";
+        if (tid === "SportCart" || /cart-overlay|SportCart/i.test(tid)) continue;
+        const text = root.textContent || "";
+        if (!/清除|清空|删除|移除|注单/.test(text)) continue;
+        const btn = findConfirmInRoot(root, labels);
+        if (btn) {
+          robustClick(btn);
+          await humanDelay(300, 600);
+          return true;
+        }
+      }
+      return false;
+    }
+    async function clearExistingBetSlip() {
+      if (isBetSubmittedDrawerVisible()) return true;
+      if (cartTicketCount() <= 0 && !isCartOpen()) return true;
+      setBetStep("\u6295\u6CE8\u5355\u5DF2\u6709\u9009\u9879\uFF0C\u5148\u6E05\u9664");
+      renderPanel(true);
+      if (!isCartOpen()) {
+        await openBetDrawer();
+        await humanDelay(300, 600);
+      }
+      for (let i = 0; i < 5; i++) {
+        if (cartTicketCount() <= 0) return true;
+        const allBtn = findCartClearAllButton();
+        if (allBtn) {
+          setBetStep("\u6E05\u9664\u5DF2\u6709\u6295\u6CE8\u5355");
+          renderPanel(true);
+          robustClick(allBtn);
+          await humanDelay(300, 600);
+          await dismissCartClearConfirm();
+          await humanDelay(400, 700);
+          continue;
+        }
+        const items = document.querySelectorAll(
+          '[data-testid="sport-cart-clear-item-btn"], [data-testid="SportCartClearItemBtn"]'
+        );
+        let removed = false;
+        for (let j = 0; j < items.length; j++) {
+          if (!isElementVisible(items[j])) continue;
+          robustClick(items[j]);
+          removed = true;
+          await humanDelay(250, 500);
+          await dismissCartClearConfirm();
+          break;
+        }
+        if (!removed && !isCartOpen()) {
+          await openBetDrawer();
+          await humanDelay(300, 600);
+        } else if (!removed) {
+          await sleep(300);
+        }
+      }
+      return cartTicketCount() <= 0;
     }
     async function ensureMarketView(force) {
       const now = Date.now();
@@ -10033,11 +10118,11 @@
         markBetAttemptStarted(option, recHash, stakeInput);
         let betAttemptAt = 0;
         try {
+          setBetStep("\u68C0\u67E5\u5DF2\u6709\u6295\u6CE8\u5355");
+          const cleared = await clearExistingBetSlip();
+          if (!cleared) throw new Error("\u6295\u6CE8\u5355\u672A\u6E05\u7A7A");
           setBetStep("\u5B9A\u4F4D\u8D54\u7387\u6309\u94AE");
-          let opened = isCartOpen();
-          if (!opened && getSportCartItemCount() > 0) {
-            opened = await openBetDrawer();
-          }
+          let opened = false;
           for (let attempt = 0; attempt < 3 && !opened; attempt++) {
             const liveBtn = await ensureButtonVisible(option);
             if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
@@ -10059,8 +10144,10 @@
             renderPanel(true);
             clickOddsButtonAtPoint(btn);
             await humanDelay(450, 800);
-            opened = !!await waitForSettled(isCartOpen, attempt === 2 ? 4e3 : 1800, 200);
-            if (!opened && getSportCartItemCount() > 0) {
+            opened = !!await waitForSettled(function() {
+              return cartTicketCount() > 0 && isCartOpen();
+            }, attempt === 2 ? 4e3 : 1800, 200);
+            if (!opened && cartTicketCount() > 0) {
               setBetStep("\u8D54\u7387\u5DF2\u9009\u4E2D\uFF0C\u6253\u5F00\u6295\u6CE8\u5355");
               renderPanel(true);
               opened = await openBetDrawer();
