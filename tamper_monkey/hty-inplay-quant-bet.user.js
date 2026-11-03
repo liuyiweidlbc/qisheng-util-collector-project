@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.21
+// @version      2.16.23
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.21";
+  var SCRIPT_VERSION = "2.16.23";
 
   // src/storage-keys.js
   var KEYS = {
@@ -1747,7 +1747,8 @@
         renderPanel(true);
         return;
       }
-      panel.classList.remove("tm-hty-ball");
+      if (panelCollapsed) panel.classList.add("tm-hty-ball");
+      else panel.classList.remove("tm-hty-ball");
     }
     function isStrandedSportEventsPage() {
       const path = window.location.pathname.replace(/\/$/, "") || "/";
@@ -2286,6 +2287,108 @@
       } else {
         await humanDelay(150, 400);
       }
+    }
+    function marketChromeBottom() {
+      let bottom = 64;
+      const nodes = document.querySelectorAll('[class*="z-header"], header');
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        const cs = window.getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        if (cs.pointerEvents === "none") continue;
+        if (cs.position !== "fixed" && cs.position !== "sticky") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 80 || r.height < 16) continue;
+        if (r.top > 180) continue;
+        if (r.bottom > bottom && r.bottom < window.innerHeight * 0.6) bottom = r.bottom;
+      }
+      return bottom;
+    }
+    function oddsButtonIsClickable(btn) {
+      if (!btn || !btn.isConnected || btn.disabled) return false;
+      const r = btn.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) return false;
+      const chrome = marketChromeBottom();
+      if (r.top < chrome + 1 || r.bottom > window.innerHeight - 2) return false;
+      const cx = Math.min(window.innerWidth - 2, Math.max(1, r.left + r.width / 2));
+      const cy = Math.min(window.innerHeight - 2, Math.max(1, r.top + r.height / 2));
+      const hit = document.elementFromPoint(cx, cy);
+      if (!hit) return false;
+      return hit === btn || btn.contains(hit);
+    }
+    function scrollByForOdds(delta) {
+      if (!delta || Math.abs(delta) < 4) return;
+      noteScriptMarketScroll();
+      const root = document.scrollingElement || document.documentElement;
+      if (root && root.scrollHeight > root.clientHeight + 20) {
+        root.scrollTop += delta;
+        return;
+      }
+      try {
+        window.scrollBy(0, delta);
+      } catch (e) {
+      }
+    }
+    async function scrollOddsButtonClear(btn) {
+      let current = btn;
+      for (let i = 0; i < 5; i++) {
+        if (!current || !current.isConnected) break;
+        if (oddsButtonIsClickable(current)) return current;
+        const chrome = marketChromeBottom();
+        const r = current.getBoundingClientRect();
+        const desiredCenter = chrome + 28 + Math.min(r.height || 40, 56) / 2;
+        let delta = r.top + (r.height || 0) / 2 - desiredCenter;
+        if (r.top >= chrome && r.bottom <= window.innerHeight - 8 && Math.abs(delta) < 12) {
+          delta = chrome + 12 - r.top;
+          if (Math.abs(delta) < 8) delta = 48;
+        }
+        scrollByForOdds(delta);
+        await sleep(160);
+        const tid = current.dataset ? current.dataset.testid : "";
+        const fresh = tid ? resolveLiveButton(tid) : null;
+        if (fresh) current = fresh;
+      }
+      return current && current.isConnected ? current : null;
+    }
+    function clickOddsButtonAtPoint(btn) {
+      if (!btn || !btn.isConnected) return false;
+      if (shouldBlockProgrammaticNavClick(btn)) return false;
+      const r = btn.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      function opts(buttons) {
+        return {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: cx,
+          clientY: cy,
+          screenX: (window.screenX || 0) + cx,
+          screenY: (window.screenY || 0) + cy,
+          button: 0,
+          buttons,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true
+        };
+      }
+      try {
+        if (typeof PointerEvent === "function") {
+          btn.dispatchEvent(new PointerEvent("pointerdown", opts(1)));
+        }
+        btn.dispatchEvent(new MouseEvent("mousedown", opts(1)));
+        if (typeof PointerEvent === "function") {
+          btn.dispatchEvent(new PointerEvent("pointerup", opts(0)));
+        }
+        btn.dispatchEvent(new MouseEvent("mouseup", opts(0)));
+        if (!btn.disabled) btn.click();
+      } catch (e) {
+        try {
+          if (!btn.disabled) btn.click();
+        } catch (e2) {
+        }
+      }
+      return true;
     }
     function getSportCartRoot() {
       const selectors = [
@@ -3439,11 +3542,23 @@
     function resolveLiveButton(testid) {
       if (!testid) return null;
       const buttons = queryOddsButtons();
+      let fallback = null;
+      let fallbackScore = -1;
       for (let i = 0; i < buttons.length; i++) {
         const btn = buttons[i];
-        if (btn.dataset.testid === testid && !btn.disabled) return btn;
+        if (btn.dataset.testid !== testid || btn.disabled || !btn.isConnected) continue;
+        if (oddsButtonIsClickable(btn)) return btn;
+        const r = btn.getBoundingClientRect();
+        let score = 0;
+        if (r.width > 8 && r.height > 8) score += 100;
+        if (r.bottom > 0 && r.top < window.innerHeight) score += 50;
+        score -= Math.min(Math.abs(r.top), 4e3) / 100;
+        if (score > fallbackScore) {
+          fallbackScore = score;
+          fallback = btn;
+        }
       }
-      return null;
+      return fallback;
     }
     function resolveLiveButtonForOption(option) {
       if (!option) return null;
@@ -3482,9 +3597,25 @@
         const el = findStrategyMarketElement(markets[i]);
         if (el) scrollMarketIntoView(el, { force: true });
       }
-      await humanDelay(400, 700);
+      const deadline = Date.now() + 2200;
+      let btn = null;
+      while (Date.now() < deadline) {
+        snapshotOddsButtons(lastButtonSnapshot);
+        buttonMarketIndex = buildButtonMarketIndex(lastButtonSnapshot);
+        btn = resolveLiveButtonForOption(option);
+        if (btn) break;
+        await sleep(180);
+      }
+      if (!btn) {
+        snapshotOddsButtons(lastButtonSnapshot);
+        return null;
+      }
+      const cleared = await scrollOddsButtonClear(btn);
       snapshotOddsButtons(lastButtonSnapshot);
-      return resolveLiveButtonForOption(option);
+      buttonMarketIndex = buildButtonMarketIndex(lastButtonSnapshot);
+      const fresh = resolveLiveButtonForOption(option);
+      if (fresh && fresh.isConnected) return fresh;
+      return cleared && cleared.isConnected ? cleared : btn.isConnected ? btn : null;
     }
     function truncatePanelText(text, max) {
       const s = String(text || "");
@@ -3599,12 +3730,29 @@
     function scanStatusText() {
       return scanStatusFull();
     }
+    function findMarketContainer(prefix, pm) {
+      const nodes = document.querySelectorAll('[data-testid*="' + prefix + pm + '"]');
+      const stem = prefix + pm;
+      for (let i = 0; i < nodes.length; i++) {
+        const tid = nodes[i].getAttribute("data-testid") || "";
+        const idx = tid.indexOf(stem);
+        if (idx < 0) continue;
+        const after = tid.slice(idx + stem.length);
+        if (after === "" || after === "_group-grouped") return nodes[i];
+      }
+      return null;
+    }
     function findStrategyMarketElement(pageMarket) {
       const pm = String(pageMarket || "");
       if (!pm) return null;
-      const direct = document.querySelector('[data-testid="MarketTableColTwoContainer-' + pm + '"]') || document.querySelector('[data-testid*="MarketTableColTwoContainer-' + pm + '"]') || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-' + pm + '"]') || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-' + pm + '_group-grouped"]') || document.querySelector('[data-testid*="ExhaustiveMarketCardWrapper-' + pm + '"]');
+      const direct = findMarketContainer("MarketTableColTwoContainer-", pm) || findMarketContainer("ExhaustiveMarketCardWrapper-", pm);
       if (direct) return direct;
-      const label = MARKET_SECTION_LABEL[pm.toLowerCase()];
+      const key = pm.toLowerCase();
+      if (key === "a-ou" || key === "aou") {
+        const host = document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-h-ou"]') || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-ou-grouped"]') || document.querySelector('[data-testid*="ExhaustiveMarketCardWrapper-ou-grouped"]');
+        if (host) return host;
+      }
+      const label = MARKET_SECTION_LABEL[key];
       if (label) return findMarketElementByLabel(label);
       return null;
     }
@@ -9886,31 +10034,37 @@
         let betAttemptAt = 0;
         try {
           setBetStep("\u5B9A\u4F4D\u8D54\u7387\u6309\u94AE");
-          const liveBtn = await ensureButtonVisible(option);
-          if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
-          option.button = liveBtn;
-          setBetStep("\u7B49\u5F85\u6295\u6CE8\u5355\u6253\u5F00");
           let opened = isCartOpen();
           if (!opened && getSportCartItemCount() > 0) {
             opened = await openBetDrawer();
           }
-          if (!opened) {
-            setBetStep("\u6EDA\u52A8\u5230\u8D54\u7387\u6309\u94AE");
-            await humanScrollTo(liveBtn);
-            setBetStep("\u70B9\u51FB " + option.label + " \u8D54\u7387");
-            robustClick(liveBtn);
-            await humanDelay(600, 1100);
-            opened = !!await waitForSettled(isCartOpen, 8e3, 300);
-          }
-          if (!opened) {
-            setBetStep("\u6295\u6CE8\u5355\u672A\u6253\u5F00\uFF0C\u518D\u6B21\u70B9\u51FB\u8D54\u7387");
+          for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+            const liveBtn = await ensureButtonVisible(option);
+            if (!liveBtn) throw new Error("\u9875\u9762\u4E0A\u627E\u4E0D\u5230\u5BF9\u5E94\u8D54\u7387\u6309\u94AE");
+            option.button = liveBtn;
+            const aimed = await scrollOddsButtonClear(liveBtn);
+            const fresh = resolveLiveButtonForOption(option) || resolveLiveButton(option.testid);
+            const btn = fresh && fresh.isConnected ? fresh : aimed;
+            if (!btn || !btn.isConnected) continue;
+            option.button = btn;
+            if (!oddsButtonIsClickable(btn)) {
+              console.log(
+                "[hty-inplay] \u8D54\u7387\u6309\u94AE\u4ECD\u88AB\u6321\u4F4F\uFF0C\u6362\u8282\u70B9\u518D\u70B9",
+                btn.dataset && btn.dataset.testid,
+                "attempt",
+                attempt
+              );
+            }
+            setBetStep(attempt ? "\u91CD\u65B0\u5B9A\u4F4D\u5E76\u70B9\u51FB " + option.label : "\u70B9\u51FB " + option.label + " \u8D54\u7387");
             renderPanel(true);
-            robustClick(liveBtn);
-            await humanDelay(700, 1200);
-            opened = !!await waitForSettled(isCartOpen, 8e3, 300);
-          }
-          if (!opened) {
-            opened = await openBetDrawer();
+            clickOddsButtonAtPoint(btn);
+            await humanDelay(450, 800);
+            opened = !!await waitForSettled(isCartOpen, attempt === 2 ? 4e3 : 1800, 200);
+            if (!opened && getSportCartItemCount() > 0) {
+              setBetStep("\u8D54\u7387\u5DF2\u9009\u4E2D\uFF0C\u6253\u5F00\u6295\u6CE8\u5355");
+              renderPanel(true);
+              opened = await openBetDrawer();
+            }
           }
           if (!opened) throw new Error("\u6295\u6CE8\u5355\u672A\u6253\u5F00");
           await ensureBetCartVisible();
@@ -10299,7 +10453,7 @@
       if (!panel) return;
       panelCollapsed = !!collapsed;
       panel.classList.toggle("tm-hty-collapsed", panelCollapsed);
-      panel.classList.toggle("tm-hty-ball", panelCollapsed && isHistoryOrderPage());
+      panel.classList.toggle("tm-hty-ball", panelCollapsed);
       const btn = panel.querySelector(".tm-hty-collapse");
       if (btn) btn.textContent = panelCollapsed ? "\u25B8" : "\u25BE";
       syncOddsObserverState();
@@ -10357,7 +10511,7 @@
       if (!document.getElementById(STYLE_ID)) {
         const style = document.createElement("style");
         style.id = STYLE_ID;
-        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}#' + PANEL_ID + ".tm-hty-collapsed{width:auto;min-width:148px;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions{display:none;}#" + PANEL_ID + ".tm-hty-ball{width:44px;height:44px;min-width:44px;right:auto;left:16px;bottom:20px;border:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;}#" + PANEL_ID + ".tm-hty-ball:hover{transform:scale(1.08);box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}#" + PANEL_ID + ".tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}#" + PANEL_ID + ".tm-hty-ball .tm-hty-title,#" + PANEL_ID + ".tm-hty-ball .tm-hty-version,#" + PANEL_ID + ".tm-hty-ball .tm-hty-login,#" + PANEL_ID + ".tm-hty-ball .tm-hty-collapse{display:none;}#" + PANEL_ID + " .tm-hty-ball-label{display:none;}#" + PANEL_ID + ".tm-hty-ball .tm-hty-ball-label{display:block;font-size:12px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
+        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}#' + PANEL_ID + ".tm-hty-collapsed,#" + PANEL_ID + ".tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:16px;bottom:24px;border:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;overflow:hidden;}#" + PANEL_ID + ".tm-hty-collapsed:hover,#" + PANEL_ID + ".tm-hty-ball:hover{transform:scale(1.08);box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions,#" + PANEL_ID + ".tm-hty-ball .tm-hty-body,#" + PANEL_ID + ".tm-hty-ball .tm-hty-actions{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-head,#" + PANEL_ID + ".tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-title,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-version,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-login,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-collapse,#" + PANEL_ID + ".tm-hty-ball .tm-hty-title,#" + PANEL_ID + ".tm-hty-ball .tm-hty-version,#" + PANEL_ID + ".tm-hty-ball .tm-hty-login,#" + PANEL_ID + ".tm-hty-ball .tm-hty-collapse{display:none;}#" + PANEL_ID + " .tm-hty-ball-label{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-ball-label,#" + PANEL_ID + ".tm-hty-ball .tm-hty-ball-label{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
         document.head.appendChild(style);
       }
       if (!document.getElementById(MATCH_TIP_ID + "-style")) {

@@ -1534,7 +1534,8 @@ export function bootApp() {
               renderPanel(true);
               return;
           }
-          panel.classList.remove('tm-hty-ball');
+          if (panelCollapsed) panel.classList.add('tm-hty-ball');
+          else panel.classList.remove('tm-hty-ball');
       }
   
       function isStrandedSportEventsPage() {
@@ -2116,6 +2117,114 @@ export function bootApp() {
           } else {
               await humanDelay(150, 400);
           }
+      }
+  
+      /** 顶部分类条 / 比分条会盖住刚滚进来的进球盘按钮 */
+      function marketChromeBottom() {
+          let bottom = 64;
+          const nodes = document.querySelectorAll('[class*="z-header"], header');
+          for (let i = 0; i < nodes.length; i++) {
+              const el = nodes[i];
+              const cs = window.getComputedStyle(el);
+              if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+              if (cs.pointerEvents === 'none') continue;
+              if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+              const r = el.getBoundingClientRect();
+              if (r.width < 80 || r.height < 16) continue;
+              if (r.top > 180) continue;
+              if (r.bottom > bottom && r.bottom < window.innerHeight * 0.6) bottom = r.bottom;
+          }
+          return bottom;
+      }
+  
+      function oddsButtonIsClickable(btn) {
+          if (!btn || !btn.isConnected || btn.disabled) return false;
+          const r = btn.getBoundingClientRect();
+          if (r.width < 8 || r.height < 8) return false;
+          const chrome = marketChromeBottom();
+          if (r.top < chrome + 1 || r.bottom > window.innerHeight - 2) return false;
+          const cx = Math.min(window.innerWidth - 2, Math.max(1, r.left + r.width / 2));
+          const cy = Math.min(window.innerHeight - 2, Math.max(1, r.top + r.height / 2));
+          const hit = document.elementFromPoint(cx, cy);
+          if (!hit) return false;
+          return hit === btn || btn.contains(hit);
+      }
+  
+      function scrollByForOdds(delta) {
+          if (!delta || Math.abs(delta) < 4) return;
+          noteScriptMarketScroll();
+          const root = document.scrollingElement || document.documentElement;
+          if (root && root.scrollHeight > root.clientHeight + 20) {
+              root.scrollTop += delta;
+              return;
+          }
+          try { window.scrollBy(0, delta); } catch (e) { /* ignore */ }
+      }
+  
+      /**
+       * 进球盘是滚进视口才挂载的。scrollIntoView 后原节点会换掉，
+       * 而且按钮经常停在顶栏下面。滚完必须换新节点，并确认点击点落在按钮上。
+       */
+      async function scrollOddsButtonClear(btn) {
+          let current = btn;
+          for (let i = 0; i < 5; i++) {
+              if (!current || !current.isConnected) break;
+              if (oddsButtonIsClickable(current)) return current;
+              const chrome = marketChromeBottom();
+              const r = current.getBoundingClientRect();
+              const desiredCenter = chrome + 28 + Math.min(r.height || 40, 56) / 2;
+              let delta = (r.top + (r.height || 0) / 2) - desiredCenter;
+              if (r.top >= chrome && r.bottom <= window.innerHeight - 8 && Math.abs(delta) < 12) {
+                  delta = (chrome + 12) - r.top;
+                  if (Math.abs(delta) < 8) delta = 48;
+              }
+              scrollByForOdds(delta);
+              await sleep(160);
+              const tid = current.dataset ? current.dataset.testid : '';
+              const fresh = tid ? resolveLiveButton(tid) : null;
+              if (fresh) current = fresh;
+          }
+          return current && current.isConnected ? current : null;
+      }
+  
+      function clickOddsButtonAtPoint(btn) {
+          if (!btn || !btn.isConnected) return false;
+          if (shouldBlockProgrammaticNavClick(btn)) return false;
+          const r = btn.getBoundingClientRect();
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          function opts(buttons) {
+              return {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window,
+                  clientX: cx,
+                  clientY: cy,
+                  screenX: (window.screenX || 0) + cx,
+                  screenY: (window.screenY || 0) + cy,
+                  button: 0,
+                  buttons: buttons,
+                  pointerId: 1,
+                  pointerType: 'mouse',
+                  isPrimary: true,
+              };
+          }
+          try {
+              if (typeof PointerEvent === 'function') {
+                  btn.dispatchEvent(new PointerEvent('pointerdown', opts(1)));
+              }
+              btn.dispatchEvent(new MouseEvent('mousedown', opts(1)));
+              if (typeof PointerEvent === 'function') {
+                  btn.dispatchEvent(new PointerEvent('pointerup', opts(0)));
+              }
+              btn.dispatchEvent(new MouseEvent('mouseup', opts(0)));
+              if (!btn.disabled) btn.click();
+          } catch (e) {
+              try {
+                  if (!btn.disabled) btn.click();
+              } catch (e2) { /* ignore */ }
+          }
+          return true;
       }
   
       function getSportCartRoot() {
@@ -3403,11 +3512,23 @@ export function bootApp() {
       function resolveLiveButton(testid) {
           if (!testid) return null;
           const buttons = queryOddsButtons();
+          let fallback = null;
+          let fallbackScore = -1;
           for (let i = 0; i < buttons.length; i++) {
               const btn = buttons[i];
-              if (btn.dataset.testid === testid && !btn.disabled) return btn;
+              if (btn.dataset.testid !== testid || btn.disabled || !btn.isConnected) continue;
+              if (oddsButtonIsClickable(btn)) return btn;
+              const r = btn.getBoundingClientRect();
+              let score = 0;
+              if (r.width > 8 && r.height > 8) score += 100;
+              if (r.bottom > 0 && r.top < window.innerHeight) score += 50;
+              score -= Math.min(Math.abs(r.top), 4000) / 100;
+              if (score > fallbackScore) {
+                  fallbackScore = score;
+                  fallback = btn;
+              }
           }
-          return null;
+          return fallback;
       }
   
       function resolveLiveButtonForOption(option) {
@@ -3452,9 +3573,25 @@ export function bootApp() {
               const el = findStrategyMarketElement(markets[i]);
               if (el) scrollMarketIntoView(el, { force: true });
           }
-          await humanDelay(400, 700);
+          const deadline = Date.now() + 2200;
+          let btn = null;
+          while (Date.now() < deadline) {
+              snapshotOddsButtons(lastButtonSnapshot);
+              buttonMarketIndex = buildButtonMarketIndex(lastButtonSnapshot);
+              btn = resolveLiveButtonForOption(option);
+              if (btn) break;
+              await sleep(180);
+          }
+          if (!btn) {
+              snapshotOddsButtons(lastButtonSnapshot);
+              return null;
+          }
+          const cleared = await scrollOddsButtonClear(btn);
           snapshotOddsButtons(lastButtonSnapshot);
-          return resolveLiveButtonForOption(option);
+          buttonMarketIndex = buildButtonMarketIndex(lastButtonSnapshot);
+          const fresh = resolveLiveButtonForOption(option);
+          if (fresh && fresh.isConnected) return fresh;
+          return cleared && cleared.isConnected ? cleared : (btn.isConnected ? btn : null);
       }
   
       function truncatePanelText(text, max) {
@@ -3583,16 +3720,35 @@ export function bootApp() {
           return scanStatusFull();
       }
   
+      function findMarketContainer(prefix, pm) {
+          const nodes = document.querySelectorAll('[data-testid*="' + prefix + pm + '"]');
+          const stem = prefix + pm;
+          for (let i = 0; i < nodes.length; i++) {
+              const tid = nodes[i].getAttribute('data-testid') || '';
+              const idx = tid.indexOf(stem);
+              if (idx < 0) continue;
+              const after = tid.slice(idx + stem.length);
+              // 不要把 a-ou_2nd / h-ou_1st 当成全场 a-ou / h-ou
+              if (after === '' || after === '_group-grouped') return nodes[i];
+          }
+          return null;
+      }
+  
       function findStrategyMarketElement(pageMarket) {
           const pm = String(pageMarket || '');
           if (!pm) return null;
-          const direct = document.querySelector('[data-testid="MarketTableColTwoContainer-' + pm + '"]')
-              || document.querySelector('[data-testid*="MarketTableColTwoContainer-' + pm + '"]')
-              || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-' + pm + '"]')
-              || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-' + pm + '_group-grouped"]')
-              || document.querySelector('[data-testid*="ExhaustiveMarketCardWrapper-' + pm + '"]');
+          const direct = findMarketContainer('MarketTableColTwoContainer-', pm)
+              || findMarketContainer('ExhaustiveMarketCardWrapper-', pm);
           if (direct) return direct;
-          const label = MARKET_SECTION_LABEL[pm.toLowerCase()];
+          const key = pm.toLowerCase();
+          // 客进球没有单独卡片，按钮在「球队进球」组（h-ou）里
+          if (key === 'a-ou' || key === 'aou') {
+              const host = document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-h-ou"]')
+                  || document.querySelector('[data-testid="ExhaustiveMarketCardWrapper-ou-grouped"]')
+                  || document.querySelector('[data-testid*="ExhaustiveMarketCardWrapper-ou-grouped"]');
+              if (host) return host;
+          }
+          const label = MARKET_SECTION_LABEL[key];
           if (label) return findMarketElementByLabel(label);
           return null;
       }
@@ -10609,32 +10765,35 @@ export function bootApp() {
           let betAttemptAt = 0;
           try {
               setBetStep('定位赔率按钮');
-              const liveBtn = await ensureButtonVisible(option);
-              if (!liveBtn) throw new Error('页面上找不到对应赔率按钮');
-              option.button = liveBtn;
-  
-              setBetStep('等待投注单打开');
               let opened = isCartOpen();
               if (!opened && getSportCartItemCount() > 0) {
                   opened = await openBetDrawer();
               }
-              if (!opened) {
-                  setBetStep('滚动到赔率按钮');
-                  await humanScrollTo(liveBtn);
-                  setBetStep('点击 ' + option.label + ' 赔率');
-                  robustClick(liveBtn);
-                  await humanDelay(600, 1100);
-                  opened = !!(await waitForSettled(isCartOpen, 8000, 300));
-              }
-              if (!opened) {
-                  setBetStep('投注单未打开，再次点击赔率');
+              for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+                  const liveBtn = await ensureButtonVisible(option);
+                  if (!liveBtn) throw new Error('页面上找不到对应赔率按钮');
+                  option.button = liveBtn;
+                  const aimed = await scrollOddsButtonClear(liveBtn);
+                  const fresh = resolveLiveButtonForOption(option) || resolveLiveButton(option.testid);
+                  const btn = (fresh && fresh.isConnected) ? fresh : aimed;
+                  if (!btn || !btn.isConnected) continue;
+                  option.button = btn;
+                  if (!oddsButtonIsClickable(btn)) {
+                      console.log('[hty-inplay] 赔率按钮仍被挡住，换节点再点',
+                          btn.dataset && btn.dataset.testid, 'attempt', attempt);
+                  }
+                  setBetStep(attempt
+                      ? '重新定位并点击 ' + option.label
+                      : ('点击 ' + option.label + ' 赔率'));
                   renderPanel(true);
-                  robustClick(liveBtn);
-                  await humanDelay(700, 1200);
-                  opened = !!(await waitForSettled(isCartOpen, 8000, 300));
-              }
-              if (!opened) {
-                  opened = await openBetDrawer();
+                  clickOddsButtonAtPoint(btn);
+                  await humanDelay(450, 800);
+                  opened = !!(await waitForSettled(isCartOpen, attempt === 2 ? 4000 : 1800, 200));
+                  if (!opened && getSportCartItemCount() > 0) {
+                      setBetStep('赔率已选中，打开投注单');
+                      renderPanel(true);
+                      opened = await openBetDrawer();
+                  }
               }
               if (!opened) throw new Error('投注单未打开');
               await ensureBetCartVisible();
@@ -11056,7 +11215,7 @@ export function bootApp() {
           if (!panel) return;
           panelCollapsed = !!collapsed;
           panel.classList.toggle('tm-hty-collapsed', panelCollapsed);
-          panel.classList.toggle('tm-hty-ball', panelCollapsed && isHistoryOrderPage());
+          panel.classList.toggle('tm-hty-ball', panelCollapsed);
           const btn = panel.querySelector('.tm-hty-collapse');
           if (btn) btn.textContent = panelCollapsed ? '▸' : '▾';
           syncOddsObserverState();
@@ -11125,22 +11284,31 @@ export function bootApp() {
                   'border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;' +
                   'box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;' +
                   'transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}' +
-                  '#' + PANEL_ID + '.tm-hty-collapsed{width:auto;min-width:148px;}' +
-                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-body,' +
-                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-actions{display:none;}' +
-                  '#' + PANEL_ID + '.tm-hty-ball{width:44px;height:44px;min-width:44px;right:auto;left:16px;bottom:20px;border:none;' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed,' +
+                  '#' + PANEL_ID + '.tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:16px;bottom:24px;border:none;' +
                   'border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);' +
-                  'box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;}' +
+                  'box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;overflow:hidden;}' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed:hover,' +
                   '#' + PANEL_ID + '.tm-hty-ball:hover{transform:scale(1.08);' +
                   'box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-body,' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-actions,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-body,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-actions{display:none;}' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-head,' +
                   '#' + PANEL_ID + '.tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-title,' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-version,' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-login,' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-collapse,' +
                   '#' + PANEL_ID + '.tm-hty-ball .tm-hty-title,' +
                   '#' + PANEL_ID + '.tm-hty-ball .tm-hty-version,' +
                   '#' + PANEL_ID + '.tm-hty-ball .tm-hty-login,' +
                   '#' + PANEL_ID + '.tm-hty-ball .tm-hty-collapse{display:none;}' +
                   '#' + PANEL_ID + ' .tm-hty-ball-label{display:none;}' +
-                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-ball-label{display:block;font-size:12px;font-weight:700;line-height:1;' +
-                  'letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}' +
+                  '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-ball-label,' +
+                  '#' + PANEL_ID + '.tm-hty-ball .tm-hty-ball-label{display:flex;align-items:center;justify-content:center;width:100%;height:100%;' +
+                  'font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}' +
                   '#' + PANEL_ID + ' .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}' +
                   '#' + PANEL_ID + ' .tm-hty-title{flex:1;}' +
                   '#' + PANEL_ID + ' .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}' +

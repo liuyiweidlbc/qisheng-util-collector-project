@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sofa 进攻图抽屉
 // @namespace    https://smartodds.xyz/
-// @version      1.0.0
+// @version      1.0.1
 // @description  在 SofaScore 比赛页点击原始进攻图，从底部上拉抽屉，用源站接口绘制增强攻压图
 // @match        https://www.sofascore.com/football/match/*
 // @match        https://www.sofascore.com/*/football/match/*
@@ -18,7 +18,8 @@
     return;
   }
 
-  const API = 'https://api.sofascore.com/api/v1';
+  // api.sofascore.com 对页面内 fetch 直接 403；比赛页自己走同源 /api/v1
+  const API = `${location.origin}/api/v1`;
   const SCALE = 0.58;
   /** 分钟格之间留约 1px 浅缝，对应源站条间细白线 */
   const GRAPH_W = 920;
