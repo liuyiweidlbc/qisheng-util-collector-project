@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name 8868投注记录采集
 // @namespace http://tampermonkey.net/
-// @version 2026-09-15.2
+// @version 2026-11-06.1
 // @description 投注记录上传；sportEvents / inplay 左侧计划比赛列表
 // @author You
 // @include /^https:\/\/[\w-]*8868[\w-]*\.(app|com)\/history/
@@ -1405,6 +1405,9 @@
     var PLAN_API = 'http://i.socbeta.xyz/api/v1/soc/bet/plan/list';
     var PLAN_MATCH_ENTITY_API = 'http://socbeta.xyz/api/v1/soc/match/entity/';
     var PLAN_LIVE_MS = 150 * 60 * 1000;
+    /** 上半场 45 分钟；中场休息按 15 分钟从比赛钟里扣掉 */
+    var PLAN_HALF_MS = 45 * 60 * 1000;
+    var PLAN_HT_BREAK_MS = 15 * 60 * 1000;
     var PLAN_INPLAY_EARLY_MS = 60 * 1000;
     var PLAN_POLL_MS = 60000;
     var PLAN_GROUPS = [
@@ -1683,7 +1686,7 @@
                 return String(GM_info.script.version);
             }
         } catch (e) { /* ignore */ }
-        return '2026-09-15.2';
+        return '2026-11-06.1';
     }
 
     function pad2(n) {
@@ -1826,13 +1829,37 @@
         return String(kick || '');
     }
 
+    function formatClockMs(ms) {
+        var total = Math.max(0, Math.floor(ms / 1000));
+        var mins = Math.floor(total / 60);
+        var secs = total % 60;
+        return mins + ':' + pad2(secs);
+    }
+
+    /**
+     * 开赛后的墙钟不能直接当比赛分钟。
+     * 上半场照走；约 45 分钟后的 15 分钟是中场，比赛钟停住；
+     * 下半场要扣掉这 15 分钟，所以墙钟 75:00 应显示 2h 60:00，而不是 2h 75:00。
+     */
     function formatLiveElapsed(kickoffTime) {
         var ms = parsePlanKickoffMs(kickoffTime);
         if (!ms) return '';
-        var mins = Math.floor((Date.now() - ms) / 60000);
-        if (mins < 0) return '';
-        if (mins > 180) return '';
-        return mins + "'";
+        var wall = Date.now() - ms;
+        if (wall < 0 || wall > PLAN_LIVE_MS) return '';
+        if (wall < PLAN_HALF_MS) return '1h ' + formatClockMs(wall);
+        if (wall < PLAN_HALF_MS + PLAN_HT_BREAK_MS) return 'HT';
+        var play = wall - PLAN_HT_BREAK_MS;
+        return '2h ' + formatClockMs(play);
+    }
+
+    function refreshLiveElapsedLabels() {
+        var root = document.getElementById(PLAN_SHELL_ID);
+        if (!root) return;
+        var nodes = root.querySelectorAll('.tm-8868-plan-item-elapsed[data-kickoff]');
+        for (var i = 0; i < nodes.length; i++) {
+            var next = formatLiveElapsed(nodes[i].getAttribute('data-kickoff') || '');
+            if (nodes[i].textContent !== next) nodes[i].textContent = next;
+        }
     }
 
     function shortTournamentName(name) {
@@ -2585,7 +2612,8 @@
         if (groupKey === 'live') cls += ' is-live';
         if (groupKey === 'ended') cls += ' is-ended';
         var elapsedHtml = elapsed
-            ? '<span class="tm-8868-plan-item-elapsed">' + escapeHtml(elapsed) + '</span>'
+            ? '<span class="tm-8868-plan-item-elapsed" data-kickoff="' + escapeHtml(item.kickoffTime || '') + '">' +
+                escapeHtml(elapsed) + '</span>'
             : '';
         var tourHtml = tour
             ? '<span class="tm-8868-plan-item-tour">' + escapeHtml(tour) + '</span>'
@@ -2787,10 +2815,11 @@
         if (!S.tickTimer) {
             S.tickTimer = setInterval(function () {
                 if (!isSportEventsPage() || isHistoryPage()) return;
+                refreshLiveElapsedLabels();
                 withBoard(board, function () {
                     renderPlanList();
                 });
-            }, 15000);
+            }, 1000);
         }
     }
 

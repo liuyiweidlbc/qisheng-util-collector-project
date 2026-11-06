@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTY滚球量化投注
 // @namespace    https://smartodds.xyz/
-// @version      2.16.28
+// @version      2.16.32
 // @description  HTY滚球/即将开赛赛事页：策略赛事列表 + 自动下注 + 投注单关联策略 + 记录同步
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/inplay\/football\/match\/\d+(\?|#|$)/
 // @include      /^https:\/\/[\w-]*hty[\w-]*\.(app|com)\/sportEvents\/incoming\/football\/match\/\d+(\?|#|$)/
@@ -101,7 +101,7 @@
 /* === bundled app (esbuild) === */
 (() => {
   // src/config.js
-  var SCRIPT_VERSION = "2.16.28";
+  var SCRIPT_VERSION = "2.16.32";
 
   // src/storage-keys.js
   var KEYS = {
@@ -477,6 +477,9 @@
     const MARKET_STALL_RELOAD_TTL_MS = 18e5;
     const MARKET_STALL_RELOAD_KEY = "tm_hty_market_stall_reloads";
     const MARKET_STALL_MIN_TEXT = 24;
+    const CLOCK_STALL_MS = 6e4;
+    const CLOCK_STALL_RELOAD_MAX = 3;
+    const CLOCK_STALL_RELOAD_KEY = "tm_hty_clock_stall_reloads";
     const WAF_RECOVERY_COOLDOWN_MS = 3e5;
     const NAV_SUPPRESS_NO_INPLAY_MS = 12e4;
     const WAF_RECOVERY_KEY = "tm_hty_inplay_waf_recovery_at";
@@ -588,6 +591,11 @@
     let lastPageReloadAt = 0;
     let marketStallSince = 0;
     let marketStallGaveUp = false;
+    let clockStallText = "";
+    let clockStallSince = 0;
+    let clockStallGaveUp = false;
+    let clockStallWarned = false;
+    let clockStallMatchId = "";
     function getMatchIdFromUrl(href) {
       const url = String(href || window.location.href || "");
       const m = url.match(/\/sportEvents\/(?:inplay|incoming)\/football\/match\/(\d+)/i);
@@ -4320,22 +4328,22 @@
       const text = (root.innerText || root.textContent || "").replace(/\s+/g, "");
       return text.length < MARKET_STALL_MIN_TEXT;
     }
-    function readMarketStallReloads() {
+    function readReloadLog(key) {
       try {
-        const raw = JSON.parse(sessionStorage.getItem(MARKET_STALL_RELOAD_KEY) || "{}");
+        const raw = JSON.parse(sessionStorage.getItem(key) || "{}");
         return raw && typeof raw === "object" ? raw : {};
       } catch (e) {
         return {};
       }
     }
-    function marketStallReloadCount(id) {
-      const slot = readMarketStallReloads()[String(id)];
+    function reloadLogCount(key, id) {
+      const slot = readReloadLog(key)[String(id)];
       if (!slot) return 0;
       if (Date.now() - Number(slot.at || 0) > MARKET_STALL_RELOAD_TTL_MS) return 0;
       return Number(slot.n || 0);
     }
-    function bumpMarketStallReload(id) {
-      const store = readMarketStallReloads();
+    function bumpReloadLog(key, id) {
+      const store = readReloadLog(key);
       const now = Date.now();
       Object.keys(store).forEach(function(k) {
         if (!store[k] || now - Number(store[k].at || 0) > MARKET_STALL_RELOAD_TTL_MS) delete store[k];
@@ -4344,51 +4352,173 @@
       const n = prev && now - Number(prev.at || 0) <= MARKET_STALL_RELOAD_TTL_MS ? Number(prev.n || 0) : 0;
       store[String(id)] = { n: n + 1, at: now };
       try {
-        sessionStorage.setItem(MARKET_STALL_RELOAD_KEY, JSON.stringify(store));
+        sessionStorage.setItem(key, JSON.stringify(store));
       } catch (e) {
       }
     }
-    function maybeReloadStalledMarket() {
-      if (!isOnMatchBetPage() || !matchId) {
-        marketStallSince = 0;
-        return false;
+    function isOnRunningInplayMatchPage() {
+      return /\/sportEvents\/inplay\/football\/match\/\d+/i.test(window.location.pathname || "");
+    }
+    function readInplayHeaderClock() {
+      if (!isOnRunningInplayMatchPage()) return "";
+      const panel = document.querySelector('[data-testid="exhaustive-panel-v4"]');
+      const el = panel && panel.querySelector('[data-testid="sport-inplay-timer"]');
+      if (!el) return "";
+      const raw = (el.innerText || el.textContent || "").replace(/\s+/g, "");
+      const matched = raw.match(/\d{1,3}(?:\+\d{1,2})?:\d{2}/);
+      return matched ? matched[0] : raw;
+    }
+    function isRunningMatchClock(text) {
+      return /^\d{1,3}(?:\+\d{1,2})?:\d{2}$/.test(text || "");
+    }
+    function isInplayMarketStillLoading() {
+      if (!isOnRunningInplayMatchPage()) return false;
+      if (countOddsButtons() > 0) return false;
+      const lineup = document.querySelector('[data-testid="lineUp"]');
+      const quick = document.querySelector('[data-testid="quick"]');
+      const classic = document.querySelector('[data-testid="classic"]');
+      const lineupOnly = lineup && lineup.getAttribute("aria-pressed") === "true" && !(quick && quick.getAttribute("aria-pressed") === "true") && !(classic && classic.getAttribute("aria-pressed") === "true");
+      if (lineupOnly) return false;
+      if (!document.querySelector(PAGE_READY_SEL)) return true;
+      const market = document.querySelector('[data-testid="ExhaustiveContentV4"]');
+      if (!market) return true;
+      if (market.querySelector('.animate-pulse, .animate-spin, [data-testid*="skeleton" i], [data-testid*="loading" i]')) {
+        return true;
       }
-      if (document.hidden || pageHidden || placing || reportSyncing || matchEndedHandling) return false;
-      if (isCurrentMatchEnded() || isMatchEndedModalVisible() || isBetSessionLocked()) {
-        marketStallSince = 0;
-        return false;
-      }
-      if (userManualBrowseAt && Date.now() - userManualBrowseAt < 8e3) return false;
-      if (!isMarketBoardEmpty()) {
-        marketStallSince = 0;
-        marketStallGaveUp = false;
-        return false;
-      }
-      if (!marketStallSince) {
-        marketStallSince = Date.now();
-        setBetStep("\u76D8\u53E3\u533A\u4ECD\u662F\u52A0\u8F7D\u9AA8\u67B6\uFF0C\u6EE1 1 \u5206\u949F\u5C06\u5F3A\u5236\u5237\u65B0");
-      }
-      if (Date.now() - marketStallSince < MARKET_STALL_MS) return false;
-      const used = marketStallReloadCount(matchId);
-      if (used >= MARKET_STALL_RELOAD_MAX) {
-        if (!marketStallGaveUp) {
-          marketStallGaveUp = true;
-          console.warn("[hty-inplay] \u76D8\u53E3\u9AA8\u67B6\u8D85\u8FC7\u81EA\u52A8\u5237\u65B0\u6B21\u6570", matchId, used);
-          setBetStep("\u76D8\u53E3\u533A\u957F\u65F6\u95F4\u672A\u6E32\u67D3\uFF0C\u81EA\u52A8\u5237\u65B0\u5DF2\u505C\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762");
+      return !market.querySelector('[data-testid^="ExhaustiveMarketCardWrapper"], button[data-testid^="oddsBtn"]');
+    }
+    function isSportHubStuckLoading() {
+      if (isOnMatchBetPage() || isHistoryOrderPage()) return false;
+      const path = window.location.pathname || "";
+      if (!/^\/sportEvents(\/|$)/i.test(path)) return false;
+      if (document.querySelector(
+        '[data-testid="sport-inplay-timer"], [data-testid="SportsMainSessionHeader-inplay"], [data-testid="sport-event-card-home-name"]'
+      )) return false;
+      return !!document.querySelector('.animate-pulse, .animate-spin, [data-testid*="skeleton" i], [data-testid*="loading" i]');
+    }
+    function commitForcedPageReload(logKey, bucketId, max, gaveUp, logs) {
+      const used = reloadLogCount(logKey, bucketId);
+      if (used >= max) {
+        if (!gaveUp.current) {
+          gaveUp.current = true;
+          console.warn("[hty-inplay]", logs.gaveUp, bucketId, used);
+          setBetStep(logs.gaveUpStep);
           renderPanel(true);
         }
         return false;
       }
       if (Date.now() - lastPageReloadAt < PAGE_RELOAD_COOLDOWN_MS) return false;
       lastPageReloadAt = Date.now();
-      bumpMarketStallReload(matchId);
-      console.warn("[hty-inplay] \u76D8\u53E3\u533A\u9AA8\u67B6\u5361\u4F4F\uFF0C\u5F3A\u5236\u5237\u65B0", matchId, used + 1);
-      setBetStep("\u76D8\u53E3\u533A\u5361\u4F4F\uFF0C\u6B63\u5728\u5F3A\u5236\u5237\u65B0\u2026");
+      bumpReloadLog(logKey, bucketId);
+      console.warn("[hty-inplay]", logs.busy, bucketId, used + 1);
+      setBetStep(logs.busyStep);
       renderPanel(true);
       withPageNavAllow(function() {
         window.location.reload();
       });
       return true;
+    }
+    function resetFrozenClockWatch() {
+      clockStallText = "";
+      clockStallSince = 0;
+      clockStallGaveUp = false;
+      clockStallWarned = false;
+      clockStallMatchId = "";
+    }
+    function maybeReloadFrozenMatchClock() {
+      if (!isOnRunningInplayMatchPage() || !matchId) {
+        resetFrozenClockWatch();
+        return false;
+      }
+      if (isCurrentMatchEnded() || isMatchEndedModalVisible()) {
+        resetFrozenClockWatch();
+        return false;
+      }
+      const text = readInplayHeaderClock();
+      const running = isRunningMatchClock(text);
+      if (!running || clockStallMatchId !== String(matchId)) {
+        clockStallMatchId = String(matchId);
+        clockStallText = running ? text : "";
+        clockStallSince = running ? Date.now() : 0;
+        clockStallGaveUp = false;
+        clockStallWarned = false;
+        return false;
+      }
+      if (text !== clockStallText) {
+        clockStallText = text;
+        clockStallSince = Date.now();
+        clockStallGaveUp = false;
+        clockStallWarned = false;
+        return false;
+      }
+      if (!clockStallSince) clockStallSince = Date.now();
+      if (Date.now() - clockStallSince < CLOCK_STALL_MS) {
+        if (!clockStallWarned && Date.now() - clockStallSince >= 45e3) {
+          clockStallWarned = true;
+          setBetStep("\u6BD4\u8D5B\u65F6\u95F4\u505C\u5728 " + text + "\uFF0C\u5373\u5C06\u5F3A\u5236\u5237\u65B0");
+          renderPanel(true);
+        }
+        return false;
+      }
+      const gaveUp = {
+        get current() {
+          return clockStallGaveUp;
+        },
+        set current(v) {
+          clockStallGaveUp = v;
+        }
+      };
+      return commitForcedPageReload(CLOCK_STALL_RELOAD_KEY, matchId, CLOCK_STALL_RELOAD_MAX, gaveUp, {
+        gaveUp: "\u6BD4\u8D5B\u65F6\u95F4\u5361\u4F4F\uFF0C\u8D85\u8FC7\u81EA\u52A8\u5237\u65B0\u6B21\u6570",
+        gaveUpStep: "\u6BD4\u8D5B\u65F6\u95F4\u957F\u65F6\u95F4\u4E0D\u52A8\uFF0C\u81EA\u52A8\u5237\u65B0\u5DF2\u505C\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762",
+        busy: "\u6BD4\u8D5B\u65F6\u95F4\u5361\u4F4F\uFF0C\u5F3A\u5236\u5237\u65B0",
+        busyStep: "\u6BD4\u8D5B\u65F6\u95F4\u505C\u5728 " + text + "\uFF0C\u6B63\u5728\u5F3A\u5236\u5237\u65B0\u2026"
+      });
+    }
+    function maybeReloadStuckLoading() {
+      const onMatch = isOnMatchBetPage();
+      if (onMatch && !matchId) {
+        marketStallSince = 0;
+        return false;
+      }
+      if (onMatch && (isCurrentMatchEnded() || isMatchEndedModalVisible())) {
+        marketStallSince = 0;
+        return false;
+      }
+      const stalled = onMatch ? isMarketBoardEmpty() || isInplayMarketStillLoading() : isSportHubStuckLoading();
+      if (!stalled) {
+        marketStallSince = 0;
+        marketStallGaveUp = false;
+        return false;
+      }
+      const pageLoading = !onMatch || isInplayMarketStillLoading();
+      if (!marketStallSince) {
+        marketStallSince = Date.now();
+        setBetStep(pageLoading ? "\u9875\u9762\u4ECD\u5728\u52A0\u8F7D\uFF0C\u6EE1 1 \u5206\u949F\u5C06\u5F3A\u5236\u5237\u65B0" : "\u76D8\u53E3\u533A\u4ECD\u662F\u52A0\u8F7D\u9AA8\u67B6\uFF0C\u6EE1 1 \u5206\u949F\u5C06\u5F3A\u5236\u5237\u65B0");
+      }
+      if (Date.now() - marketStallSince < MARKET_STALL_MS) return false;
+      const bucketId = onMatch ? String(matchId) : "hub";
+      const gaveUp = {
+        get current() {
+          return marketStallGaveUp;
+        },
+        set current(v) {
+          marketStallGaveUp = v;
+        }
+      };
+      return commitForcedPageReload(MARKET_STALL_RELOAD_KEY, bucketId, MARKET_STALL_RELOAD_MAX, gaveUp, {
+        gaveUp: pageLoading ? "\u9875\u9762\u52A0\u8F7D\u5361\u4F4F\uFF0C\u8D85\u8FC7\u81EA\u52A8\u5237\u65B0\u6B21\u6570" : "\u76D8\u53E3\u9AA8\u67B6\u8D85\u8FC7\u81EA\u52A8\u5237\u65B0\u6B21\u6570",
+        gaveUpStep: pageLoading ? "\u9875\u9762\u957F\u65F6\u95F4\u672A\u52A0\u8F7D\u5B8C\uFF0C\u81EA\u52A8\u5237\u65B0\u5DF2\u505C\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762" : "\u76D8\u53E3\u533A\u957F\u65F6\u95F4\u672A\u6E32\u67D3\uFF0C\u81EA\u52A8\u5237\u65B0\u5DF2\u505C\uFF0C\u8BF7\u624B\u52A8\u5237\u65B0\u9875\u9762",
+        busy: pageLoading ? "\u9875\u9762\u52A0\u8F7D\u5361\u4F4F\uFF0C\u5F3A\u5236\u5237\u65B0" : "\u76D8\u53E3\u533A\u9AA8\u67B6\u5361\u4F4F\uFF0C\u5F3A\u5236\u5237\u65B0",
+        busyStep: pageLoading ? "\u9875\u9762\u52A0\u8F7D\u5361\u4F4F\uFF0C\u6B63\u5728\u5F3A\u5236\u5237\u65B0\u2026" : "\u76D8\u53E3\u533A\u5361\u4F4F\uFF0C\u6B63\u5728\u5F3A\u5236\u5237\u65B0\u2026"
+      });
+    }
+    function maybeReloadStalledMarket() {
+      if (document.hidden || pageHidden || placing || reportSyncing || matchEndedHandling) return false;
+      if (isBetSessionLocked()) return false;
+      if (userManualBrowseAt && Date.now() - userManualBrowseAt < 8e3) return false;
+      if (maybeReloadFrozenMatchClock()) return true;
+      return maybeReloadStuckLoading();
     }
     function matchPageUrl() {
       return inplayMatchUrl(matchId);
@@ -4657,7 +4787,6 @@
       const tipAttrs = ' data-tip="' + escapeHtmlAttr(fullTitle) + '"' + (id ? ' data-match-id="' + escapeHtmlAttr(id) + '"' : "");
       const meetBadge = meetCount > 0 ? '<span class="tm-hty-match-meet">' + meetCount + "\u8FBE\u6807</span>" : "";
       const pageBadge = isPage ? '<span class="tm-hty-match-badge">\u{1F4CC}</span>' : "";
-      const traceLink = id ? '<a class="tm-hty-match-trace" href="' + traceMatchUrl(id) + '" target="_blank" rel="noopener" title="\u6253\u5F00\u5947\u80DC\u8D70\u52BF">\u5947\u80DC</a>' : "";
       if (!id) {
         return '<div class="' + rowClass + '"' + tipAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span><span class="tm-hty-match-pick">' + escapeHtmlAttr(mainText) + "</span>" + meetBadge + pageBadge + "</div>";
       }
@@ -4670,7 +4799,7 @@
       } else {
         mainHtml = '<a class="tm-hty-match-main" href="' + matchBetUrl(id, null, "incoming") + '">' + escapeHtmlAttr(mainText) + "</a>";
       }
-      return '<div class="' + rowClass + '"' + tipAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + ".</span>" + mainHtml + meetBadge + traceLink + pageBadge + "</div>";
+      return '<div class="' + rowClass + '"' + tipAttrs + '><span class="tm-hty-strategy-idx">' + (idx + 1) + ".</span>" + mainHtml + meetBadge + pageBadge + "</div>";
     }
     function ensureMatchTipEl() {
       if (matchTipEl && document.body.contains(matchTipEl)) return matchTipEl;
@@ -4733,10 +4862,6 @@
       if (!panel || panel.dataset.matchTipBound === "1") return;
       panel.dataset.matchTipBound = "1";
       panel.addEventListener("mouseover", function(e) {
-        if (e.target.closest && e.target.closest(".tm-hty-match-trace")) {
-          hideMatchTip();
-          return;
-        }
         const row = e.target.closest && e.target.closest(".tm-hty-match-item");
         if (!row || !panel.contains(row)) return;
         showMatchTip(
@@ -4748,7 +4873,6 @@
       });
       panel.addEventListener("mousemove", function(e) {
         if (!matchTipActiveKey) return;
-        if (e.target.closest && e.target.closest(".tm-hty-match-trace")) return;
         const row = e.target.closest && e.target.closest(".tm-hty-match-item");
         if (!row) return;
         if (matchTipEl && matchTipEl.style.display === "block") {
@@ -4893,6 +5017,14 @@
     }
     function traceMatchUrl(id) {
       return TRACE_MATCH_BASE + encodeURIComponent(id);
+    }
+    function openMatchTracePage(id) {
+      if (!id) return;
+      const link = document.createElement("a");
+      link.href = traceMatchUrl(id);
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
     }
     function formatKickoffShort(kick) {
       if (!kick) return "";
@@ -10655,7 +10787,7 @@
       if (!document.getElementById(STYLE_ID)) {
         const style = document.createElement("style");
         style.id = STYLE_ID;
-        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}#' + PANEL_ID + ".tm-hty-collapsed,#" + PANEL_ID + ".tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:16px;bottom:24px;border:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;overflow:hidden;}#" + PANEL_ID + ".tm-hty-collapsed:hover,#" + PANEL_ID + ".tm-hty-ball:hover{transform:scale(1.08);box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions,#" + PANEL_ID + ".tm-hty-ball .tm-hty-body,#" + PANEL_ID + ".tm-hty-ball .tm-hty-actions{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-head,#" + PANEL_ID + ".tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-title,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-version,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-login,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-collapse,#" + PANEL_ID + ".tm-hty-ball .tm-hty-title,#" + PANEL_ID + ".tm-hty-ball .tm-hty-version,#" + PANEL_ID + ".tm-hty-ball .tm-hty-login,#" + PANEL_ID + ".tm-hty-ball .tm-hty-collapse{display:none;}#" + PANEL_ID + " .tm-hty-ball-label{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-ball-label,#" + PANEL_ID + ".tm-hty-ball .tm-hty-ball-label{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
+        style.textContent = "#" + PANEL_ID + '{position:fixed;right:16px;left:auto;bottom:16px;z-index:99999;width:360px;max-width:calc(100vw - 32px);border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}#' + PANEL_ID + ".tm-hty-collapsed,#" + PANEL_ID + ".tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:50%;top:auto;bottom:16px;transform:translateX(-50%);border:none;border-radius:50%;background:radial-gradient(circle at 32% 28%,#fff4c4 0%,#f6c445 42%,#e29a08 100%);box-shadow:0 6px 18px rgba(180,120,8,.38),inset 0 -8px 12px rgba(160,96,0,.18),inset 4px 4px 10px rgba(255,255,255,.55);cursor:pointer;overflow:hidden;}#" + PANEL_ID + ".tm-hty-collapsed:hover,#" + PANEL_ID + ".tm-hty-ball:hover{transform:translateX(-50%) scale(1.08);box-shadow:0 8px 22px rgba(180,120,8,.48),inset 0 -8px 12px rgba(160,96,0,.18),inset 4px 4px 10px rgba(255,255,255,.6);}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-body,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-actions,#" + PANEL_ID + ".tm-hty-ball .tm-hty-body,#" + PANEL_ID + ".tm-hty-ball .tm-hty-actions{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-head,#" + PANEL_ID + ".tm-hty-ball .tm-hty-head{width:100%;height:100%;padding:0;background:transparent;border:none;justify-content:center;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-title,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-version,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-login,#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-collapse,#" + PANEL_ID + ".tm-hty-ball .tm-hty-title,#" + PANEL_ID + ".tm-hty-ball .tm-hty-version,#" + PANEL_ID + ".tm-hty-ball .tm-hty-login,#" + PANEL_ID + ".tm-hty-ball .tm-hty-collapse{display:none;}#" + PANEL_ID + " .tm-hty-ball-label{display:none;}#" + PANEL_ID + ".tm-hty-collapsed .tm-hty-ball-label,#" + PANEL_ID + ".tm-hty-ball .tm-hty-ball-label{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#6b3e00;text-shadow:0 1px 0 rgba(255,255,255,.55);}#" + PANEL_ID + " .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}#" + PANEL_ID + " .tm-hty-title{flex:1;}#" + PANEL_ID + " .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}#" + PANEL_ID + " .tm-hty-collapse{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:12px;padding:0 2px;}#" + PANEL_ID + " .tm-hty-body{padding:10px 10px 8px;min-width:0;}#" + PANEL_ID + " .tm-hty-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start;min-width:0;}#" + PANEL_ID + " .tm-hty-label{flex:0 0 52px;color:#94a3b8;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-value{flex:1;min-width:0;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-link{color:#60a5fa;text-decoration:none;}#" + PANEL_ID + " .tm-hty-link:hover{text-decoration:underline;}#" + PANEL_ID + " .tm-hty-link-sep{color:#475569;margin:0 4px;}#" + PANEL_ID + " .tm-hty-result{display:inline-block;padding:1px 8px;border-radius:999px;font-weight:600;font-size:11px;}#" + PANEL_ID + ' .tm-hty-result[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ing"]{background:#854d0e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="ok"]{background:#166534;color:#dcfce7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + ' .tm-hty-result[data-kind="warn"]{background:#92400e;color:#fef3c7;}#' + PANEL_ID + ' .tm-hty-result[data-kind="info"]{background:#334155;color:#cbd5e1;}#' + PANEL_ID + " .tm-hty-step{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-login{font-size:10px;color:#64748b;}#" + PANEL_ID + ' .tm-hty-login[data-kind="ok"]{color:#86efac;cursor:default;}#' + PANEL_ID + ' .tm-hty-login[data-kind="warn"]{color:#fde68a;cursor:pointer;text-decoration:underline;}#' + PANEL_ID + " .tm-hty-actions{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap;}#" + PANEL_ID + " .tm-hty-action-btn{flex:1 1 30%;border:1px solid #2563eb;border-radius:6px;padding:6px 8px;background:#172554;color:#dbeafe;font-size:11px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-action-btn:hover:not(:disabled){background:#1d4ed8;}#" + PANEL_ID + " .tm-hty-action-btn:disabled{opacity:.45;cursor:not-allowed;}#" + PANEL_ID + " .tm-hty-strategy{margin-top:8px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-strategy-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-title{font-weight:600;color:#cbd5e1;font-size:11px;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-head > span:last-child{white-space:nowrap;}#" + PANEL_ID + " .tm-hty-matches-status,#" + PANEL_ID + " .tm-hty-strategy-status{font-size:10px;padding:1px 6px;border-radius:999px;background:#334155;color:#cbd5e1;}#" + PANEL_ID + ' .tm-hty-matches-status[data-kind="ready"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="ready"]{background:#1d4ed8;color:#dbeafe;}#' + PANEL_ID + ' .tm-hty-matches-status[data-kind="err"],#' + PANEL_ID + ' .tm-hty-strategy-status[data-kind="err"]{background:#991b1b;color:#fee2e2;}#' + PANEL_ID + " .tm-hty-matches-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:120px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-matches-upcoming,#" + PANEL_ID + " .tm-hty-matches-watch,#" + PANEL_ID + " .tm-hty-matches-ended{margin-top:6px;padding-top:6px;border-top:1px dashed #334155;}#" + PANEL_ID + " .tm-hty-upcoming-toggle,#" + PANEL_ID + " .tm-hty-watch-toggle,#" + PANEL_ID + " .tm-hty-ended-toggle{display:flex;align-items:center;gap:4px;width:100%;border:0;background:transparent;color:#94a3b8;font-size:10px;cursor:pointer;padding:2px 0;text-align:left;}#" + PANEL_ID + " .tm-hty-upcoming-toggle:hover,#" + PANEL_ID + " .tm-hty-watch-toggle:hover,#" + PANEL_ID + " .tm-hty-ended-toggle:hover{color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-matches-upcoming-list,#" + PANEL_ID + " .tm-hty-matches-watch-list,#" + PANEL_ID + " .tm-hty-matches-ended-list{display:flex;flex-direction:column;align-items:stretch;gap:2px;max-height:90px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;margin-top:4px;}#" + PANEL_ID + " .tm-hty-match-ended{opacity:.72;}#" + PANEL_ID + " .tm-hty-match-ended .tm-hty-match-pick{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-list{max-height:160px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#475569 transparent;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar{width:4px;height:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-thumb{background:#475569;border-radius:4px;}#" + PANEL_ID + " .tm-hty-strategy-list::-webkit-scrollbar-track{background:transparent;}#" + PANEL_ID + " .tm-hty-match-item{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;width:100%;max-width:100%;margin-bottom:2px;font-size:11px;color:#e2e8f0;border-radius:6px;padding:3px 4px;min-width:0;}#" + PANEL_ID + " .tm-hty-match-item:hover{background:#1e293b;}#" + PANEL_ID + " .tm-hty-match-item .tm-hty-strategy-idx{flex:0 0 auto;flex-shrink:0;}#" + PANEL_ID + " .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-pick{flex:1 1 auto;min-width:0;color:#e2e8f0;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-match-main:hover{color:#93c5fd;text-decoration:underline;}#" + PANEL_ID + " .tm-hty-match-meet{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 5px;border-radius:4px;background:#14532d;color:#bbf7d0;font-weight:700;line-height:1.4;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-match-hit{background:linear-gradient(90deg,rgba(22,163,74,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(74,222,128,.4);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-hit:hover{background:linear-gradient(90deg,rgba(22,163,74,.3) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-main,#" + PANEL_ID + " .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}#" + PANEL_ID + " .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}#" + PANEL_ID + " .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}#" + PANEL_ID + " .tm-hty-match-page .tm-hty-match-main{color:#dbeafe;font-weight:600;}#" + PANEL_ID + " .tm-hty-match-badge{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:999px;background:#1d4ed8;color:#dbeafe;font-weight:600;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item{display:flex;gap:4px;margin-bottom:4px;font-size:11px;color:#e2e8f0;min-width:0;white-space:nowrap;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable{cursor:pointer;border-radius:4px;padding:2px 2px;margin-left:-2px;margin-right:-2px;}#" + PANEL_ID + " .tm-hty-strategy-item-runnable:hover{background:#1e293b;outline:1px solid #334155;}#" + PANEL_ID + " .tm-hty-strategy-idx{flex:0 0 16px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark{flex:0 0 14px;text-align:center;font-size:11px;color:#64748b;}#" + PANEL_ID + " .tm-hty-strategy-mark.hit{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.plate{color:#fde68a;}#" + PANEL_ID + " .tm-hty-strategy-mark.done{color:#86efac;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.aborted{color:#fca5a5;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-mark.confirming{color:#94a3b8;font-weight:700;}#" + PANEL_ID + " .tm-hty-strategy-exec{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-exec-pending{background:#334155;color:#cbd5e1;}#" + PANEL_ID + " .tm-hty-strategy-exec-executed{background:#dcfce7;color:#166534;}#" + PANEL_ID + " .tm-hty-strategy-exec-confirming{background:#334155;color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-exec-aborted{background:#451a1a;color:#fca5a5;}#" + PANEL_ID + " .tm-hty-strategy-item-hit .tm-hty-strategy-text{color:#f8fafc;}#" + PANEL_ID + " .tm-hty-strategy-item-done .tm-hty-strategy-text{color:#86efac;}#" + PANEL_ID + " .tm-hty-strategy-item-confirming .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-item-aborted .tm-hty-strategy-text{color:#94a3b8;}#" + PANEL_ID + " .tm-hty-strategy-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#" + PANEL_ID + " .tm-hty-strategy-odds{display:inline-block;padding:1px 6px;border-radius:4px;background:#dcfce7;color:#166534;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-amount{display:inline-block;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600;font-size:10px;line-height:1.4;}#" + PANEL_ID + " .tm-hty-strategy-empty{color:#64748b;font-size:11px;}#" + PANEL_ID + " .tm-hty-refresh{border:0;background:transparent;color:#60a5fa;cursor:pointer;font-size:10px;padding:0;}#" + PANEL_ID + " .tm-hty-bet-section{margin-top:4px;padding-top:8px;border-top:1px dashed #334155;}#" + PANEL_ID + ' .tm-hty-bet-section[data-hidden="1"]{display:none;}#' + PANEL_ID + " .tm-hty-stake-row{margin-left:-4px;margin-right:-4px;padding:6px 4px;border-radius:6px;transition:background .15s ease;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert{background:#fecaca;box-shadow:inset 0 0 0 1px #f87171;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-label{color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-row.tm-hty-stake-alert .tm-hty-stake-select{border-color:#ef4444;background:#fff1f2;color:#7f1d1d;font-weight:700;}#" + PANEL_ID + " .tm-hty-stake-select{width:100%;border:1px solid #475569;border-radius:4px;background:#1e293b;color:#f1f5f9;font-size:11px;padding:3px 6px;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#cbd5e1;cursor:pointer;}#" + PANEL_ID + " .tm-hty-dedup-toggle{margin:0;cursor:pointer;}";
         document.head.appendChild(style);
       }
       if (!document.getElementById(MATCH_TIP_ID + "-style")) {
@@ -10721,6 +10853,16 @@
           });
         });
       }
+      panel.addEventListener("contextmenu", function(e) {
+        const row = e.target.closest && e.target.closest(".tm-hty-match-item");
+        if (!row || !panel.contains(row)) return;
+        const id = row.getAttribute("data-match-id") || "";
+        if (!id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        hideMatchTip();
+        openMatchTracePage(id);
+      });
       panel.addEventListener("click", function(e) {
         if (e.target.closest(".tm-hty-upcoming-toggle")) {
           e.stopPropagation();
@@ -10737,7 +10879,6 @@
           toggleEndedMatchesCollapsed(panel);
           return;
         }
-        if (e.target.closest(".tm-hty-match-trace")) return;
         if (e.target.closest(".tm-hty-match-main")) {
           e.preventDefault();
           const link = e.target.closest(".tm-hty-match-main");

@@ -119,6 +119,10 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     const MARKET_STALL_RELOAD_TTL_MS = 1800000;
     const MARKET_STALL_RELOAD_KEY = 'tm_hty_market_stall_reloads';
     const MARKET_STALL_MIN_TEXT = 24;
+    /** 滚球页比分条 MM:SS 连续不动，视为直播时钟卡死（中场 HT 等不走这个格式） */
+    const CLOCK_STALL_MS = 60000;
+    const CLOCK_STALL_RELOAD_MAX = 3;
+    const CLOCK_STALL_RELOAD_KEY = 'tm_hty_clock_stall_reloads';
     const WAF_RECOVERY_COOLDOWN_MS = 300000;
     const NAV_SUPPRESS_NO_INPLAY_MS = 120000;
     const WAF_RECOVERY_KEY = 'tm_hty_inplay_waf_recovery_at';
@@ -233,6 +237,11 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
     let lastPageReloadAt = 0;
     let marketStallSince = 0;
     let marketStallGaveUp = false;
+    let clockStallText = '';
+    let clockStallSince = 0;
+    let clockStallGaveUp = false;
+    let clockStallWarned = false;
+    let clockStallMatchId = '';
 
     function getMatchIdFromUrl(href) {
         const url = String(href || window.location.href || '');
@@ -4346,24 +4355,24 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         return text.length < MARKET_STALL_MIN_TEXT;
     }
 
-    function readMarketStallReloads() {
+    function readReloadLog(key) {
         try {
-            const raw = JSON.parse(sessionStorage.getItem(MARKET_STALL_RELOAD_KEY) || '{}');
+            const raw = JSON.parse(sessionStorage.getItem(key) || '{}');
             return raw && typeof raw === 'object' ? raw : {};
         } catch (e) {
             return {};
         }
     }
 
-    function marketStallReloadCount(id) {
-        const slot = readMarketStallReloads()[String(id)];
+    function reloadLogCount(key, id) {
+        const slot = readReloadLog(key)[String(id)];
         if (!slot) return 0;
         if (Date.now() - Number(slot.at || 0) > MARKET_STALL_RELOAD_TTL_MS) return 0;
         return Number(slot.n || 0);
     }
 
-    function bumpMarketStallReload(id) {
-        const store = readMarketStallReloads();
+    function bumpReloadLog(key, id) {
+        const store = readReloadLog(key);
         const now = Date.now();
         Object.keys(store).forEach(function (k) {
             if (!store[k] || now - Number(store[k].at || 0) > MARKET_STALL_RELOAD_TTL_MS) delete store[k];
@@ -4372,56 +4381,197 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         const n = prev && now - Number(prev.at || 0) <= MARKET_STALL_RELOAD_TTL_MS
             ? Number(prev.n || 0) : 0;
         store[String(id)] = { n: n + 1, at: now };
-        try { sessionStorage.setItem(MARKET_STALL_RELOAD_KEY, JSON.stringify(store)); } catch (e) { /* ignore */ }
+        try { sessionStorage.setItem(key, JSON.stringify(store)); } catch (e) { /* ignore */ }
+    }
+
+    function isOnRunningInplayMatchPage() {
+        return /\/sportEvents\/inplay\/football\/match\/\d+/i.test(window.location.pathname || '');
+    }
+
+    /** 比分条时钟。进行中是 44:24 这种 MM:SS；中场是 HT，完场等也不会是这个格式。 */
+    function readInplayHeaderClock() {
+        if (!isOnRunningInplayMatchPage()) return '';
+        const panel = document.querySelector('[data-testid="exhaustive-panel-v4"]');
+        const el = panel && panel.querySelector('[data-testid="sport-inplay-timer"]');
+        if (!el) return '';
+        const raw = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+        const matched = raw.match(/\d{1,3}(?:\+\d{1,2})?:\d{2}/);
+        return matched ? matched[0] : raw;
+    }
+
+    function isRunningMatchClock(text) {
+        return /^\d{1,3}(?:\+\d{1,2})?:\d{2}$/.test(text || '');
     }
 
     /**
-     * 源站盘口骨架长时间不渲染时同页刷新。
-     * document-start 会吞掉页面自己的 location.reload；这里用 __htyAllowPageNav 放行一次。
-     * 不走 performPageNavigation：同 URL 会被当成已到达，而且 page-reload 不属于策略跳转。
-     * 返回 true 只在已经发起刷新时，避免本轮再去做别的事。
+     * 滚球页盘口还在转圈：头图可能已经画出来（文字很长），但盘口卡片 / 赔率按钮还没有。
+     * 阵容页本身没有赔率，不把这种情况当成加载卡死。
      */
-    function maybeReloadStalledMarket() {
-        if (!isOnMatchBetPage() || !matchId) {
-            marketStallSince = 0;
-            return false;
+    function isInplayMarketStillLoading() {
+        if (!isOnRunningInplayMatchPage()) return false;
+        if (countOddsButtons() > 0) return false;
+        const lineup = document.querySelector('[data-testid="lineUp"]');
+        const quick = document.querySelector('[data-testid="quick"]');
+        const classic = document.querySelector('[data-testid="classic"]');
+        const lineupOnly = lineup && lineup.getAttribute('aria-pressed') === 'true' &&
+            !(quick && quick.getAttribute('aria-pressed') === 'true') &&
+            !(classic && classic.getAttribute('aria-pressed') === 'true');
+        if (lineupOnly) return false;
+        if (!document.querySelector(PAGE_READY_SEL)) return true;
+        const market = document.querySelector('[data-testid="ExhaustiveContentV4"]');
+        if (!market) return true;
+        if (market.querySelector('.animate-pulse, .animate-spin, [data-testid*="skeleton" i], [data-testid*="loading" i]')) {
+            return true;
         }
-        if (document.hidden || pageHidden || placing || reportSyncing || matchEndedHandling) return false;
-        if (isCurrentMatchEnded() || isMatchEndedModalVisible() || isBetSessionLocked()) {
-            marketStallSince = 0;
-            return false;
-        }
-        if (userManualBrowseAt && Date.now() - userManualBrowseAt < 8000) return false;
-        if (!isMarketBoardEmpty()) {
-            marketStallSince = 0;
-            marketStallGaveUp = false;
-            return false;
-        }
-        if (!marketStallSince) {
-            marketStallSince = Date.now();
-            setBetStep('盘口区仍是加载骨架，满 1 分钟将强制刷新');
-        }
-        if (Date.now() - marketStallSince < MARKET_STALL_MS) return false;
-        const used = marketStallReloadCount(matchId);
-        if (used >= MARKET_STALL_RELOAD_MAX) {
-            if (!marketStallGaveUp) {
-                marketStallGaveUp = true;
-                console.warn('[hty-inplay] 盘口骨架超过自动刷新次数', matchId, used);
-                setBetStep('盘口区长时间未渲染，自动刷新已停，请手动刷新页面');
+        return !market.querySelector('[data-testid^="ExhaustiveMarketCardWrapper"], button[data-testid^="oddsBtn"]');
+    }
+
+    /** 总览/列表还停在骨架或转圈，比赛卡片和滚球时钟都没出来。 */
+    function isSportHubStuckLoading() {
+        if (isOnMatchBetPage() || isHistoryOrderPage()) return false;
+        const path = window.location.pathname || '';
+        if (!/^\/sportEvents(\/|$)/i.test(path)) return false;
+        if (document.querySelector(
+            '[data-testid="sport-inplay-timer"], [data-testid="SportsMainSessionHeader-inplay"], [data-testid="sport-event-card-home-name"]'
+        )) return false;
+        return !!document.querySelector('.animate-pulse, .animate-spin, [data-testid*="skeleton" i], [data-testid*="loading" i]');
+    }
+
+    function commitForcedPageReload(logKey, bucketId, max, gaveUp, logs) {
+        const used = reloadLogCount(logKey, bucketId);
+        if (used >= max) {
+            if (!gaveUp.current) {
+                gaveUp.current = true;
+                console.warn('[hty-inplay]', logs.gaveUp, bucketId, used);
+                setBetStep(logs.gaveUpStep);
                 renderPanel(true);
             }
             return false;
         }
         if (Date.now() - lastPageReloadAt < PAGE_RELOAD_COOLDOWN_MS) return false;
         lastPageReloadAt = Date.now();
-        bumpMarketStallReload(matchId);
-        console.warn('[hty-inplay] 盘口区骨架卡住，强制刷新', matchId, used + 1);
-        setBetStep('盘口区卡住，正在强制刷新…');
+        bumpReloadLog(logKey, bucketId);
+        console.warn('[hty-inplay]', logs.busy, bucketId, used + 1);
+        setBetStep(logs.busyStep);
         renderPanel(true);
         withPageNavAllow(function () {
             window.location.reload();
         });
         return true;
+    }
+
+    function resetFrozenClockWatch() {
+        clockStallText = '';
+        clockStallSince = 0;
+        clockStallGaveUp = false;
+        clockStallWarned = false;
+        clockStallMatchId = '';
+    }
+
+    /**
+     * 比分条时间是 MM:SS 时每秒都会变。同一串停满 1 分钟就同页刷新。
+     * HT / 完场不是这个格式，中场休息不会被当成卡死。
+     */
+    function maybeReloadFrozenMatchClock() {
+        if (!isOnRunningInplayMatchPage() || !matchId) {
+            resetFrozenClockWatch();
+            return false;
+        }
+        if (isCurrentMatchEnded() || isMatchEndedModalVisible()) {
+            resetFrozenClockWatch();
+            return false;
+        }
+        const text = readInplayHeaderClock();
+        const running = isRunningMatchClock(text);
+        if (!running || clockStallMatchId !== String(matchId)) {
+            clockStallMatchId = String(matchId);
+            clockStallText = running ? text : '';
+            clockStallSince = running ? Date.now() : 0;
+            clockStallGaveUp = false;
+            clockStallWarned = false;
+            return false;
+        }
+        if (text !== clockStallText) {
+            clockStallText = text;
+            clockStallSince = Date.now();
+            clockStallGaveUp = false;
+            clockStallWarned = false;
+            return false;
+        }
+        if (!clockStallSince) clockStallSince = Date.now();
+        if (Date.now() - clockStallSince < CLOCK_STALL_MS) {
+            if (!clockStallWarned && Date.now() - clockStallSince >= 45000) {
+                clockStallWarned = true;
+                setBetStep('比赛时间停在 ' + text + '，即将强制刷新');
+                renderPanel(true);
+            }
+            return false;
+        }
+        const gaveUp = {
+            get current() { return clockStallGaveUp; },
+            set current(v) { clockStallGaveUp = v; },
+        };
+        return commitForcedPageReload(CLOCK_STALL_RELOAD_KEY, matchId, CLOCK_STALL_RELOAD_MAX, gaveUp, {
+            gaveUp: '比赛时间卡住，超过自动刷新次数',
+            gaveUpStep: '比赛时间长时间不动，自动刷新已停，请手动刷新页面',
+            busy: '比赛时间卡住，强制刷新',
+            busyStep: '比赛时间停在 ' + text + '，正在强制刷新…',
+        });
+    }
+
+    /**
+     * 盘口骨架、盘口区一直转圈、或总览页停在加载时同页刷新。
+     * document-start 会吞掉页面自己的 location.reload；这里用 __htyAllowPageNav 放行一次。
+     * 不走 performPageNavigation：同 URL 会被当成已到达，而且 page-reload 不属于策略跳转。
+     * 返回 true 只在已经发起刷新时，避免本轮再去做别的事。
+     */
+    function maybeReloadStuckLoading() {
+        const onMatch = isOnMatchBetPage();
+        if (onMatch && !matchId) {
+            marketStallSince = 0;
+            return false;
+        }
+        if (onMatch && (isCurrentMatchEnded() || isMatchEndedModalVisible())) {
+            marketStallSince = 0;
+            return false;
+        }
+        const stalled = onMatch
+            ? (isMarketBoardEmpty() || isInplayMarketStillLoading())
+            : isSportHubStuckLoading();
+        if (!stalled) {
+            marketStallSince = 0;
+            marketStallGaveUp = false;
+            return false;
+        }
+        const pageLoading = !onMatch || isInplayMarketStillLoading();
+        if (!marketStallSince) {
+            marketStallSince = Date.now();
+            setBetStep(pageLoading
+                ? '页面仍在加载，满 1 分钟将强制刷新'
+                : '盘口区仍是加载骨架，满 1 分钟将强制刷新');
+        }
+        if (Date.now() - marketStallSince < MARKET_STALL_MS) return false;
+        const bucketId = onMatch ? String(matchId) : 'hub';
+        const gaveUp = {
+            get current() { return marketStallGaveUp; },
+            set current(v) { marketStallGaveUp = v; },
+        };
+        return commitForcedPageReload(MARKET_STALL_RELOAD_KEY, bucketId, MARKET_STALL_RELOAD_MAX, gaveUp, {
+            gaveUp: pageLoading ? '页面加载卡住，超过自动刷新次数' : '盘口骨架超过自动刷新次数',
+            gaveUpStep: pageLoading
+                ? '页面长时间未加载完，自动刷新已停，请手动刷新页面'
+                : '盘口区长时间未渲染，自动刷新已停，请手动刷新页面',
+            busy: pageLoading ? '页面加载卡住，强制刷新' : '盘口区骨架卡住，强制刷新',
+            busyStep: pageLoading ? '页面加载卡住，正在强制刷新…' : '盘口区卡住，正在强制刷新…',
+        });
+    }
+
+    function maybeReloadStalledMarket() {
+        if (document.hidden || pageHidden || placing || reportSyncing || matchEndedHandling) return false;
+        if (isBetSessionLocked()) return false;
+        if (userManualBrowseAt && Date.now() - userManualBrowseAt < 8000) return false;
+        if (maybeReloadFrozenMatchClock()) return true;
+        return maybeReloadStuckLoading();
     }
 
     function matchPageUrl() {
@@ -4724,11 +4874,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
             ? '<span class="tm-hty-match-meet">' + meetCount + '达标</span>'
             : '';
         const pageBadge = isPage ? '<span class="tm-hty-match-badge">📌</span>' : '';
-        const traceLink = id
-            ? '<a class="tm-hty-match-trace" href="' + traceMatchUrl(id) +
-                '" target="_blank" rel="noopener" title="打开奇胜走势">' +
-                '奇胜</a>'
-            : '';
         if (!id) {
             return '<div class="' + rowClass + '"' + tipAttrs + '>' +
                 '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
@@ -4752,7 +4897,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
             '<span class="tm-hty-strategy-idx">' + (idx + 1) + '.</span>' +
             mainHtml +
             meetBadge +
-            traceLink +
             pageBadge +
             '</div>';
     }
@@ -4822,10 +4966,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         if (!panel || panel.dataset.matchTipBound === '1') return;
         panel.dataset.matchTipBound = '1';
         panel.addEventListener('mouseover', function (e) {
-            if (e.target.closest && e.target.closest('.tm-hty-match-trace')) {
-                hideMatchTip();
-                return;
-            }
             const row = e.target.closest && e.target.closest('.tm-hty-match-item');
             if (!row || !panel.contains(row)) return;
             showMatchTip(
@@ -4837,7 +4977,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
         });
         panel.addEventListener('mousemove', function (e) {
             if (!matchTipActiveKey) return;
-            if (e.target.closest && e.target.closest('.tm-hty-match-trace')) return;
             const row = e.target.closest && e.target.closest('.tm-hty-match-item');
             if (!row) return;
             if (matchTipEl && matchTipEl.style.display === 'block') {
@@ -4990,6 +5129,16 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
 
     function traceMatchUrl(id) {
         return TRACE_MATCH_BASE + encodeURIComponent(id);
+    }
+
+    /** 与原先「奇胜」链接点击相同：新标签打开走势页。 */
+    function openMatchTracePage(id) {
+        if (!id) return;
+        const link = document.createElement('a');
+        link.href = traceMatchUrl(id);
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.click();
     }
 
     function formatKickoffShort(kick) {
@@ -11424,12 +11573,13 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 'box-shadow:0 8px 24px rgba(0,0,0,.35);font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;' +
                 'transition:width .22s ease,height .22s ease,border-radius .22s ease,left .18s ease,right .18s ease;}' +
                 '#' + PANEL_ID + '.tm-hty-collapsed,' +
-                '#' + PANEL_ID + '.tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:16px;bottom:24px;border:none;' +
-                'border-radius:50%;background:radial-gradient(circle at 32% 28%,#dbeafe 0%,#60a5fa 46%,#2563eb 100%);' +
-                'box-shadow:0 6px 18px rgba(37,99,235,.32),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.5);cursor:pointer;overflow:hidden;}' +
+                '#' + PANEL_ID + '.tm-hty-ball{width:52px;height:52px;min-width:52px;max-width:52px;right:auto;left:50%;top:auto;bottom:16px;' +
+                'transform:translateX(-50%);border:none;border-radius:50%;' +
+                'background:radial-gradient(circle at 32% 28%,#fff4c4 0%,#f6c445 42%,#e29a08 100%);' +
+                'box-shadow:0 6px 18px rgba(180,120,8,.38),inset 0 -8px 12px rgba(160,96,0,.18),inset 4px 4px 10px rgba(255,255,255,.55);cursor:pointer;overflow:hidden;}' +
                 '#' + PANEL_ID + '.tm-hty-collapsed:hover,' +
-                '#' + PANEL_ID + '.tm-hty-ball:hover{transform:scale(1.08);' +
-                'box-shadow:0 8px 22px rgba(37,99,235,.4),inset 0 -8px 12px rgba(29,78,216,.16),inset 4px 4px 10px rgba(255,255,255,.55);}' +
+                '#' + PANEL_ID + '.tm-hty-ball:hover{transform:translateX(-50%) scale(1.08);' +
+                'box-shadow:0 8px 22px rgba(180,120,8,.48),inset 0 -8px 12px rgba(160,96,0,.18),inset 4px 4px 10px rgba(255,255,255,.6);}' +
                 '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-body,' +
                 '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-actions,' +
                 '#' + PANEL_ID + '.tm-hty-ball .tm-hty-body,' +
@@ -11447,7 +11597,7 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 '#' + PANEL_ID + ' .tm-hty-ball-label{display:none;}' +
                 '#' + PANEL_ID + '.tm-hty-collapsed .tm-hty-ball-label,' +
                 '#' + PANEL_ID + '.tm-hty-ball .tm-hty-ball-label{display:flex;align-items:center;justify-content:center;width:100%;height:100%;' +
-                'font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#1e3a8a;text-shadow:0 1px 0 rgba(255,255,255,.45);}' +
+                'font-size:13px;font-weight:700;line-height:1;letter-spacing:.5px;color:#6b3e00;text-shadow:0 1px 0 rgba(255,255,255,.55);}' +
                 '#' + PANEL_ID + ' .tm-hty-head{position:relative;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#1e293b;font-weight:600;font-size:12px;cursor:pointer;user-select:none;}' +
                 '#' + PANEL_ID + ' .tm-hty-title{flex:1;}' +
                 '#' + PANEL_ID + ' .tm-hty-version{font-weight:400;color:#64748b;font-size:10px;margin-left:4px;}' +
@@ -11522,9 +11672,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 '#' + PANEL_ID + ' .tm-hty-match-hit .tm-hty-match-pick{color:#dcfce7;font-weight:600;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-hit.tm-hty-match-page{background:linear-gradient(90deg,rgba(22,163,74,.28) 0%,rgba(37,99,235,.2) 55%,rgba(30,41,59,.55) 100%);' +
                 'border-color:rgba(74,222,128,.45);box-shadow:inset 2px 0 0 #22c55e;}' +
-                '#' + PANEL_ID + ' .tm-hty-match-trace{flex:0 0 auto;flex-shrink:0;font-size:10px;padding:1px 4px;border-radius:4px;' +
-                'border:1px solid #475569;color:#94a3b8;text-decoration:none;line-height:1.4;white-space:nowrap;}' +
-                '#' + PANEL_ID + ' .tm-hty-match-trace:hover{border-color:#60a5fa;color:#60a5fa;background:#172554;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-page{background:linear-gradient(90deg,rgba(37,99,235,.22) 0%,rgba(30,41,59,.55) 100%);' +
                 'border:1px solid rgba(59,130,246,.45);box-shadow:inset 2px 0 0 #3b82f6;}' +
                 '#' + PANEL_ID + ' .tm-hty-match-page:hover{background:linear-gradient(90deg,rgba(37,99,235,.28) 0%,rgba(30,41,59,.65) 100%);}' +
@@ -11703,6 +11850,16 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 });
             });
         }
+        panel.addEventListener('contextmenu', function (e) {
+            const row = e.target.closest && e.target.closest('.tm-hty-match-item');
+            if (!row || !panel.contains(row)) return;
+            const id = row.getAttribute('data-match-id') || '';
+            if (!id) return;
+            e.preventDefault();
+            e.stopPropagation();
+            hideMatchTip();
+            openMatchTracePage(id);
+        });
         panel.addEventListener('click', function (e) {
             if (e.target.closest('.tm-hty-upcoming-toggle')) {
                 e.stopPropagation();
@@ -11719,7 +11876,6 @@ const MATCH_TIP_ID = 'tm-hty-inplay-match-tip';
                 toggleEndedMatchesCollapsed(panel);
                 return;
             }
-            if (e.target.closest('.tm-hty-match-trace')) return;
             if (e.target.closest('.tm-hty-match-main')) {
                 e.preventDefault();
                 const link = e.target.closest('.tm-hty-match-main');
